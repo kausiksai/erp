@@ -1,0 +1,467 @@
+.page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2rem 2rem;
+  flex: 1;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 0.5rem 0;
+  letter-spacing: -0.5px;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.createButton {
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+}
+
+/* Role Metrics - Compact Design */
+.roleMetricsContainer {
+  background: white;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.roleMetricsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.roleMetricsTitle {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.roleMetricsTotal {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: rgba(37, 99, 235, 0.05);
+  border-radius: 6px;
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+
+.roleMetricsTotalLabel {
+  font-size: 0.8125rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.roleMetricsTotalValue {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.roleMetricsGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.875rem;
+}
+
+.roleMetricItem {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  transition: all 0.2s ease;
+  flex: 1;
+  min-width: 180px;
+}
+
+.roleMetricItem:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-color: rgba(37, 99, 235, 0.3);
+  background: white;
+}
+
+.roleMetricContent {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.roleMetricDetails {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.roleCount {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.rolePercentage {
+  font-size: 0.8125rem;
+  color: #64748b;
+  font-weight: 500;
+  padding: 0.125rem 0.5rem;
+  background: rgba(100, 116, 139, 0.1);
+  border-radius: 4px;
+}
+
+.roleMetricBar {
+  display: none;
+}
+
+.loadingContainer {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.tableContainer {
+  background: white;
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.tableHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.tableSummary {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.summaryItem {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.summaryLabel {
+  font-size: 0.875rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.summaryValue {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.summaryDivider {
+  width: 1px;
+  height: 24px;
+  background: rgba(226, 232, 240, 0.8);
+}
+
+.dataTable {
+  width: 100%;
+}
+
+.actionButtons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.noData {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* Dialog Styles */
+.userDialog :global(.p-dialog-content) {
+  padding: 1.5rem;
+}
+
+.dialogContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.required {
+  color: #dc2626;
+}
+
+.optional {
+  color: #64748b;
+  font-weight: 400;
+  font-size: 0.8125rem;
+}
+
+.input {
+  width: 100%;
+}
+
+.checkboxField {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkboxLabel {
+  font-size: 0.875rem;
+  color: #1e293b;
+  margin: 0;
+  cursor: pointer;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+/* Menu Access Dialog */
+.menuAccessDialog :global(.p-dialog-content) {
+  padding: 1.5rem;
+  max-height: calc(90vh - 120px);
+  overflow-y: auto;
+}
+
+.menuAccessContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.menuAccessNote {
+  font-size: 0.9375rem;
+  color: #475569;
+  margin: 0 0 1rem 0;
+  padding: 1rem;
+  background: rgba(37, 99, 235, 0.05);
+  border-radius: 8px;
+  border-left: 4px solid #2563eb;
+}
+
+.menuAccessToggle {
+  margin-top: 0.5rem;
+}
+
+.menuAccessToggleButton {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.menuAccessSection {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.menuCategory {
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 12px;
+  padding: 1.25rem;
+  background: #f8fafc;
+}
+
+.categoryHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid rgba(226, 232, 240, 0.8);
+}
+
+.categoryTitle {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.categoryActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.menuItemsList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.menuItemRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  transition: all 0.2s ease;
+}
+
+.menuItemRow:hover {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.02);
+}
+
+.menuItemLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  cursor: pointer;
+  margin: 0;
+}
+
+.menuItemTitle {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.menuItemPath {
+  font-size: 0.8125rem;
+  color: #64748b;
+  font-family: 'Courier New', monospace;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .container {
+    padding: 1.5rem 1rem;
+  }
+
+  .header {
+    flex-direction: column;
+  }
+
+  .title {
+    font-size: 1.75rem;
+  }
+
+  .tableContainer {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+
+  .actionButtons {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .userDialog,
+  .menuAccessDialog {
+    width: 95vw !important;
+    max-width: 95vw !important;
+  }
+
+  .tableSummary {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .summaryDivider {
+    display: none;
+  }
+
+  .roleMetricsGrid {
+    flex-direction: column;
+  }
+
+  .roleMetricsHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .roleMetricItem {
+    padding: 0.625rem 0.875rem;
+    min-width: 100%;
+  }
+
+  .roleCount {
+    font-size: 1rem;
+  }
+
+  .roleMetricsContainer {
+    padding: 1rem 1.25rem;
+  }
+
+  .categoryHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .categoryActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

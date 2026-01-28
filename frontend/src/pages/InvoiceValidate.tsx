@@ -1,0 +1,296 @@
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { DataTable } from 'primereact/datatable'
+import { Column } from 'primereact/column'
+import { InputText } from 'primereact/inputtext'
+import { Dropdown } from 'primereact/dropdown'
+import { Button } from 'primereact/button'
+import { Tag } from 'primereact/tag'
+import { Toast } from 'primereact/toast'
+import { ProgressSpinner } from 'primereact/progressspinner'
+import Header from '../components/Header'
+import PageNavigation from '../components/PageNavigation'
+import { apiUrl } from '../utils/api'
+import styles from './InvoiceValidate.module.css'
+
+interface Invoice {
+  invoice_id: number
+  invoice_number: string
+  invoice_date: string
+  scanning_number: string | null
+  total_amount: number
+  tax_amount: number
+  status: string
+  supplier_name: string | null
+  po_id: number | null
+  po_number: string | null
+  po_date: string | null
+  created_at: string
+}
+
+const statusOptions = [
+  { label: 'All Status', value: '' },
+  { label: 'Pending', value: 'pending' },
+  { label: 'Approved', value: 'approved' },
+  { label: 'Rejected', value: 'rejected' },
+  { label: 'Completed', value: 'completed' }
+]
+
+function InvoiceValidate() {
+  const navigate = useNavigate()
+  const toast = useRef<Toast>(null)
+  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [searchInvoiceNumber, setSearchInvoiceNumber] = useState<string>('')
+  const [searchPONumber, setSearchPONumber] = useState<string>('')
+  const [selectedStatus, setSelectedStatus] = useState<string>('')
+  const [globalFilter, setGlobalFilter] = useState<string>('')
+
+  useEffect(() => {
+    fetchInvoices()
+  }, [selectedStatus])
+
+  const fetchInvoices = async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (selectedStatus) params.append('status', selectedStatus)
+      if (searchInvoiceNumber) params.append('invoiceNumber', searchInvoiceNumber)
+      if (searchPONumber) params.append('poNumber', searchPONumber)
+      
+      const url = apiUrl('invoices') + (params.toString() ? `?${params.toString()}` : '')
+      const response = await fetch(url)
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch invoices')
+      }
+      
+      const data = await response.json()
+      setInvoices(data)
+    } catch (error: any) {
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Error',
+        detail: error.message || 'Failed to load invoices',
+        life: 5000
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSearch = () => {
+    fetchInvoices()
+  }
+
+  const handleClearSearch = () => {
+    setSearchInvoiceNumber('')
+    setSearchPONumber('')
+    setSelectedStatus('')
+    setGlobalFilter('')
+    fetchInvoices()
+  }
+
+  const handleInvoiceClick = (invoiceId: number) => {
+    navigate(`/invoices/validate/${invoiceId}`)
+  }
+
+  const handlePOClick = (invoice: Invoice, e: React.MouseEvent) => {
+    e.stopPropagation()
+    // Navigate to invoice details page which shows both invoice and PO details
+    navigate(`/invoices/validate/${invoice.invoice_id}`)
+  }
+
+  const dateBodyTemplate = (rowData: Invoice) => {
+    if (!rowData.invoice_date) return '-'
+    const date = new Date(rowData.invoice_date)
+    return date.toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+
+  const statusBodyTemplate = (rowData: Invoice) => {
+    const status = rowData.status || 'pending'
+    const severity = status === 'completed' ? 'success' : 
+                     status === 'approved' ? 'info' :
+                     status === 'rejected' ? 'danger' : 'warning'
+    return <Tag value={status.toUpperCase()} severity={severity} />
+  }
+
+  const amountBodyTemplate = (rowData: Invoice) => {
+    return rowData.total_amount 
+      ? `₹${rowData.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : '-'
+  }
+
+  const invoiceNumberBodyTemplate = (rowData: Invoice) => {
+    return (
+      <span 
+        className={styles.clickableLink}
+        onClick={() => handleInvoiceClick(rowData.invoice_id)}
+      >
+        {rowData.invoice_number}
+      </span>
+    )
+  }
+
+  const poNumberBodyTemplate = (rowData: Invoice) => {
+    if (!rowData.po_number) return '-'
+    return (
+      <span 
+        className={styles.clickableLink}
+        onClick={(e) => handlePOClick(rowData, e)}
+      >
+        {rowData.po_number}
+      </span>
+    )
+  }
+
+  return (
+    <div className={styles.invoiceValidatePage}>
+      <Header />
+      <Toast ref={toast} />
+      
+      <div className={styles.pageContainer}>
+        <div className={styles.pageHeader}>
+          <div className={styles.headerContent}>
+            <div className={styles.headerText}>
+              <h1 className={styles.pageTitle}>Invoice Validate</h1>
+              <p className={styles.pageSubtitle}>View and validate all invoice records</p>
+            </div>
+            <PageNavigation />
+          </div>
+        </div>
+
+        <div className={styles.searchSection}>
+          <div className={styles.searchRow}>
+            <div className={styles.searchField}>
+              <label className={styles.searchLabel}>Invoice Number</label>
+              <InputText
+                value={searchInvoiceNumber}
+                onChange={(e) => setSearchInvoiceNumber(e.target.value)}
+                placeholder="Search by invoice number"
+                className={styles.searchInput}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              />
+            </div>
+            <div className={styles.searchField}>
+              <label className={styles.searchLabel}>PO Number</label>
+              <InputText
+                value={searchPONumber}
+                onChange={(e) => setSearchPONumber(e.target.value)}
+                placeholder="Search by PO number"
+                className={styles.searchInput}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              />
+            </div>
+            <div className={styles.searchField}>
+              <label className={styles.searchLabel}>Status</label>
+              <Dropdown
+                value={selectedStatus}
+                options={statusOptions}
+                onChange={(e) => setSelectedStatus(e.value)}
+                placeholder="All Status"
+                className={styles.searchDropdown}
+              />
+            </div>
+            <div className={styles.searchActions}>
+              <Button
+                label="Search"
+                icon="pi pi-search"
+                onClick={handleSearch}
+                className={styles.searchButton}
+              />
+              <Button
+                label="Clear"
+                icon="pi pi-times"
+                onClick={handleClearSearch}
+                className={styles.clearButton}
+                outlined
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.tableContainer}>
+          {loading ? (
+            <div className={styles.loadingContainer}>
+              <ProgressSpinner />
+              <p>Loading invoices...</p>
+            </div>
+          ) : (
+            <DataTable
+              value={invoices}
+              paginator
+              rows={10}
+              rowsPerPageOptions={[10, 25, 50, 100]}
+              emptyMessage="No invoices found"
+              className={styles.dataTable}
+              stripedRows
+              globalFilter={globalFilter}
+              onRowClick={(e) => handleInvoiceClick(e.data.invoice_id)}
+              rowHover
+              header={
+                <div className={styles.tableHeader}>
+                  <span className={styles.tableTitle}>Invoices ({invoices.length})</span>
+                  <InputText
+                    value={globalFilter}
+                    onChange={(e) => setGlobalFilter(e.target.value)}
+                    placeholder="Global search..."
+                    className={styles.globalSearch}
+                  />
+                </div>
+              }
+            >
+              <Column
+                field="invoice_number"
+                header="Invoice Number"
+                sortable
+                body={invoiceNumberBodyTemplate}
+                style={{ minWidth: '180px' }}
+              />
+              <Column
+                field="po_number"
+                header="PO Number"
+                sortable
+                body={poNumberBodyTemplate}
+                style={{ minWidth: '180px' }}
+              />
+              <Column
+                field="invoice_date"
+                header="Invoice Date"
+                sortable
+                body={dateBodyTemplate}
+                style={{ minWidth: '150px' }}
+              />
+              <Column
+                field="supplier_name"
+                header="Supplier"
+                sortable
+                style={{ minWidth: '250px' }}
+              />
+              <Column
+                field="total_amount"
+                header="Total Amount"
+                sortable
+                body={amountBodyTemplate}
+                style={{ minWidth: '150px', textAlign: 'right' }}
+              />
+              <Column
+                field="status"
+                header="Status"
+                sortable
+                body={statusBodyTemplate}
+                style={{ minWidth: '120px' }}
+              />
+            </DataTable>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default InvoiceValidate

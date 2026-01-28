@@ -1,0 +1,362 @@
+.purchaseOrderPage {
+  min-height: 100vh;
+  background: #f5f7fa;
+  padding: 0;
+  position: relative;
+}
+
+.pageContainer {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 24px;
+  position: relative;
+}
+
+.pageHeader {
+  margin-bottom: 24px;
+  padding: 0;
+}
+
+.headerContent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e4e7eb;
+  flex-wrap: wrap;
+}
+
+.headerText {
+  flex: 1;
+}
+
+.pageTitle {
+  font-size: 28px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.5px;
+  line-height: 1.3;
+}
+
+.pageSubtitle {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.refreshButton {
+  background-color: #2563eb;
+  border: none;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  border-radius: 8px;
+  color: white;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.refreshButton:hover {
+  background-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.refreshButton:active {
+  transform: translateY(0);
+}
+
+.tableContainer {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.loadingContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  gap: 1rem;
+}
+
+.loadingContainer p {
+  color: #64748b;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.dataTable {
+  width: 100%;
+}
+
+/* PrimeReact DataTable overrides */
+:global(.p-datatable .p-datatable-thead > tr > th) {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  font-weight: 600;
+  padding: 1rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+:global(.p-datatable .p-datatable-tbody > tr > td) {
+  padding: 1rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+:global(.p-datatable .p-datatable-tbody > tr:hover) {
+  background-color: #f8fafc;
+}
+
+:global(.p-datatable .p-datatable-tbody > tr.p-highlight) {
+  background-color: #eff6ff;
+}
+
+/* Paginator styles */
+:global(.p-paginator) {
+  background-color: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  padding: 1rem;
+}
+
+:global(.p-paginator .p-paginator-pages .p-paginator-page.p-highlight) {
+  background-color: #2563eb;
+  color: white;
+}
+
+/* Row expansion styles */
+.expansionContent {
+  padding: 1.5rem;
+  background: linear-gradient(to bottom, #f8fafc, #ffffff);
+  border-top: 2px solid #e2e8f0;
+}
+
+.poDetailsSection {
+  margin-bottom: 1.5rem;
+}
+
+.detailRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.detailItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.detailLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detailValue {
+  font-size: 1rem;
+  color: #1e293b;
+  font-weight: 500;
+}
+
+.lineItemsSection {
+  margin-top: 1.5rem;
+}
+
+.lineItemsHeader {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 1rem 0;
+  display: flex;
+  align-items: center;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.lineItemsLoading {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem;
+  justify-content: center;
+  color: #64748b;
+}
+
+.noLineItems {
+  text-align: center;
+  padding: 2rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.lineItemsTable {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: white;
+}
+
+.lineItemsTable table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.lineItemsTable thead {
+  background: linear-gradient(to bottom, #f1f5f9, #f8fafc);
+}
+
+.lineItemsTable thead th {
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.lineItemsTable tbody tr {
+  border-bottom: 1px solid #f1f5f9;
+  transition: background-color 0.2s;
+}
+
+.lineItemsTable tbody tr:hover {
+  background-color: #f8fafc;
+}
+
+.lineItemsTable tbody tr:last-child {
+  border-bottom: none;
+}
+
+.lineItemsTable tbody td {
+  padding: 1rem;
+  color: #334155;
+  font-size: 0.9375rem;
+}
+
+.sequenceCell {
+  text-align: center;
+  font-weight: 600;
+  color: #64748b;
+  width: 60px;
+}
+
+.itemNameCell {
+  font-weight: 600;
+  color: #1e293b;
+  min-width: 200px;
+}
+
+.descriptionCell {
+  color: #64748b;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hsnCell {
+  font-family: 'Courier New', monospace;
+  color: #475569;
+  min-width: 120px;
+}
+
+.uomCell {
+  text-align: center;
+  color: #64748b;
+  min-width: 80px;
+}
+
+.quantityCell {
+  text-align: right;
+  font-weight: 600;
+  color: #2563eb;
+  min-width: 100px;
+}
+
+.poNumberCell {
+  display: flex;
+  align-items: center;
+  font-size: 1rem;
+}
+
+.lineItemCount {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+/* Enhanced table row styles */
+:global(.p-datatable .p-datatable-tbody > tr.p-row-expanded) {
+  background-color: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+:global(.p-datatable .p-datatable-tbody > tr.p-row-expanded > td) {
+  border-bottom: none;
+}
+
+:global(.p-datatable .p-row-expander) {
+  color: #2563eb;
+  transition: transform 0.2s;
+}
+
+:global(.p-datatable .p-row-expander:hover) {
+  color: #1d4ed8;
+  transform: scale(1.1);
+}
+
+:global(.p-datatable .p-row-expander.p-row-expander-expanded) {
+  transform: rotate(90deg);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .pageContainer {
+    padding: 16px;
+  }
+
+  .headerContent {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .refreshButton {
+    width: 100%;
+  }
+
+  .pageTitle {
+    font-size: 1.5rem;
+  }
+
+  .detailRow {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .lineItemsTable {
+    font-size: 0.875rem;
+  }
+
+  .lineItemsTable thead th,
+  .lineItemsTable tbody td {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .descriptionCell {
+    max-width: 150px;
+  }
+}
