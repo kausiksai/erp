@@ -1,0 +1,70 @@
+# ============================================
+# Billing System - Complete Requirements
+# ============================================
+# This file lists all dependencies for the entire project
+# 
+# For Node.js projects (Backend & Frontend), use package.json files
+# For Python service (Qwen OCR), use qwen_service/requirements.txt
+# ============================================
+
+# ============================================
+# Backend Dependencies (Node.js)
+# ============================================
+# Install via: cd backend && npm install
+# See backend/package.json for complete list
+#
+# Key dependencies:
+# - express: Web framework
+# - pg: PostgreSQL client
+# - bcrypt: Password hashing
+# - jsonwebtoken: JWT authentication
+# - multer: File upload handling
+# - axios: HTTP client
+# - cors: CORS middleware
+# - dotenv: Environment variables
+# - pdf-parse: PDF parsing
+# - form-data: Form data handling
+
+# ============================================
+# Frontend Dependencies (Node.js)
+# ============================================
+# Install via: cd frontend && npm install
+# See frontend/package.json for complete list
+#
+# Key dependencies:
+# - react: UI framework
+# - react-dom: React DOM rendering
+# - react-router-dom: Routing
+# - primereact: UI component library
+# - primeicons: Icon library
+# - react-pdf: PDF viewing
+# - pdfjs-dist: PDF.js library
+# - vite: Build tool
+# - typescript: TypeScript compiler
+# - tailwindcss: CSS framework
+
+# ============================================
+# Qwen OCR Service Dependencies (Python)
+# ============================================
+# Install via: cd qwen_service && pip install -r requirements.txt
+# See qwen_service/requirements.txt for complete list
+#
+# Key dependencies:
+# - fastapi: Web framework
+# - uvicorn: ASGI server
+# - pillow: Image processing
+# - pdf2image: PDF to image conversion
+# - openai: OpenAI client (for Qwen API)
+# - transformers: Hugging Face transformers
+# - torch: PyTorch
+# - accelerate: Model acceleration
+
+# ============================================
+# System Requirements
+# ============================================
+# - Node.js v18 or higher
+# - PostgreSQL v12 or higher
+# - Python 3.12+ (for Qwen service)
+# - npm or yarn (Node.js package manager)
+# - pip (Python package manager)
+# - Poppler (for PDF conversion) - See README.md for installation

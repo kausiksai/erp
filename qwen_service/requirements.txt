@@ -1,8 +1,19 @@
+# Qwen OCR Service Requirements
+# Python 3.12+ recommended
+
+# Web Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
+
+# Image Processing
 pillow==10.1.0
 pdf2image==1.16.3
+
+# Qwen API Client (OpenAI-compatible)
+openai>=1.0.0
+
+# ML/AI Libraries (optional if using local models)
 transformers>=4.36.0
 torch>=2.0.0
 torchvision>=0.15.0

@@ -1,280 +1,476 @@
-# Billing System - Invoice Upload with OCR
+# Billing System - Complete ERP Solution
 
-A billing system application that allows users to upload invoice PDFs and extract data using DeepSeek-OCR technology.
+A comprehensive billing and invoice management system with OCR-based data extraction, user management, role-based access control, and complete purchase order tracking.
 
-## Features
+## 🚀 Features
 
-- **User Authentication**: Secure login system with JWT tokens and role-based access control
-- **PDF Upload**: Drag and drop or browse to upload invoice PDFs
-- **OCR Data Extraction**: Uses DeepSeek-OCR to automatically extract invoice data
-- **PDF Viewer**: View uploaded PDFs with page navigation
-- **Form Fields**: Automatically populated form fields for invoice details
-- **Data Storage**: Stores extracted invoice data in PostgreSQL database
+- **User Authentication & Authorization**: Secure JWT-based authentication with role-based access control (Admin, Manager, User, Finance, Viewer)
+- **Invoice Management**: Upload, extract, validate, and manage invoices with OCR technology
+- **Purchase Order Tracking**: Complete PO management with line items and status tracking
+- **Supplier Management**: Register and manage supplier information
+- **Owner/Company Details**: Manage company owner information
+- **User Registration**: Admin can create, update, and manage users with menu access control
+- **Menu-Based Navigation**: Dynamic menu system with role-based visibility
+- **OCR Data Extraction**: Automatic invoice data extraction using Qwen-VL-OCR API
+- **Weight Slip Scanning**: Extract weight data from weight slip PDFs
+- **Invoice Validation**: Validate invoices against purchase orders
+- **PDF Viewer**: Built-in PDF viewer for invoice documents
+- **Responsive Design**: Modern, professional UI with PrimeReact components
 
-## Tech Stack
+## 📋 Tech Stack
 
 ### Backend
-- Node.js + Express
-- PostgreSQL
-- Multer (file upload handling)
-- PDF parsing and OCR integration
-- DeepSeek-OCR API integration
+- **Node.js** + **Express.js** - RESTful API server
+- **PostgreSQL** - Relational database
+- **JWT** - Authentication tokens
+- **bcrypt** - Password hashing
+- **Multer** - File upload handling
+- **Axios** - HTTP client for external services
 
 ### Frontend
-- React + TypeScript
-- Vite
-- PrimeReact UI components
-- React-PDF for PDF viewing
-- Tailwind CSS
+- **React 19** + **TypeScript** - Modern UI framework
+- **Vite** - Fast build tool and dev server
+- **PrimeReact** - Professional UI component library
+- **React Router** - Client-side routing
+- **React-PDF** - PDF viewing capabilities
+- **Tailwind CSS** - Utility-first CSS framework
 
-## Project Structure
+### OCR Service
+- **Python 3.12+** - OCR service runtime
+- **FastAPI** - Python web framework
+- **Qwen-VL-OCR** - Alibaba Cloud OCR API integration
+- **Pillow** - Image processing
+- **pdf2image** - PDF to image conversion
+
+## 📁 Project Structure
 
 ```
 biling_system/
-├── backend/
+├── backend/                    # Node.js backend server
 │   ├── src/
-│   │   ├── index.js          # Express server and API routes
-│   │   ├── db.js             # PostgreSQL connection pool
-│   │   ├── schema.sql        # Database schema
-│   │   └── initDb.js         # Database initialization script
-│   ├── package.json
-│   └── .env.example
-├── frontend/
+│   │   ├── index.js           # Express server and main routes
+│   │   ├── db.js              # PostgreSQL connection pool
+│   │   ├── schema.sql         # Complete database schema
+│   │   ├── auth.js            # Authentication middleware
+│   │   ├── menu_api.js        # Menu items API
+│   │   ├── userManagement.js  # User management API
+│   │   ├── ownerDetails.js    # Owner details API
+│   │   ├── qwenService.js     # Qwen OCR service client
+│   │   └── initDb.js          # Database initialization
+│   ├── package.json           # Backend dependencies
+│   └── .env                   # Environment variables
+│
+├── frontend/                   # React frontend application
 │   ├── src/
-│   │   ├── pages/
-│   │   │   └── InvoiceUpload.tsx  # Main invoice upload page
-│   │   ├── utils/
-│   │   │   └── api.ts        # API utility functions
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   ├── index.css
-│   │   └── App.css
-│   ├── package.json
-│   └── vite.config.ts
-└── README.md
+│   │   ├── pages/             # Page components
+│   │   │   ├── Login.tsx      # Login page
+│   │   │   ├── Home.tsx       # Dashboard/home page
+│   │   │   ├── InvoiceUpload.tsx
+│   │   │   ├── InvoiceDetails.tsx
+│   │   │   ├── UserRegistration.tsx
+│   │   │   ├── OwnerDetails.tsx
+│   │   │   └── ...
+│   │   ├── components/        # Reusable components
+│   │   │   ├── Header.tsx
+│   │   │   ├── PageNavigation.tsx
+│   │   │   └── ProtectedRoute.tsx
+│   │   ├── contexts/          # React contexts
+│   │   │   └── AuthContext.tsx
+│   │   └── utils/             # Utility functions
+│   │       └── api.ts
+│   ├── package.json           # Frontend dependencies
+│   └── vite.config.ts         # Vite configuration
+│
+├── qwen_service/              # Python OCR service
+│   ├── qwen_service.py        # FastAPI OCR service
+│   ├── requirements.txt      # Python dependencies
+│   └── README.md             # OCR service documentation
+│
+├── requirements.txt           # Project overview (this file)
+├── .gitignore                # Git ignore rules
+└── README.md                 # This file
 ```
 
-## Setup Instructions
+## 🛠️ Prerequisites
 
-### Prerequisites
-- Node.js (v18 or higher)
-- PostgreSQL (v12 or higher)
-- npm or yarn
+Before you begin, ensure you have the following installed:
 
-### Backend Setup
+- **Node.js** v18 or higher ([Download](https://nodejs.org/))
+- **PostgreSQL** v12 or higher ([Download](https://www.postgresql.org/download/))
+- **Python** 3.12+ ([Download](https://www.python.org/downloads/))
+- **npm** or **yarn** (comes with Node.js)
+- **pip** (comes with Python)
+- **Poppler** (for PDF conversion):
+  - **Windows**: Download from [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) and add to PATH
+  - **Ubuntu/Debian**: `sudo apt-get install poppler-utils`
+  - **macOS**: `brew install poppler`
 
-1. Navigate to backend directory:
+## 📦 Installation & Setup
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/kausiksai/erp.git
+cd erp
+```
+
+### Step 2: Database Setup
+
+1. **Create PostgreSQL Database**:
+```sql
+CREATE DATABASE billing_system;
+```
+
+2. **Update Database Credentials**:
+   - Navigate to `backend/` directory
+   - Create `.env` file (copy from `.env.example` if available):
+```env
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=billing_system
+PGUSER=postgres
+PGPASSWORD=your_password_here
+PORT=4000
+NODE_ENV=development
+JSON_LIMIT=25mb
+QWEN_SERVICE_URL=http://localhost:5000
+```
+
+### Step 3: Backend Setup
+
+1. **Navigate to backend directory**:
 ```bash
 cd backend
 ```
 
-2. Install dependencies:
+2. **Install dependencies**:
 ```bash
 npm install
 ```
 
-3. Create `.env` file from `.env.example`:
-```bash
-cp .env.example .env
-```
-
-4. Update `.env` with your database credentials:
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/billing_system
-DEEPSEEK_OCR_API=https://api.deepseek.com/ocr
-DEEPSEEK_API_KEY=your_api_key_here
-PORT=4000
-```
-
-5. Initialize database:
+3. **Initialize database**:
 ```bash
 npm run db:init
 ```
+This will create all tables and insert default data including:
+- Menu items
+- Role-based access permissions
+- Default admin user (username: `admin`, email: `admin@srimukha.com`, password: `Admin@123`)
 
-6. Create default admin user:
-```bash
-npm run db:create-user
-```
-
-   This creates a default admin user with:
-   - Username: `admin` (or set `DEFAULT_ADMIN_USERNAME` in `.env`)
-   - Email: `admin@example.com` (or set `DEFAULT_ADMIN_EMAIL` in `.env`)
-   - Password: `admin123` (or set `DEFAULT_ADMIN_PASSWORD` in `.env`)
-   - Role: `admin` (or set `DEFAULT_ADMIN_ROLE` in `.env`)
-
-   ⚠️ **Important**: Change the default password after first login!
-
-7. Start the server:
+4. **Start the backend server**:
 ```bash
 npm run dev
 ```
 
 The backend API will be running on `http://localhost:4000`
 
-### Frontend Setup
+### Step 4: Frontend Setup
 
-1. Navigate to frontend directory:
+1. **Open a new terminal and navigate to frontend directory**:
 ```bash
 cd frontend
 ```
 
-2. Install dependencies:
+2. **Install dependencies**:
 ```bash
 npm install
 ```
 
-3. Start the development server:
+3. **Start the development server**:
 ```bash
 npm run dev
 ```
 
 The frontend will be running on `http://localhost:3000`
 
-## Usage
+### Step 5: Qwen OCR Service Setup
 
-1. Open the application in your browser (typically `http://localhost:3000`)
-2. **Login** with your credentials (default: `admin` / `admin123`)
-3. Navigate to "Invoice Upload" from the home page
-4. Click "Browse Files" or drag and drop a PDF invoice
-5. The PDF will be displayed on the left side
-6. Click "Extract Data" button to process the invoice with DeepSeek-OCR
-7. Review and edit the extracted data in the form fields on the right
-8. Click "Save Invoice" to store the data in the database
+1. **Get Qwen API Key**:
+   - Sign up at [Alibaba Cloud DashScope](https://dashscope.aliyun.com/)
+   - Get your API key from the dashboard
+   - Update `qwen_service/qwen_service.py` with your API key:
+   ```python
+   QWEN_API_KEY = 'your-api-key-here'
+   ```
+   Or set it as environment variable:
+   ```bash
+   export DASHSCOPE_API_KEY=your-api-key-here
+   ```
 
-## DeepSeek-OCR Integration
-
-The application integrates with DeepSeek-OCR for intelligent invoice data extraction. Based on the [official GitHub repository](https://github.com/deepseek-ai/DeepSeek-OCR):
-
-- **DeepSeek-OCR** is a 3B-parameter model with 97% character-level accuracy
-- Uses 10× input compression (100 tokens vs 6000+ for traditional OCR)
-- Supports multiple modes: Tiny (512×512, 64 tokens), Small (640×640, 100 tokens), Base (1024×1024, 256 tokens), Large (1280×1280, 400 tokens)
-- Outputs clean markdown from documents
-
-### Setup DeepSeek-OCR Service
-
-The application uses the **actual DeepSeek-OCR code** from the [official repository](https://github.com/deepseek-ai/DeepSeek-OCR). The model runs locally using transformers.
-
-#### Quick Setup (Recommended)
-
-**Windows:**
+2. **Navigate to qwen_service directory**:
 ```bash
-cd backend\ocr_service
-setup.bat
+cd qwen_service
 ```
 
-**Linux/Mac:**
+3. **Create Python virtual environment** (recommended):
 ```bash
-cd backend/ocr_service
-chmod +x setup.sh
-./setup.sh
-```
-
-#### Manual Setup
-
-1. **Create Python environment:**
-```bash
-cd backend/ocr_service
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Windows
+venv\Scripts\activate
+
+# Linux/Mac
+source venv/bin/activate
 ```
 
-2. **Install PyTorch with CUDA 11.8:**
-```bash
-pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu118
-```
-
-3. **Install dependencies:**
+4. **Install Python dependencies**:
 ```bash
 pip install -r requirements.txt
-pip install flash-attn==2.7.3 --no-build-isolation
 ```
 
-4. **Install Poppler (for PDF conversion):**
-   - **Windows**: Download from [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) and add to PATH
-   - **Ubuntu/Debian**: `sudo apt-get install poppler-utils`
-   - **macOS**: `brew install poppler`
-
-5. **Start the OCR service:**
+5. **Start the OCR service**:
 ```bash
-python ocr_service.py
+python qwen_service.py
 ```
 
-The service will run on `http://localhost:5000` (configured in `.env`).
+The OCR service will be running on `http://localhost:5000`
 
-**Requirements:**
-- Python 3.12.9 (recommended) or 3.12+
-- CUDA 11.8+ and GPU (recommended) or CPU (very slow)
-- ~10GB disk space for model download
-- GPU with 8GB+ VRAM (recommended 16GB+)
+**Note**: The OCR service is optional. If it's not running, the application will still work but OCR extraction will fail.
 
-**Note**: If the OCR service is not running, the application will automatically fall back to basic PDF text extraction.
+## 🚀 Running the Application
 
-See `backend/ocr_service/QUICKSTART.md` for detailed setup instructions.
+### Development Mode
 
-## Authentication
+1. **Start PostgreSQL** (if not running as a service)
 
-The application includes a complete authentication system:
+2. **Start Backend** (Terminal 1):
+```bash
+cd backend
+npm run dev
+```
 
-- **JWT-based authentication**: Secure token-based authentication
-- **Role-based access control**: Support for different user roles (admin, user, etc.)
-- **Password hashing**: Passwords are hashed using bcrypt
-- **Protected routes**: All application routes require authentication
-- **Session management**: Tokens stored in localStorage
+3. **Start Frontend** (Terminal 2):
+```bash
+cd frontend
+npm run dev
+```
 
-### User Roles
+4. **Start OCR Service** (Terminal 3 - Optional):
+```bash
+cd qwen_service
+python qwen_service.py
+```
 
-The system supports role-based access control. Default roles:
-- `admin` - Full system access
-- `user` - Standard user access
+5. **Open Browser**: Navigate to `http://localhost:3000`
 
-You can extend roles as needed for your use case.
+### Production Build
 
-### API Endpoints
+**Backend**:
+```bash
+cd backend
+npm start
+```
 
-**Authentication:**
-- `POST /api/auth/register` - Register a new user
-- `POST /api/auth/login` - Login and get JWT token
-- `GET /api/auth/me` - Get current user info (protected)
+**Frontend**:
+```bash
+cd frontend
+npm run build
+npm run preview
+```
 
-## Database Schema
+## 🔐 Default Login Credentials
 
-The application uses the following main tables:
-- `users` - User accounts with authentication and role information
-- `invoices` - Main invoice records
-- `invoice_lines` - Invoice line items
-- `invoice_attachments` - Stored PDF files
-- `suppliers` - Supplier information
-- `purchase_orders` - Purchase order records
-- `purchase_order_lines` - Purchase order line items
-- `owners` - Company/owner information
+After running `npm run db:init`, you can login with:
 
-Refer to `backend/src/schema.sql` for the complete schema.
+- **Username**: `admin`
+- **Email**: `admin@srimukha.com`
+- **Password**: `Admin@123`
+- **Role**: `admin`
 
-## API Endpoints
+⚠️ **Important**: Change the default password after first login!
 
-**Authentication (Public):**
-- `POST /api/auth/register` - Register a new user
-- `POST /api/auth/login` - Login and get JWT token
+## 📚 Usage Guide
 
-**Authentication (Protected):**
+### 1. Login
+- Navigate to `http://localhost:3000`
+- Enter your credentials
+- Click "Sign In"
+
+### 2. Invoice Upload
+- Click "Invoice Upload" from the home page
+- Upload a PDF invoice
+- Click "Extract Data" to process with OCR
+- Review and edit extracted data
+- Select measurement type (Weight or Count) for line items
+- Fill in weight (via weight slip scanning) or count for each item
+- Click "Save Invoice" to store in database
+
+### 3. User Management (Admin Only)
+- Click "User Registration" from the home page
+- Create new users
+- Assign roles and menu access
+- View user metrics and statistics
+
+### 4. Owner Details (Admin Only)
+- Click "Owner Details" from Master Data section
+- View and edit company owner information
+- Update bank details, contact information, etc.
+
+### 5. Purchase Orders
+- View incomplete purchase orders
+- Link invoices to purchase orders
+- Track PO status and line items
+
+## 🔑 API Endpoints
+
+### Authentication
+- `POST /api/auth/login` - User login
+- `POST /api/auth/register` - User registration (if enabled)
 - `GET /api/auth/me` - Get current user info
 
-**Invoices (Protected):**
-- `POST /api/invoices/upload` - Upload invoice PDF and extract data
+### Invoices
+- `POST /api/invoices/upload` - Upload and extract invoice data
+- `GET /api/invoices` - List all invoices
 - `GET /api/invoices/:id` - Get invoice details
 - `PUT /api/invoices/:id` - Update invoice
-- `GET /api/invoices/:id/pdf` - Download invoice PDF
-- `GET /api/invoices` - List all invoices
+- `POST /api/invoices/extract-weight` - Extract weight from weight slip PDF
 
-**Purchase Orders (Protected):**
+### Users
+- `GET /api/users` - List all users (Admin only)
+- `POST /api/users` - Create user (Admin only)
+- `PUT /api/users/:id` - Update user (Admin only)
+- `DELETE /api/users/:id` - Delete user (Admin only)
+
+### Menu & Access
+- `GET /api/menu-items` - Get menu items based on user role
+- `GET /api/menu-items/all` - Get all menu items (Admin only)
+
+### Owner Details
+- `GET /api/owner` - Get owner details
+- `PUT /api/owner` - Update owner details (Admin only)
+
+### Purchase Orders
 - `GET /api/purchase-orders` - List all purchase orders
-- `GET /api/purchase-orders/:poNumber` - Get purchase order by number
-- `GET /api/purchase-orders/:poId/line-items` - Get purchase order line items
+- `GET /api/purchase-orders/:poNumber` - Get PO by number
+- `GET /api/purchase-orders/incomplete` - Get incomplete POs
 
-**Other (Protected):**
-- `GET /api/owner` - Get owner/company information
-- `GET /api/suppliers/:supplierName` - Get supplier by name
+## 🗄️ Database Schema
 
-## License
+The database includes the following main tables:
+
+- **users** - User accounts with authentication and roles
+- **menu_items** - Menu items configuration
+- **role_menu_access** - Role-based menu access control
+- **suppliers** - Supplier information
+- **owners** - Company/owner information
+- **purchase_orders** - Purchase order records
+- **purchase_order_lines** - PO line items
+- **invoices** - Invoice records
+- **invoice_lines** - Invoice line items with weight/count
+- **invoice_attachments** - Stored PDF files
+
+See `backend/src/schema.sql` for the complete schema with all relationships and indexes.
+
+## 🔒 Security Features
+
+- **JWT Authentication**: Secure token-based authentication
+- **Password Hashing**: bcrypt with salt rounds
+- **Role-Based Access Control**: Granular permissions per role
+- **Protected Routes**: Frontend and backend route protection
+- **Input Validation**: Server-side validation for all inputs
+- **SQL Injection Protection**: Parameterized queries
+- **CORS Configuration**: Controlled cross-origin requests
+
+## 🧪 Testing
+
+### Test Database Connection
+```bash
+cd backend
+npm run db:test
+```
+
+### Create Test User
+```bash
+cd backend
+npm run db:create-user
+```
+
+## 📝 Environment Variables
+
+### Backend (.env)
+```env
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=billing_system
+PGUSER=postgres
+PGPASSWORD=your_password
+PORT=4000
+NODE_ENV=development
+JSON_LIMIT=25mb
+QWEN_SERVICE_URL=http://localhost:5000
+JWT_SECRET=your_jwt_secret_here
+```
+
+### Qwen Service
+Set in `qwen_service/qwen_service.py` or as environment variable:
+```bash
+export DASHSCOPE_API_KEY=your-api-key-here
+```
+
+## 🐛 Troubleshooting
+
+### Backend won't start
+- Check PostgreSQL is running
+- Verify database credentials in `.env`
+- Ensure database exists: `CREATE DATABASE billing_system;`
+
+### Frontend won't start
+- Clear `node_modules` and reinstall: `rm -rf node_modules && npm install`
+- Check Node.js version: `node --version` (should be v18+)
+
+### OCR service errors
+- Verify API key is correct
+- Check internet connection (API calls to Alibaba Cloud)
+- Ensure Poppler is installed and in PATH
+
+### Database connection errors
+- Verify PostgreSQL is running
+- Check firewall settings
+- Verify credentials in `.env` file
+
+## 📦 Dependencies
+
+### Backend Dependencies
+See `backend/package.json` for complete list:
+- express, pg, bcrypt, jsonwebtoken, multer, axios, cors, dotenv, pdf-parse, form-data
+
+### Frontend Dependencies
+See `frontend/package.json` for complete list:
+- react, react-dom, react-router-dom, primereact, primeicons, react-pdf, pdfjs-dist, vite, typescript, tailwindcss
+
+### Python Dependencies
+See `qwen_service/requirements.txt`:
+- fastapi, uvicorn, pillow, pdf2image, openai
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
 
 ISC
+
+## 👥 Authors
+
+- **Kausi** - Initial work
+
+## 🙏 Acknowledgments
+
+- PrimeReact for the excellent UI component library
+- Alibaba Cloud for Qwen-VL-OCR API
+- React team for the amazing framework
+- All open-source contributors
+
+## 📞 Support
+
+For issues and questions:
+- Open an issue on GitHub
+- Check the documentation in each service's README
+
+---
+
+**Happy Coding! 🚀**
