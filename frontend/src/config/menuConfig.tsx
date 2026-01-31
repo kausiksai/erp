@@ -121,33 +121,33 @@ const allMenuItems: MenuItem[] = [
     icon: 'pi pi-building',
     path: '/suppliers/registration',
     color: '#ca8a04',
-    comingSoon: true,
-    allowedRoles: ['admin', 'manager', 'user'],
+    comingSoon: false,
+    allowedRoles: ['admin', 'manager'],
     order: 2
   },
   
   // Finance & Payments
   {
-    id: 'finance-dashboard',
-    title: 'Finance Dashboard',
-    description: 'Comprehensive financial overview and analytics',
-    icon: 'pi pi-chart-line',
-    path: '/finance/dashboard',
-    color: '#16a34a',
-    comingSoon: true,
+    id: 'approve-payments',
+    title: 'Approve Payments',
+    description: 'Review and approve payments (PO, supplier, invoice, GRN, ASN, banking)',
+    icon: 'pi pi-check-square',
+    path: '/payments/approve',
+    color: '#0d9488',
+    comingSoon: false,
     allowedRoles: ['admin', 'manager', 'finance'],
-    order: 1
+    order: 2
   },
   {
     id: 'ready-for-payment',
     title: 'Ready for Payments',
-    description: 'Manage invoices ready for payment processing',
+    description: 'Manage approved payments and mark as done',
     icon: 'pi pi-money-bill',
     path: '/payments/ready',
     color: '#0284c7',
-    comingSoon: true,
+    comingSoon: false,
     allowedRoles: ['admin', 'manager', 'finance'],
-    order: 2
+    order: 3
   },
   {
     id: 'payment-history',
@@ -156,12 +156,23 @@ const allMenuItems: MenuItem[] = [
     icon: 'pi pi-history',
     path: '/payments/history',
     color: '#9333ea',
-    comingSoon: true,
+    comingSoon: false,
     allowedRoles: ['admin', 'manager', 'finance', 'viewer'],
-    order: 3
+    order: 4
   },
   
   // Reports & Analytics
+  {
+    id: 'finance-dashboard',
+    title: 'Finance Dashboard',
+    description: 'Comprehensive financial overview and analytics',
+    icon: 'pi pi-chart-line',
+    path: '/finance/dashboard',
+    color: '#16a34a',
+    comingSoon: false,
+    allowedRoles: ['admin', 'manager', 'finance', 'viewer'],
+    order: 1
+  },
   {
     id: 'invoice-reports',
     title: 'Invoice Reports',
@@ -171,7 +182,7 @@ const allMenuItems: MenuItem[] = [
     color: '#be123c',
     comingSoon: true,
     allowedRoles: ['admin', 'manager', 'finance', 'viewer'],
-    order: 1
+    order: 2
   },
   {
     id: 'financial-reports',
@@ -182,7 +193,7 @@ const allMenuItems: MenuItem[] = [
     color: '#0d9488',
     comingSoon: true,
     allowedRoles: ['admin', 'manager', 'finance'],
-    order: 2
+    order: 3
   },
   {
     id: 'supplier-reports',
@@ -193,7 +204,7 @@ const allMenuItems: MenuItem[] = [
     color: '#c2410c',
     comingSoon: true,
     allowedRoles: ['admin', 'manager'],
-    order: 3
+    order: 4
   }
 ]
 
@@ -238,14 +249,14 @@ export const getMenuCategories = (userRole: UserRole): MenuCategory[] => {
     {
       id: 'finance',
       title: 'Finance & Payments',
-      description: 'Financial dashboard and payment management',
-      items: filterItemsByRole(getMenuItemsByIds('finance-dashboard', 'ready-for-payment', 'payment-history'))
+      description: 'Payment approval and history',
+      items: filterItemsByRole(getMenuItemsByIds('approve-payments', 'ready-for-payment', 'payment-history'))
     },
     {
       id: 'reports',
       title: 'Reports & Analytics',
       description: 'Generate reports and view analytics',
-      items: filterItemsByRole(getMenuItemsByIds('invoice-reports', 'financial-reports', 'supplier-reports'))
+      items: filterItemsByRole(getMenuItemsByIds('finance-dashboard', 'invoice-reports', 'financial-reports', 'supplier-reports'))
     }
   ].filter(category => category.items.length > 0) // Only show categories with items
 }

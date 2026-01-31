@@ -1,21 +1,53 @@
 .comingSoonPage {
   min-height: 100vh;
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
   display: flex;
   flex-direction: column;
+  position: relative;
+  overflow-x: hidden;
+}
+
+.comingSoonPage::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 400px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(251, 191, 36, 0.06) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .container {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 2rem 2.5rem 3rem;
+  position: relative;
+  z-index: 1;
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.navRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 2rem;
 }
 
 .content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  max-width: 500px;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
 }
 
 .iconWrapper {
@@ -27,19 +59,34 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 30px rgba(251, 191, 36, 0.3);
+  box-shadow:
+    0 10px 30px rgba(251, 191, 36, 0.3),
+    0 4px 12px rgba(245, 158, 11, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.iconWrapper:hover {
+  transform: scale(1.05);
+  box-shadow:
+    0 14px 36px rgba(251, 191, 36, 0.35),
+    0 6px 16px rgba(245, 158, 11, 0.25);
 }
 
 .iconWrapper i {
   font-size: 3rem;
   color: white;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
 }
 
 .title {
-  font-size: 2.5rem;
+  font-size: 2.25rem;
   font-weight: 700;
   color: #0f172a;
   margin: 0 0 1rem 0;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
 }
 
 .description {
@@ -47,9 +94,68 @@
   color: #64748b;
   margin: 0 0 2rem 0;
   line-height: 1.6;
+  max-width: 420px;
 }
 
 .backButton {
   padding: 0.75rem 1.5rem;
   font-size: 1rem;
+  font-weight: 600;
+  border-radius: 10px;
+  transition: all 0.25s ease;
+}
+
+.backButton:hover {
+  transform: translateY(-1px);
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 1.5rem 1.5rem 2rem;
+  }
+
+  .navRow {
+    margin-bottom: 1.5rem;
+  }
+
+  .content {
+    padding: 1.5rem 1rem;
+  }
+
+  .iconWrapper {
+    width: 100px;
+    height: 100px;
+    margin-bottom: 1.5rem;
+  }
+
+  .iconWrapper i {
+    font-size: 2.5rem;
+  }
+
+  .title {
+    font-size: 1.875rem;
+  }
+
+  .description {
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 1.25rem 1rem 1.5rem;
+  }
+
+  .navRow {
+    margin-bottom: 1.25rem;
+  }
+
+  .title {
+    font-size: 1.625rem;
+  }
+
+  .description {
+    font-size: 0.9375rem;
+  }
 }

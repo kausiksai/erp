@@ -42,6 +42,50 @@ A comprehensive billing and invoice management system with OCR-based data extrac
 - **Pillow** - Image processing
 - **pdf2image** - PDF to image conversion
 
+## 📊 Data Model & Production Data Flow
+
+In production, data enters the system from two sources:
+
+| Source | Entities | How |
+|--------|----------|-----|
+| **Excel import** | PO, DC, GRN, ASN | Bulk load from Excel exports. These tables are **not** created or edited through the frontend. |
+| **Frontend (scan & store)** | Invoices, invoice lines, invoice attachments | User scans invoice PDF → system extracts data (OCR) → user validates → save. Invoices link to POs (already loaded from Excel) via `po_id` / `po_number`. |
+
+- **PO (Purchase Order)** and **purchase_order_lines**: Loaded from Excel; frontend is view-only (e.g. Purchase Order Details page).
+- **GRN (Goods Receipt Note)** and **ASN (Advanced Shipping Notice)**: Loaded from Excel; no frontend create/edit.
+- **Invoices**: The only entity created and updated through the frontend (upload PDF, extract, validate, save). Schema and APIs are designed so invoices reference Excel-imported POs.
+
+## Invoice, ASN, GRN & PO Processing – Functional Requirements
+
+The system implements the following business rules for PO, Invoice, GRN, and ASN processing.
+
+### 1. Standard PO Invoice Validation
+- For any standard PO, the system processes ASN, GRN, and Invoice.
+- Invoice details are validated against ASN and GRN (quantity, unit price, tax/totals where applicable).
+- **If all details match:** Invoice status → **Ready for Payment**; payment due date = invoice receipt date + PO payment terms (days); PO status → **Fulfilled**.
+
+### 2. Partial Quantity / Shortfall (Debit Note Flow)
+- If Invoice, ASN, or GRN quantity is less than PO quantity: Invoice → **Debit Note Approval** and the PO appears under **Incomplete POs**.
+- After the Debit Note is uploaded and approved: Invoice → **Ready for Payment**; payment amount = Debit Note value; PO status → **Partially Fulfilled**.
+
+### 3. Partially Fulfilled PO Management
+- All **Partially Fulfilled** POs are shown under **Incomplete POs** with an option to **Force Close**.
+- When force-closed: PO status → **Fulfilled**.
+
+### 4. Multiple Invoices, ASN, and GRN per PO
+- A single PO may have multiple ASNs, GRNs, and Invoices.
+- The system maintains **cumulative** invoice, ASN, and GRN quantities per PO.
+- When cumulative quantities match the PO quantity, PO status is updated to **Fulfilled**.
+
+### 5. Invoices Received After PO Fulfillment
+- If an invoice is received for a PO already marked **Fulfilled**: Invoice → **Exception Approval**.
+- After exception approval: Invoice → **Ready for Payment**.
+
+### Implementation Notes
+- **Schema:** `purchase_orders` has `terms` (e.g. "60 DAYS FROM RECEIPT OF MATERIAL"); days are parsed from this text for payment due date. `status` = pending | fulfilled | partially_fulfilled. `invoices` has `payment_due_date`, `debit_note_value`, and `status` (pending | ready_for_payment | debit_note_approval | exception_approval | …).
+- **Backend:** `poInvoiceValidation.js` implements validation, cumulative quantities, and status updates. APIs: `POST /api/invoices/:id/validate`, `PATCH /api/invoices/:id/debit-note-approve`, `PATCH /api/invoices/:id/exception-approve`, `PATCH /api/purchase-orders/:id/force-close`, `GET /api/purchase-orders/:id/cumulative`.
+- **Database:** `backend/src/schema.sql` contains tables and indexes only. `backend/src/data.sql` contains seed data (users, menu, role access, suppliers, owners) and test PO data for all scenarios (partially fulfilled, fulfilled, debit note, exception approval, ready for payment, approved, payment done). Run `npm run db:init` to apply schema and load data.
+
 ## 📁 Project Structure
 
 ```
@@ -50,12 +94,14 @@ biling_system/
 │   ├── src/
 │   │   ├── index.js           # Express server and main routes
 │   │   ├── db.js              # PostgreSQL connection pool
-│   │   ├── schema.sql         # Complete database schema
+│   │   ├── schema.sql         # Database schema (tables and indexes only)
+│   │   ├── data.sql           # Seed data (menu, users, suppliers) and test PO/invoice/GRN/ASN data
 │   │   ├── auth.js            # Authentication middleware
 │   │   ├── menu_api.js        # Menu items API
 │   │   ├── userManagement.js  # User management API
 │   │   ├── ownerDetails.js    # Owner details API
 │   │   ├── qwenService.js     # Qwen OCR service client
+│   │   ├── poInvoiceValidation.js  # PO/Invoice/GRN validation and status rules
 │   │   └── initDb.js          # Database initialization
 │   ├── package.json           # Backend dependencies
 │   └── .env                   # Environment variables

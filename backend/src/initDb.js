@@ -1,25 +1,13 @@
-import 'dotenv/config'
-import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { pool } from './db.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-async function initDb() {
-  try {
-    const schemaPath = path.join(__dirname, 'schema.sql')
-    const schema = fs.readFileSync(schemaPath, 'utf8')
-    
-    await pool.query(schema)
-    console.log('Database schema initialized successfully')
-    
-    process.exit(0)
-  } catch (err) {
-    console.error('Database initialization failed:', err)
-    process.exit(1)
-  }
-}
-
-initDb()
+// Schema and data are run manually in your DB client.
+// 1. Run backend/src/schema.sql to create tables and indexes.
+// 2. Run backend/src/data.sql to load seed and test data.
+console.log('Run schema.sql and data.sql manually in your DB client.')
+console.log('  schema:', path.join(__dirname, 'schema.sql'))
+console.log('  data:  ', path.join(__dirname, 'data.sql'))
+process.exit(0)

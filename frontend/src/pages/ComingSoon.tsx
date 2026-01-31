@@ -10,8 +10,8 @@ function ComingSoon() {
   return (
     <div className={styles.comingSoonPage}>
       <Header />
-      <div className={styles.container}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' }}>
+        <div id="main-content" className={styles.container} tabIndex={-1}>
+        <div className={styles.navRow}>
           <PageNavigation />
         </div>
         <div className={styles.content}>

@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import Header from '../components/Header'
+import { Toast } from 'primereact/toast'
 import { getRoleDisplayName, type UserRole } from '../config/menuConfig'
-import { apiUrl } from '../utils/api'
+import { apiUrl, getErrorMessageFromResponse } from '../utils/api'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import styles from './Home.module.css'
 
@@ -28,12 +29,13 @@ interface MenuCategory {
 function Home() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const toast = useRef<Toast>(null)
   const [menuCategories, setMenuCategories] = useState<MenuCategory[]>([])
   const [loading, setLoading] = useState(true)
-  
+
   // Get user role, default to 'user' if not available
   const userRole = user?.role?.toLowerCase() || 'user'
-  
+
   useEffect(() => {
     fetchMenuItems()
   }, [userRole])
@@ -44,44 +46,51 @@ function Home() {
       const token = localStorage.getItem('authToken')
       const response = await fetch(apiUrl(`menu-items?role=${userRole}`), {
         headers: {
-          'Authorization': `Bearer ${token}`
-        }
+          Authorization: token ? `Bearer ${token}` : '',
+        },
       })
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.message || 'Failed to fetch menu items')
+        const msg = await getErrorMessageFromResponse(response, 'Failed to load menu. Please try again.')
+        toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+        setMenuCategories([])
+        return
       }
 
       const data = await response.json()
-      
-      // If no menu items returned and user is admin, log a warning
+
       if (data.length === 0 && userRole === 'admin') {
         console.warn('Admin user has no menu items. Please ensure menu_items and role_menu_access tables are populated.')
       }
-      
+
       setMenuCategories(data)
     } catch (error) {
-      console.error('Error fetching menu items:', error)
-      // Fallback to empty array if API fails
+      const msg = error instanceof Error ? error.message : 'Failed to load menu. Please try again.'
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
       setMenuCategories([])
     } finally {
       setLoading(false)
     }
   }
 
-  const handleMenuClick = (item: any) => {
+  const handleMenuClick = (item: MenuItem) => {
     if (!item.comingSoon) {
       navigate(item.path)
     }
+  }
+
+  const scrollToSection = (categoryId: string) => {
+    const el = document.getElementById(`section-${categoryId}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   if (loading) {
     return (
       <div className={styles.homePage}>
         <Header />
-        <div className={styles.container}>
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+        <Toast ref={toast} position="top-right" />
+        <div id="main-content" className={styles.container} tabIndex={-1}>
+          <div className={styles.loadingWrap}>
             <ProgressSpinner />
           </div>
         </div>
@@ -92,27 +101,39 @@ function Home() {
   return (
     <div className={styles.homePage}>
       <Header />
-      <div className={styles.container}>
+      <Toast ref={toast} position="top-right" />
+      <div id="main-content" className={styles.container} tabIndex={-1}>
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <div>
               <h1 className={styles.pageTitle}>Billing System Dashboard</h1>
               <p className={styles.pageSubtitle}>End-to-end billing and invoice management solution</p>
             </div>
+            {menuCategories.length > 0 && (
             <div className={styles.statsBar}>
-              <div className={styles.statItem}>
-                <i className="pi pi-file"></i>
-                <span>Invoices</span>
-              </div>
-              <div className={styles.statItem}>
-                <i className="pi pi-shopping-cart"></i>
-                <span>Purchase Orders</span>
-              </div>
-              <div className={styles.statItem}>
-                <i className="pi pi-building"></i>
-                <span>Suppliers</span>
-              </div>
+              {menuCategories.map((category) => (
+                <div
+                  key={category.id}
+                  className={styles.statItem}
+                  onClick={() => scrollToSection(category.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      scrollToSection(category.id)
+                    }
+                  }}
+                >
+                  <i
+                    className={category.items[0]?.icon ?? 'pi pi-folder'}
+                    style={{ color: category.items[0]?.color ?? '#2563eb' }}
+                  />
+                  <span>{category.title}</span>
+                </div>
+              ))}
             </div>
+            )}
           </div>
         </div>
 
@@ -130,7 +151,7 @@ function Home() {
         ) : (
           <div className={styles.categoriesContainer}>
             {menuCategories.map((category) => (
-            <div key={category.id} className={styles.categorySection}>
+            <div key={category.id} id={`section-${category.id}`} className={styles.categorySection}>
               <div className={styles.categoryHeader}>
                 <h2 className={styles.categoryTitle}>{category.title}</h2>
                 <p className={styles.categoryDescription}>{category.description}</p>

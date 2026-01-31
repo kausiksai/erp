@@ -1,6 +1,6 @@
 .invoiceUploadPage {
   min-height: 100vh;
-  background: #f5f7fa;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   padding: 0;
   position: relative;
 }
@@ -1339,7 +1339,7 @@
 
 @media (max-width: 768px) {
   .pageContainer {
-    padding: 16px;
+    padding: 1.5rem 1rem;
   }
 
   .formRow,
@@ -1353,7 +1353,7 @@
   }
 
   .pageTitle {
-    font-size: 24px;
+    font-size: 1.5rem;
   }
 
   .pdfControls {
@@ -1367,5 +1367,25 @@
 
   .extractButton {
     flex: 1;
+  }
+
+  .tableContainer,
+  .invoiceTableWrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .pageContainer {
+    padding: 1rem;
+  }
+
+  .pageTitle {
+    font-size: 1.25rem;
+  }
+
+  .poValidationCard {
+    padding: 1.5rem 1rem;
   }
 }

@@ -5,12 +5,21 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import InvoiceUpload from './pages/InvoiceUpload'
 import PurchaseOrderDetails from './pages/PurchaseOrderDetails'
+import GRNDetails from './pages/GRNDetails'
+import ASNDetails from './pages/ASNDetails'
 import InvoiceValidate from './pages/InvoiceValidate'
 import InvoiceDetails from './pages/InvoiceDetails'
 import IncompletePOs from './pages/IncompletePOs'
 import UserRegistration from './pages/UserRegistration'
 import OwnerDetails from './pages/OwnerDetails'
-import ComingSoon from './pages/ComingSoon'
+import SupplierRegistration from './pages/SupplierRegistration'
+import InvoiceReports from './pages/InvoiceReports'
+import SupplierReports from './pages/SupplierReports'
+import FinancialReports from './pages/FinancialReports'
+import ApprovePayments from './pages/ApprovePayments'
+import ReadyForPayments from './pages/ReadyForPayments'
+import PaymentHistory from './pages/PaymentHistory'
+import FinanceDashboard from './pages/FinanceDashboard'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
@@ -18,13 +27,8 @@ function App() {
 
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        minHeight: '100vh' 
-      }}>
-        <i className="pi pi-spin pi-spinner" style={{ fontSize: '2rem' }}></i>
+      <div className="appLoadingWrap">
+        <i className="pi pi-spin pi-spinner" aria-hidden></i>
       </div>
     )
   }
@@ -84,12 +88,11 @@ function App() {
             </ProtectedRoute>
           } 
         />
-        {/* Coming Soon Routes */}
         <Route 
           path="/grn/details" 
           element={
             <ProtectedRoute>
-              <ComingSoon />
+              <GRNDetails />
             </ProtectedRoute>
           } 
         />
@@ -97,7 +100,7 @@ function App() {
           path="/asn/details" 
           element={
             <ProtectedRoute>
-              <ComingSoon />
+              <ASNDetails />
             </ProtectedRoute>
           } 
         />
@@ -120,24 +123,32 @@ function App() {
         <Route 
           path="/suppliers/registration" 
           element={
-            <ProtectedRoute>
-              <ComingSoon />
+            <ProtectedRoute requiredRole={['admin', 'manager']}>
+              <SupplierRegistration />
             </ProtectedRoute>
           } 
         />
         <Route 
           path="/finance/dashboard" 
           element={
-            <ProtectedRoute>
-              <ComingSoon />
+            <ProtectedRoute requiredRole={['admin', 'manager', 'finance', 'viewer']}>
+              <FinanceDashboard />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/payments/approve" 
+          element={
+            <ProtectedRoute requiredRole={['admin', 'manager', 'finance']}>
+              <ApprovePayments />
             </ProtectedRoute>
           } 
         />
         <Route 
           path="/payments/ready" 
           element={
-            <ProtectedRoute>
-              <ComingSoon />
+            <ProtectedRoute requiredRole={['admin', 'manager', 'finance']}>
+              <ReadyForPayments />
             </ProtectedRoute>
           } 
         />
@@ -145,7 +156,7 @@ function App() {
           path="/payments/history" 
           element={
             <ProtectedRoute>
-              <ComingSoon />
+              <PaymentHistory />
             </ProtectedRoute>
           } 
         />
@@ -153,7 +164,7 @@ function App() {
           path="/reports/invoices" 
           element={
             <ProtectedRoute>
-              <ComingSoon />
+              <InvoiceReports />
             </ProtectedRoute>
           } 
         />
@@ -161,7 +172,7 @@ function App() {
           path="/reports/financial" 
           element={
             <ProtectedRoute>
-              <ComingSoon />
+              <FinancialReports />
             </ProtectedRoute>
           } 
         />
@@ -169,7 +180,7 @@ function App() {
           path="/reports/suppliers" 
           element={
             <ProtectedRoute>
-              <ComingSoon />
+              <SupplierReports />
             </ProtectedRoute>
           } 
         />

@@ -18,6 +18,25 @@ import {
   getOwnerDetailsRoute,
   updateOwnerDetailsRoute
 } from './ownerDetails.js'
+import {
+  getSuppliersRoute,
+  getSupplierByIdRoute,
+  createSupplierRoute,
+  updateSupplierRoute,
+  deleteSupplierRoute
+} from './supplierManagement.js'
+import {
+  getCumulativeQuantities,
+  validateInvoiceAgainstPoGrn,
+  validateAndUpdateInvoiceStatus,
+  applyStandardValidation,
+  proceedToPaymentFromMismatch,
+  moveToDebitNoteApproval,
+  forceClosePo,
+  exceptionApprove,
+  debitNoteApprove,
+  updatePoStatusFromCumulative
+} from './poInvoiceValidation.js'
 
 const app = express()
 
@@ -716,14 +735,60 @@ router.get('/auth/me', authenticateToken, async (req, res) => {
   }
 })
 
+// Invoices pending debit note approval – must be before /invoices/:id so "pending-debit-note" is not treated as id
+router.get('/invoices/pending-debit-note', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), async (req, res) => {
+  try {
+    // Query invoices first (no dependency on debit_notes table – works even if table not created yet)
+    // Match both 'debit_note_approval' and human-readable variants like 'Debit Note Approval'
+    const { rows } = await pool.query(
+      `SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.total_amount, i.status,
+              i.po_id, po.po_number, COALESCE(s.supplier_name, '') AS supplier_name
+       FROM invoices i
+       LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+       LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+       WHERE REPLACE(LOWER(TRIM(COALESCE(i.status, ''))), ' ', '_') = 'debit_note_approval'
+       ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC`
+    )
+    // Optionally attach debit note file names from debit_notes table (if table exists)
+    let fileNamesByInvoice = {}
+    try {
+      const { rows: dnRows } = await pool.query(
+        `SELECT invoice_id, file_name FROM debit_notes ORDER BY uploaded_at DESC`
+      )
+      for (const r of dnRows) {
+        if (fileNamesByInvoice[r.invoice_id] == null) fileNamesByInvoice[r.invoice_id] = r.file_name
+      }
+    } catch (_dnErr) {
+      // debit_notes table may not exist yet – ignore, list still works
+    }
+    const result = []
+    for (const inv of rows) {
+      const validation = await validateInvoiceAgainstPoGrn(inv.invoice_id)
+      result.push({
+        ...inv,
+        debit_note_file_name: fileNamesByInvoice[inv.invoice_id] || null,
+        validation: {
+          reason: validation.validationFailureReason || validation.reason,
+          thisInvQty: validation.thisInvQty,
+          poQty: validation.poQty,
+          grnQty: validation.grnQty
+        }
+      })
+    }
+    res.json(result)
+  } catch (err) {
+    console.error('Pending debit note list error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
 
-// Get invoice PDF
+// Get invoice PDF (main invoice attachment)
 router.get('/invoices/:id/pdf', async (req, res) => {
   try {
     const { id } = req.params
     const { rows } = await pool.query(
       `SELECT file_name, file_data FROM invoice_attachments 
-       WHERE invoice_id = $1 
+       WHERE invoice_id = $1 AND COALESCE(attachment_type, 'invoice') = 'invoice'
        ORDER BY uploaded_at DESC 
        LIMIT 1`,
       [id]
@@ -736,6 +801,50 @@ router.get('/invoices/:id/pdf', async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf')
     res.setHeader('Content-Disposition', `inline; filename="${rows[0].file_name}"`)
     res.send(rows[0].file_data)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Get debit note PDF for an invoice
+router.get('/invoices/:id/debit-note-pdf', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { rows } = await pool.query(
+      `SELECT file_name, file_data FROM debit_notes
+       WHERE invoice_id = $1
+       ORDER BY uploaded_at DESC LIMIT 1`,
+      [id]
+    )
+    if (rows.length === 0 || !rows[0].file_data) {
+      return res.status(404).json({ error: 'not_found' })
+    }
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `inline; filename="${rows[0].file_name}"`)
+    res.send(rows[0].file_data)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Upload debit note PDF for an invoice
+router.post('/invoices/:id/debit-note-pdf', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), upload.single('pdf'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'PDF file is required' })
+    }
+    const fileName = req.file.originalname || `debit-note-${id}.pdf`
+    const buffer = req.file.buffer
+
+    await pool.query(`DELETE FROM debit_notes WHERE invoice_id = $1`, [id])
+    await pool.query(
+      `INSERT INTO debit_notes (invoice_id, file_name, file_data)
+       VALUES ($1, $2, $3)`,
+      [id, fileName, buffer]
+    )
+    res.json({ success: true, file_name: fileName })
   } catch (err) {
     res.status(500).json({ error: 'server_error', message: err.message })
   }
@@ -757,10 +866,10 @@ router.get('/invoices/:id', async (req, res) => {
          s.mobile as supplier_mobile,
          po.po_id,
          po.po_number,
-         po.po_date,
-         po.bill_to,
-         po.bill_to_address,
-         po.bill_to_gstin,
+         po.date AS po_date,
+         NULL::TEXT AS bill_to,
+         NULL::TEXT AS bill_to_address,
+         NULL::TEXT AS bill_to_gstin,
          po.status as po_status
        FROM invoices i
        LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
@@ -781,19 +890,24 @@ router.get('/invoices/:id', async (req, res) => {
       [id]
     )
     
-    // Get PO line items if PO exists
+    // Get PO line items if PO exists (all columns from purchase_order_lines)
     let poLineItems = []
     if (invoice.po_id) {
       const { rows: poLines } = await pool.query(
         `SELECT 
            pol.po_line_id,
            pol.po_id,
-           pol.item_name,
-           pol.item_description,
-           pol.hsn_sac,
-           pol.uom,
-           pol.quantity,
-           pol.sequence_number
+           pol.sequence_number,
+           pol.item_id,
+           COALESCE(pol.description1, pol.item_id) AS item_name,
+           pol.description1 AS item_description,
+           pol.qty AS quantity,
+           pol.unit_cost,
+           pol.disc_pct,
+           pol.raw_material,
+           pol.process_description,
+           pol.norms,
+           pol.process_cost
          FROM purchase_order_lines pol
          WHERE pol.po_id = $1
          ORDER BY pol.sequence_number`,
@@ -878,7 +992,7 @@ router.post('/invoices', async (req, res) => {
     let poLineItems = []
     if (poId) {
       const poLinesResult = await client.query(
-        'SELECT po_line_id, item_name, sequence_number FROM purchase_order_lines WHERE po_id = $1 ORDER BY sequence_number',
+        'SELECT po_line_id, COALESCE(description1, item_id) AS item_name, sequence_number FROM purchase_order_lines WHERE po_id = $1 ORDER BY sequence_number',
         [poId]
       )
       poLineItems = poLinesResult.rows
@@ -1034,7 +1148,7 @@ router.put('/invoices/:id', async (req, res) => {
     let poLineItems = []
     if (finalPoId) {
       const poLinesResult = await client.query(
-        'SELECT po_line_id, item_name, sequence_number FROM purchase_order_lines WHERE po_id = $1 ORDER BY sequence_number',
+        'SELECT po_line_id, COALESCE(description1, item_id) AS item_name, sequence_number FROM purchase_order_lines WHERE po_id = $1 ORDER BY sequence_number',
         [finalPoId]
       )
       poLineItems = poLinesResult.rows
@@ -1109,14 +1223,14 @@ router.put('/invoices/:id', async (req, res) => {
 // Get all invoices with search and filter
 router.get('/invoices', async (req, res) => {
   try {
-    const { 
-      limit = 100, 
+    const {
+      limit = 100,
       offset = 0,
       status,
       invoiceNumber,
       poNumber
     } = req.query
-    
+
     let query = `
       SELECT 
         i.invoice_id,
@@ -1132,20 +1246,31 @@ router.get('/invoices', async (req, res) => {
         s.supplier_id,
         po.po_id,
         po.po_number,
-        po.po_date
+        po.date AS po_date
       FROM invoices i
       LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
       LEFT JOIN purchase_orders po ON po.po_id = i.po_id
       WHERE 1=1
     `
-    
+
     const params = []
     let paramCount = 0
-    
+
     if (status) {
-      paramCount++
-      query += ` AND i.status = $${paramCount}`
-      params.push(status)
+      const statusList = Array.isArray(status)
+        ? status
+        : String(status).split(',').map((s) => s.trim()).filter(Boolean)
+      if (statusList.length > 0) {
+        const statusNormalized = statusList.flatMap((s) =>
+          (s.toLowerCase() === 'open' ? ['open', 'pending'] : [s])
+        )
+        const placeholders = statusNormalized.map(() => {
+          paramCount++
+          return `$${paramCount}`
+        }).join(', ')
+        query += ` AND i.status IN (${placeholders})`
+        params.push(...statusNormalized)
+      }
     }
     
     if (invoiceNumber) {
@@ -1170,30 +1295,115 @@ router.get('/invoices', async (req, res) => {
   }
 })
 
-// Get purchase order by PO number
-// Get all purchase orders
+// List all GRN (with po_number from purchase_orders)
+router.get('/grn', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT 
+         g.id,
+         g.po_id,
+         po.po_number,
+         g.supplier_id,
+         g.supplier_name,
+         g.grn_no,
+         g.grn_date,
+         g.grn_line,
+         g.po_no,
+         g.dc_no,
+         g.dc_date,
+         g.unit,
+         g.item,
+         g.description_1,
+         g.uom,
+         g.grn_qty,
+         g.accepted_qty,
+         g.unit_cost,
+         g.header_status,
+         g.line_status,
+         g.gate_entry_no,
+         g.supplier_doc_no,
+         g.supplier_doc_date,
+         g.supplier,
+         g.exchange_rate,
+         g.grn_year,
+         g.grn_period,
+         g.po_pfx,
+         g.po_line
+       FROM grn g
+       LEFT JOIN purchase_orders po ON po.po_id = g.po_id
+       ORDER BY g.grn_date DESC NULLS LAST, g.id DESC`
+    )
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching GRN:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// List all ASN (with po_number from purchase_orders, supplier name from suppliers table)
+router.get('/asn', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT 
+         a.id,
+         a.po_id,
+         po.po_number,
+         a.supplier_id,
+         COALESCE(s.supplier_name, a.supplier_name) AS supplier_name,
+         a.asn_no,
+         a.supplier,
+         a.dc_no,
+         a.dc_date,
+         a.inv_no,
+         a.inv_date,
+         a.lr_no,
+         a.lr_date,
+         a.unit,
+         a.transporter,
+         a.transporter_name,
+         a.doc_no_date,
+         a.status
+       FROM asn a
+       LEFT JOIN purchase_orders po ON po.po_id = a.po_id
+       LEFT JOIN suppliers s ON s.supplier_id = a.supplier_id
+       ORDER BY a.dc_date DESC NULLS LAST, a.id DESC`
+    )
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching ASN:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Get all purchase orders (columns match current schema: date, terms, status; alias po_date for frontend)
 router.get('/purchase-orders', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT 
          po.po_id,
          po.po_number,
-         po.po_date,
-         po.bill_to,
-         po.bill_to_address,
-         po.bill_to_gstin,
+         po.date AS po_date,
+         po.unit,
+         po.ref_unit,
+         po.pfx,
+         po.amd_no,
+         po.suplr_id,
+         po.supplier_id,
+         po.terms,
          po.status,
-         po.terms_and_conditions,
-         po.payment_terms,
-         po.delivery_terms,
-         po.created_at,
-         po.updated_at,
          s.supplier_name,
-         s.supplier_id,
-         (SELECT COUNT(*) FROM purchase_order_lines pol WHERE pol.po_id = po.po_id) as line_item_count
+         (SELECT COUNT(*) FROM purchase_order_lines pol WHERE pol.po_id = po.po_id) AS line_item_count,
+         NULL::TEXT AS bill_to,
+         NULL::TEXT AS bill_to_address,
+         NULL::TEXT AS bill_to_gstin,
+         NULL::TEXT AS terms_and_conditions,
+         NULL::TEXT AS payment_terms,
+         NULL::TEXT AS delivery_terms,
+         NULL::TIMESTAMPTZ AS created_at,
+         NULL::TIMESTAMPTZ AS updated_at
        FROM purchase_orders po
        LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
-       ORDER BY po.po_date DESC, po.created_at DESC`
+       ORDER BY po.date DESC, po.po_id DESC`
     )
     
     res.json(result.rows)
@@ -1202,7 +1412,168 @@ router.get('/purchase-orders', async (req, res) => {
   }
 })
 
-// Get purchase order line items by PO ID
+// Incomplete POs: missing Invoice/GRN/ASN OR status = partially_fulfilled (Force Close option)
+// Also returns pending_invoice_id and pending_invoice_status when PO has invoice in debit_note_approval or exception_approval (for inline detail + reason)
+router.get('/purchase-orders/incomplete', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT 
+         po.po_id,
+         po.po_number,
+         po.date AS po_date,
+         po.status AS po_status,
+         COALESCE(s.supplier_name, po.suplr_id::TEXT, 'N/A') AS supplier_name,
+         EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id) AS has_invoice,
+         EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id) AS has_grn,
+         EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id) AS has_asn,
+         (po.status = 'partially_fulfilled') AS can_force_close,
+         ARRAY_REMOVE(ARRAY[
+           CASE WHEN NOT EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id) THEN 'Invoice' END,
+           CASE WHEN NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id) THEN 'GRN' END,
+           CASE WHEN NOT EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id) THEN 'ASN' END
+         ], NULL) AS missing_items,
+         (SELECT i.invoice_id FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_id,
+         (SELECT LOWER(TRIM(i.status)) FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_status
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
+       WHERE po.status = 'partially_fulfilled'
+          OR NOT (
+         EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
+         AND EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
+         AND EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
+       )
+       ORDER BY po.date DESC, po.po_id DESC`
+    )
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching incomplete POs:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Cumulative quantities per PO (invoice, GRN, PO totals) for validation / UI
+router.get('/purchase-orders/:poId/cumulative', async (req, res) => {
+  try {
+    const poId = parseInt(req.params.poId, 10)
+    if (Number.isNaN(poId)) return res.status(400).json({ error: 'invalid_po_id' })
+    const cum = await getCumulativeQuantities(poId)
+    res.json(cum)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Force close PO (partially_fulfilled → fulfilled)
+router.patch('/purchase-orders/:poId/force-close', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const poId = parseInt(req.params.poId, 10)
+    if (Number.isNaN(poId)) return res.status(400).json({ error: 'invalid_po_id' })
+    await client.query('BEGIN')
+    const result = await forceClosePo(client, poId)
+    await client.query('COMMIT')
+    res.json(result)
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    if (err.message?.includes('not found')) return res.status(404).json({ error: 'po_not_found', message: err.message })
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Validation summary (read-only): reason and quantities for debit note / validation – for UI to show why invoice is in debit_note_approval
+router.get('/invoices/:id/validation-summary', authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    const result = await validateInvoiceAgainstPoGrn(id)
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Validate invoice against PO/GRN and apply status (standard / debit note / exception)
+router.post('/invoices/:id/validate', authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    const result = await validateAndUpdateInvoiceStatus(id)
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Resolve validation mismatch: proceed to payment or send to debit note
+router.post('/invoices/:id/validate-resolution', authenticateToken, async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    const { resolution } = req.body || {}
+    if (resolution !== 'proceed_to_payment' && resolution !== 'send_to_debit_note') {
+      return res.status(400).json({ error: 'invalid_resolution', message: 'resolution must be proceed_to_payment or send_to_debit_note' })
+    }
+    await client.query('BEGIN')
+    if (resolution === 'proceed_to_payment') {
+      const applied = await proceedToPaymentFromMismatch(client, id)
+      await client.query('COMMIT')
+      return res.json({ action: 'ready_for_payment', ...applied })
+    }
+    await moveToDebitNoteApproval(client, id)
+    await client.query('COMMIT')
+    return res.json({ action: 'debit_note_approval', invoiceStatus: 'debit_note_approval' })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    if (err.message?.includes('not found')) return res.status(404).json({ error: 'invoice_not_found', message: err.message })
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Exception approve: invoice for already-fulfilled PO → ready_for_payment
+router.patch('/invoices/:id/exception-approve', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    await client.query('BEGIN')
+    const result = await exceptionApprove(client, id)
+    await client.query('COMMIT')
+    res.json(result)
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    if (err.message?.includes('not found')) return res.status(404).json({ error: 'invoice_not_found', message: err.message })
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Debit note approve: set debit_note_value, invoice → ready_for_payment, PO → partially_fulfilled
+router.patch('/invoices/:id/debit-note-approve', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    const { debit_note_value } = req.body || {}
+    await client.query('BEGIN')
+    const result = await debitNoteApprove(client, id, debit_note_value != null ? parseFloat(debit_note_value) : null)
+    await client.query('COMMIT')
+    res.json(result)
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    if (err.message?.includes('not found')) return res.status(404).json({ error: 'invoice_not_found', message: err.message })
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Get purchase order line items by PO ID – all columns from purchase_order_lines schema only
 router.get('/purchase-orders/:poId/line-items', async (req, res) => {
   try {
     const { poId } = req.params
@@ -1210,12 +1581,16 @@ router.get('/purchase-orders/:poId/line-items', async (req, res) => {
       `SELECT 
          pol.po_line_id,
          pol.po_id,
-         pol.item_name,
-         pol.item_description,
-         pol.hsn_sac,
-         pol.uom,
-         pol.quantity,
-         pol.sequence_number
+         pol.sequence_number,
+         pol.item_id,
+         pol.description1,
+         pol.qty,
+         pol.unit_cost,
+         pol.disc_pct,
+         pol.raw_material,
+         pol.process_description,
+         pol.norms,
+         pol.process_cost
        FROM purchase_order_lines pol
        WHERE pol.po_id = $1
        ORDER BY pol.sequence_number`,
@@ -1230,18 +1605,27 @@ router.get('/purchase-orders/:poId/line-items', async (req, res) => {
 
 router.get('/purchase-orders/:poNumber', async (req, res) => {
   try {
-    // Decode the PO number in case it's URL encoded
     let { poNumber } = req.params
     poNumber = decodeURIComponent(poNumber)
     
-    // Get purchase order with supplier info
     const poResult = await pool.query(
       `SELECT 
-         po.*,
+         po.po_id,
+         po.po_number,
+         po.date AS po_date,
+         po.unit,
+         po.ref_unit,
+         po.pfx,
+         po.amd_no,
+         po.suplr_id,
+         po.supplier_id,
+         po.terms,
+         po.status,
          s.supplier_name
        FROM purchase_orders po
        LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
-       WHERE po.po_number = $1`,
+       WHERE po.po_number = $1 AND (po.amd_no = 0 OR po.amd_no IS NULL)
+       LIMIT 1`,
       [poNumber]
     )
     
@@ -1254,17 +1638,20 @@ router.get('/purchase-orders/:poNumber', async (req, res) => {
     
     const po = poResult.rows[0]
     
-    // Get purchase order lines with all fields including po_line_id
     const linesResult = await pool.query(
       `SELECT 
          pol.po_line_id,
          pol.po_id,
-         pol.item_name,
-         pol.item_description,
-         pol.hsn_sac,
-         pol.uom,
-         pol.quantity,
-         pol.sequence_number
+         pol.sequence_number,
+         pol.item_id,
+         pol.description1,
+         pol.qty,
+         pol.unit_cost,
+         pol.disc_pct,
+         pol.raw_material,
+         pol.process_description,
+         pol.norms,
+         pol.process_cost
        FROM purchase_order_lines pol
        WHERE pol.po_id = $1
        ORDER BY pol.sequence_number`,
@@ -1317,7 +1704,14 @@ router.get('/owner', async (req, res) => {
   }
 })
 
-// Get supplier details by name (for validation)
+// Supplier CRUD (admin/manager) – must be before /suppliers/:supplierName
+router.get('/suppliers', authenticateToken, authorize(['admin', 'manager']), getSuppliersRoute)
+router.get('/suppliers/by-id/:id', authenticateToken, authorize(['admin', 'manager']), getSupplierByIdRoute)
+router.post('/suppliers', authenticateToken, authorize(['admin', 'manager']), createSupplierRoute)
+router.put('/suppliers/:id', authenticateToken, authorize(['admin', 'manager']), updateSupplierRoute)
+router.delete('/suppliers/:id', authenticateToken, authorize(['admin', 'manager']), deleteSupplierRoute)
+
+// Get supplier details by name (for validation / invoice flow)
 router.get('/suppliers/:supplierName', async (req, res) => {
   try {
     const { supplierName } = req.params
@@ -1542,6 +1936,540 @@ router.put('/users/:id/menu-access', authenticateToken, authorize(['admin']), up
 // Owner Details Routes (Admin only - view and edit, no create)
 router.get('/owners', authenticateToken, authorize(['admin']), getOwnerDetailsRoute)
 router.put('/owners/:id', authenticateToken, authorize(['admin']), updateOwnerDetailsRoute)
+
+// ========== Reports & Analytics APIs ==========
+// Each report API returns only data for its scope. No duplication of totals across reports.
+
+// Invoice Report only: volume, status, and date distribution (no amounts – see Financial)
+router.get('/reports/invoices-summary', authenticateToken, async (req, res) => {
+  try {
+    const [summary, byMonth, byStatus] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total_invoices,
+          COALESCE(AVG(total_amount), 0)::numeric(18,2) AS avg_amount
+        FROM invoices
+      `),
+      pool.query(`
+        SELECT
+          TO_CHAR(invoice_date, 'Mon YYYY') AS month_label,
+          DATE_TRUNC('month', invoice_date)::date AS month_date,
+          COUNT(*)::int AS count
+        FROM invoices
+        WHERE invoice_date IS NOT NULL
+        GROUP BY DATE_TRUNC('month', invoice_date), TO_CHAR(invoice_date, 'Mon YYYY')
+        ORDER BY month_date ASC
+      `),
+      pool.query(`
+        SELECT status, COUNT(*)::int AS count
+        FROM invoices
+        GROUP BY status
+        ORDER BY count DESC
+      `)
+    ])
+    res.json({
+      summary: summary.rows[0],
+      byMonth: byMonth.rows,
+      byStatus: byStatus.rows
+    })
+  } catch (err) {
+    console.error('Invoice report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Supplier Report only: supplier counts, POs, activity (no total invoiced – see Financial)
+router.get('/reports/suppliers-summary', authenticateToken, async (req, res) => {
+  try {
+    const [summary, suppliers] = await Promise.all([
+      pool.query(`
+        SELECT
+          (SELECT COUNT(*) FROM suppliers)::int AS total_suppliers,
+          (SELECT COUNT(*) FROM purchase_orders)::int AS total_pos,
+          (SELECT COUNT(*) FROM suppliers s WHERE EXISTS (SELECT 1 FROM invoices i WHERE i.supplier_id = s.supplier_id))::int AS active_suppliers,
+          (SELECT COUNT(*) FROM suppliers s WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.supplier_id = s.supplier_id))::int AS suppliers_with_no_invoices
+      `),
+      pool.query(`
+        SELECT
+          s.supplier_id,
+          s.supplier_name,
+          s.city,
+          s.gst_number,
+          (SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id = s.supplier_id)::int AS po_count,
+          (SELECT COUNT(*) FROM invoices i WHERE i.supplier_id = s.supplier_id)::int AS invoice_count,
+          COALESCE((SELECT SUM(i.total_amount) FROM invoices i WHERE i.supplier_id = s.supplier_id), 0)::numeric(18,2) AS total_invoice_amount
+        FROM suppliers s
+        ORDER BY total_invoice_amount DESC NULLS LAST
+      `)
+    ])
+    res.json({
+      summary: summary.rows[0],
+      suppliers: suppliers.rows
+    })
+  } catch (err) {
+    console.error('Supplier report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Financial Reports: totals, by month (amount & tax), trends
+router.get('/reports/financial-summary', authenticateToken, async (req, res) => {
+  try {
+    const [summary, byMonth] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total_invoices,
+          COALESCE(SUM(total_amount), 0)::numeric(18,2) AS total_billed,
+          COALESCE(SUM(tax_amount), 0)::numeric(18,2) AS total_tax,
+          COALESCE(AVG(total_amount), 0)::numeric(18,2) AS avg_invoice_amount
+        FROM invoices
+      `),
+      pool.query(`
+        SELECT
+          TO_CHAR(invoice_date, 'Mon YYYY') AS month_label,
+          DATE_TRUNC('month', invoice_date)::date AS month_date,
+          COUNT(*)::int AS invoice_count,
+          COALESCE(SUM(total_amount), 0)::numeric(18,2) AS amount,
+          COALESCE(SUM(tax_amount), 0)::numeric(18,2) AS tax_amount
+        FROM invoices
+        WHERE invoice_date IS NOT NULL
+        GROUP BY DATE_TRUNC('month', invoice_date), TO_CHAR(invoice_date, 'Mon YYYY')
+        ORDER BY month_date ASC
+      `)
+    ])
+    res.json({
+      summary: summary.rows[0],
+      byMonth: byMonth.rows
+    })
+  } catch (err) {
+    console.error('Financial report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Procurement / PO summary (for Reports & Analytics)
+router.get('/reports/procurement-summary', authenticateToken, async (req, res) => {
+  try {
+    const [summary, byStatus, incompleteCount] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total_pos,
+          (SELECT COUNT(*) FROM grn)::int AS total_grn,
+          (SELECT COUNT(*) FROM asn)::int AS total_asn,
+          (SELECT COUNT(*) FROM invoices)::int AS total_invoices
+        FROM purchase_orders
+      `),
+      pool.query(`
+        SELECT status, COUNT(*)::int AS count
+        FROM purchase_orders
+        GROUP BY status
+        ORDER BY count DESC
+      `),
+      pool.query(`
+        SELECT COUNT(DISTINCT po.po_id)::int AS count
+        FROM purchase_orders po
+        WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
+           OR NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
+           OR NOT EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
+      `)
+    ])
+    res.json({
+      summary: { ...summary.rows[0], incomplete_po_count: incompleteCount.rows[0]?.count ?? 0 },
+      byStatus: byStatus.rows
+    })
+  } catch (err) {
+    console.error('Procurement report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Finance Dashboard: single API for financial summary, payment pipeline, and finance analytics
+router.get('/reports/dashboard', authenticateToken, async (req, res) => {
+  try {
+    const [financial, invoiceByStatus, paymentCounts, paymentAmounts, debitNote, recentPayments, topSuppliers, byMonth] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total_invoices,
+          COALESCE(SUM(total_amount), 0)::numeric(18,2) AS total_billed,
+          COALESCE(SUM(tax_amount), 0)::numeric(18,2) AS total_tax,
+          COALESCE(AVG(total_amount), 0)::numeric(18,2) AS avg_invoice_amount,
+          COALESCE(SUM(CASE WHEN invoice_date >= DATE_TRUNC('month', CURRENT_DATE)::date THEN total_amount ELSE 0 END), 0)::numeric(18,2) AS current_month_billed,
+          COALESCE(SUM(CASE WHEN invoice_date >= DATE_TRUNC('year', CURRENT_DATE)::date THEN total_amount ELSE 0 END), 0)::numeric(18,2) AS ytd_billed
+        FROM invoices
+      `),
+      pool.query(`
+        SELECT LOWER(TRIM(status)) AS status, COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0)::numeric(18,2) AS total_amount
+        FROM invoices
+        GROUP BY status
+        ORDER BY count DESC
+      `),
+      Promise.all([
+        pool.query(`
+          SELECT COUNT(*)::int AS count FROM invoices i
+          LEFT JOIN payment_approvals pa ON pa.invoice_id = i.invoice_id
+          WHERE LOWER(TRIM(i.status)) = 'ready_for_payment'
+            AND (pa.id IS NULL OR LOWER(TRIM(pa.status)) = 'pending_approval')
+        `),
+        pool.query(`SELECT COUNT(*)::int AS count FROM payment_approvals WHERE LOWER(TRIM(status)) = 'approved'`),
+        pool.query(`SELECT COUNT(*)::int AS count FROM payment_approvals WHERE LOWER(TRIM(status)) = 'payment_done'`)
+      ]),
+      Promise.all([
+        pool.query(`
+          SELECT COALESCE(SUM(CASE WHEN i.debit_note_value IS NOT NULL AND i.debit_note_value > 0 THEN i.debit_note_value ELSE i.total_amount END), 0)::numeric(18,2) AS amount
+          FROM invoices i
+          LEFT JOIN payment_approvals pa ON pa.invoice_id = i.invoice_id
+          WHERE LOWER(TRIM(i.status)) = 'ready_for_payment' AND (pa.id IS NULL OR LOWER(TRIM(pa.status)) = 'pending_approval')
+        `),
+        pool.query(`
+          SELECT COALESCE(SUM(COALESCE(debit_note_value, total_amount)), 0)::numeric(18,2) AS amount
+          FROM payment_approvals WHERE LOWER(TRIM(status)) = 'approved'
+        `),
+        pool.query(`
+          SELECT COALESCE(SUM(COALESCE(debit_note_value, total_amount)), 0)::numeric(18,2) AS amount
+          FROM payment_approvals WHERE LOWER(TRIM(status)) = 'payment_done'
+        `)
+      ]),
+      pool.query(`
+        SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0)::numeric(18,2) AS total_amount
+        FROM invoices WHERE LOWER(TRIM(status)) = 'debit_note_approval'
+      `),
+      pool.query(`
+        SELECT pa.id, i.invoice_number, s.supplier_name,
+               COALESCE(pa.debit_note_value, pa.total_amount, i.total_amount)::numeric(18,2) AS amount,
+               pa.payment_done_at
+        FROM payment_approvals pa
+        JOIN invoices i ON i.invoice_id = pa.invoice_id
+        LEFT JOIN suppliers s ON s.supplier_id = pa.supplier_id
+        WHERE LOWER(TRIM(pa.status)) = 'payment_done' AND pa.payment_done_at IS NOT NULL
+        ORDER BY pa.payment_done_at DESC
+        LIMIT 10
+      `),
+      pool.query(`
+        SELECT s.supplier_name, COUNT(i.invoice_id)::int AS invoice_count, COALESCE(SUM(i.total_amount), 0)::numeric(18,2) AS total_amount
+        FROM suppliers s
+        JOIN invoices i ON i.supplier_id = s.supplier_id
+        GROUP BY s.supplier_id, s.supplier_name
+        ORDER BY total_amount DESC NULLS LAST
+        LIMIT 10
+      `),
+      pool.query(`
+        SELECT
+          TO_CHAR(invoice_date, 'Mon YYYY') AS month_label,
+          DATE_TRUNC('month', invoice_date)::date AS month_date,
+          COUNT(*)::int AS invoice_count,
+          COALESCE(SUM(total_amount), 0)::numeric(18,2) AS amount,
+          COALESCE(SUM(tax_amount), 0)::numeric(18,2) AS tax_amount
+        FROM invoices
+        WHERE invoice_date IS NOT NULL
+        GROUP BY DATE_TRUNC('month', invoice_date), TO_CHAR(invoice_date, 'Mon YYYY')
+        ORDER BY month_date DESC
+        LIMIT 12
+      `)
+    ])
+    const [pendingApproval, ready, paymentDone] = paymentCounts.map(r => r.rows[0]?.count ?? 0)
+    const finRow = financial.rows[0]
+    const totalBilled = parseFloat(finRow?.total_billed ?? 0)
+    const totalTax = parseFloat(finRow?.total_tax ?? 0)
+    const taxPct = totalBilled > 0 ? ((totalTax / totalBilled) * 100).toFixed(2) : '0.00'
+    res.json({
+      financial: {
+        ...finRow,
+        tax_pct: taxPct
+      },
+      invoiceByStatus: invoiceByStatus.rows,
+      payments: {
+        pending_approval_count: pendingApproval,
+        ready_count: ready,
+        payment_done_count: paymentDone,
+        pending_approval_amount: paymentAmounts[0].rows[0]?.amount ?? 0,
+        ready_amount: paymentAmounts[1].rows[0]?.amount ?? 0,
+        payment_done_amount: paymentAmounts[2].rows[0]?.amount ?? 0
+      },
+      debitNote: debitNote.rows[0] || { count: 0, total_amount: '0' },
+      recentPayments: recentPayments.rows,
+      topSuppliers: topSuppliers.rows,
+      procurement: {
+        total_pos: (await pool.query('SELECT COUNT(*)::int AS c FROM purchase_orders')).rows[0]?.c ?? 0,
+        total_grn: (await pool.query('SELECT COUNT(*)::int AS c FROM grn')).rows[0]?.c ?? 0,
+        total_asn: (await pool.query('SELECT COUNT(*)::int AS c FROM asn')).rows[0]?.c ?? 0,
+        total_invoices: finRow?.total_invoices ?? 0,
+        incomplete_po_count: (await pool.query(`
+          SELECT COUNT(*)::int AS c FROM purchase_orders po
+          WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
+            OR NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
+            OR NOT EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
+        `)).rows[0]?.c ?? 0
+      },
+      byMonth: byMonth.rows.reverse()
+    })
+  } catch (err) {
+    console.error('Dashboard report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// ========== Payment Approval & Ready for Payments ==========
+
+// List invoices ready_for_payment that are pending manager approval (no payment_approvals or status pending_approval)
+router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  try {
+    const { rows: invoices } = await pool.query(
+      `SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.total_amount, i.tax_amount, i.status,
+              i.payment_due_date, i.debit_note_value, i.po_id, i.supplier_id, i.po_number,
+              s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan,
+              s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
+              s.bank_account_name, s.bank_account_number, s.bank_ifsc_code, s.bank_name, s.branch_name,
+              po.po_number AS po_number_ref, po.date AS po_date, po.terms AS po_terms, po.status AS po_status,
+              pa.id AS payment_approval_id, pa.status AS payment_approval_status
+       FROM invoices i
+       LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+       LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+       LEFT JOIN payment_approvals pa ON pa.invoice_id = i.invoice_id
+       WHERE i.status = 'ready_for_payment'
+         AND (pa.id IS NULL OR pa.status = 'pending_approval')
+       ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC`
+    )
+    const result = []
+    for (const inv of invoices) {
+      let grnList = []
+      let asnList = []
+      if (inv.po_id) {
+        const [grnRes, asnRes] = await Promise.all([
+          pool.query(
+            `SELECT g.id, g.grn_no, g.grn_date, g.dc_no, g.dc_date, g.grn_qty, g.accepted_qty, g.unit_cost
+             FROM grn g WHERE g.po_id = $1 ORDER BY g.grn_date DESC NULLS LAST`,
+            [inv.po_id]
+          ),
+          pool.query(
+            `SELECT a.id, a.asn_no, a.dc_no, a.dc_date, a.inv_no, a.inv_date, a.lr_no, a.transporter_name
+             FROM asn a WHERE a.po_id = $1 ORDER BY a.dc_date DESC NULLS LAST`,
+            [inv.po_id]
+          )
+        ])
+        grnList = grnRes.rows
+        asnList = asnRes.rows
+      }
+      result.push({
+        ...inv,
+        grn_list: grnList,
+        asn_list: asnList
+      })
+    }
+    res.json(result)
+  } catch (err) {
+    console.error('Pending approval list error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Approve payment: create/update payment_approvals to approved, snapshot banking (from body or supplier)
+router.post('/payments/approve', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const userId = req.user?.user_id
+    const { invoiceId, bank_account_name, bank_account_number, bank_ifsc_code, bank_name, branch_name, notes } = req.body || {}
+    if (!invoiceId) return res.status(400).json({ error: 'invoiceId_required' })
+    const invId = parseInt(invoiceId, 10)
+    if (Number.isNaN(invId)) return res.status(400).json({ error: 'invalid_invoice_id' })
+
+    await client.query('BEGIN')
+
+    const inv = await client.query(
+      `SELECT i.invoice_id, i.po_id, i.supplier_id, i.total_amount, i.debit_note_value,
+              s.bank_account_name AS s_bank_name, s.bank_account_number AS s_bank_no,
+              s.bank_ifsc_code AS s_ifsc, s.bank_name AS s_bank, s.branch_name AS s_branch
+       FROM invoices i
+       LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+       WHERE i.invoice_id = $1 AND i.status = 'ready_for_payment'`,
+      [invId]
+    )
+    if (inv.rows.length === 0) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'invoice_not_found', message: 'Invoice not found or not ready for payment' })
+    }
+    const row = inv.rows[0]
+    const totalAmount = row.debit_note_value != null ? row.debit_note_value : row.total_amount
+    const bankName = bank_account_name != null ? bank_account_name : row.s_bank_name
+    const bankNo = bank_account_number != null ? bank_account_number : row.s_bank_no
+    const ifsc = bank_ifsc_code != null ? bank_ifsc_code : row.s_ifsc
+    const bank = bank_name != null ? bank_name : row.s_bank
+    const branch = branch_name != null ? branch_name : row.s_branch
+
+    await client.query(
+      `INSERT INTO payment_approvals
+        (invoice_id, po_id, supplier_id, status, total_amount, debit_note_value,
+         bank_account_name, bank_account_number, bank_ifsc_code, bank_name, branch_name,
+         approved_by, approved_at, notes, updated_at)
+       VALUES ($1, $2, $3, 'approved', $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12, NOW())
+       ON CONFLICT (invoice_id) DO UPDATE SET
+         po_id = EXCLUDED.po_id,
+         supplier_id = EXCLUDED.supplier_id,
+         status = 'approved',
+         total_amount = EXCLUDED.total_amount,
+         debit_note_value = EXCLUDED.debit_note_value,
+         bank_account_name = EXCLUDED.bank_account_name,
+         bank_account_number = EXCLUDED.bank_account_number,
+         bank_ifsc_code = EXCLUDED.bank_ifsc_code,
+         bank_name = EXCLUDED.bank_name,
+         branch_name = EXCLUDED.branch_name,
+         approved_by = EXCLUDED.approved_by,
+         approved_at = NOW(),
+         notes = EXCLUDED.notes,
+         updated_at = NOW()`,
+      [invId, row.po_id, row.supplier_id, totalAmount, row.debit_note_value,
+        bankName, bankNo, ifsc, bank, branch, userId, notes || null]
+    )
+    await client.query('COMMIT')
+    res.json({ success: true, message: 'Payment approved' })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Approve payment error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Reject payment
+router.patch('/payments/reject', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  try {
+    const userId = req.user?.user_id
+    const { invoiceId, rejection_reason } = req.body || {}
+    if (!invoiceId) return res.status(400).json({ error: 'invoiceId_required' })
+    const invId = parseInt(invoiceId, 10)
+    if (Number.isNaN(invId)) return res.status(400).json({ error: 'invalid_invoice_id' })
+
+    const inv = await pool.query(
+      'SELECT invoice_id, po_id, supplier_id, total_amount, debit_note_value FROM invoices WHERE invoice_id = $1',
+      [invId]
+    )
+    if (inv.rows.length === 0) return res.status(404).json({ error: 'invoice_not_found' })
+    const row = inv.rows[0]
+    const totalAmount = row.debit_note_value != null ? row.debit_note_value : row.total_amount
+
+    await pool.query(
+      `INSERT INTO payment_approvals
+        (invoice_id, po_id, supplier_id, status, total_amount, debit_note_value, rejected_by, rejected_at, rejection_reason, updated_at)
+       VALUES ($1, $2, $3, 'rejected', $4, $5, $6, NOW(), $7, NOW())
+       ON CONFLICT (invoice_id) DO UPDATE SET
+         status = 'rejected',
+         rejected_by = EXCLUDED.rejected_by,
+         rejected_at = NOW(),
+         rejection_reason = EXCLUDED.rejection_reason,
+         updated_at = NOW()`,
+      [invId, row.po_id, row.supplier_id, totalAmount, row.debit_note_value, userId, rejection_reason || null]
+    )
+    res.json({ success: true, message: 'Payment rejected' })
+  } catch (err) {
+    console.error('Reject payment error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// List approved payments (ready for payment execution)
+router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT pa.id, pa.invoice_id, pa.po_id, pa.supplier_id, pa.status, pa.total_amount, pa.debit_note_value,
+              pa.bank_account_name, pa.bank_account_number, pa.bank_ifsc_code, pa.bank_name, pa.branch_name,
+              pa.approved_by, pa.approved_at, pa.notes,
+              i.invoice_number, i.invoice_date, i.payment_due_date,
+              s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan, s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
+              po.po_number, po.date AS po_date, po.terms AS po_terms
+       FROM payment_approvals pa
+       JOIN invoices i ON i.invoice_id = pa.invoice_id
+       LEFT JOIN suppliers s ON s.supplier_id = pa.supplier_id
+       LEFT JOIN purchase_orders po ON po.po_id = pa.po_id
+       WHERE pa.status = 'approved'
+       ORDER BY pa.approved_at DESC NULLS LAST, pa.id DESC`
+    )
+    const result = []
+    for (const r of rows) {
+      let grnList = []
+      let asnList = []
+      if (r.po_id) {
+        const [grnRes, asnRes] = await Promise.all([
+          pool.query('SELECT id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty, unit_cost FROM grn WHERE po_id = $1 ORDER BY grn_date DESC', [r.po_id]),
+          pool.query('SELECT id, asn_no, dc_no, dc_date, inv_no, inv_date, lr_no, transporter_name FROM asn WHERE po_id = $1 ORDER BY dc_date DESC', [r.po_id])
+        ])
+        grnList = grnRes.rows
+        asnList = asnRes.rows
+      }
+      result.push({ ...r, grn_list: grnList, asn_list: asnList })
+    }
+    res.json(result)
+  } catch (err) {
+    console.error('Ready payments list error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Payment history: all payment_approvals with status = payment_done
+router.get('/payments/history', authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT pa.id, pa.invoice_id, pa.po_id, pa.supplier_id, pa.status, pa.total_amount, pa.debit_note_value,
+              pa.bank_account_name, pa.bank_account_number, pa.bank_ifsc_code, pa.bank_name, pa.branch_name,
+              pa.approved_by, pa.approved_at, pa.payment_done_by, pa.payment_done_at, pa.notes,
+              i.invoice_number, i.invoice_date, i.payment_due_date,
+              s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan, s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
+              po.po_number, po.date AS po_date, po.terms AS po_terms,
+              u_done.username AS payment_done_by_username, u_done.full_name AS payment_done_by_name
+       FROM payment_approvals pa
+       JOIN invoices i ON i.invoice_id = pa.invoice_id
+       LEFT JOIN suppliers s ON s.supplier_id = pa.supplier_id
+       LEFT JOIN purchase_orders po ON po.po_id = pa.po_id
+       LEFT JOIN users u_done ON u_done.user_id = pa.payment_done_by
+       WHERE pa.status = 'payment_done'
+       ORDER BY pa.payment_done_at DESC NULLS LAST, pa.id DESC`
+    )
+    const result = []
+    for (const r of rows) {
+      let grnList = []
+      let asnList = []
+      if (r.po_id) {
+        const [grnRes, asnRes] = await Promise.all([
+          pool.query('SELECT id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty, unit_cost FROM grn WHERE po_id = $1 ORDER BY grn_date DESC', [r.po_id]),
+          pool.query('SELECT id, asn_no, dc_no, dc_date, inv_no, inv_date, lr_no, transporter_name FROM asn WHERE po_id = $1 ORDER BY dc_date DESC', [r.po_id])
+        ])
+        grnList = grnRes.rows
+        asnList = asnRes.rows
+      }
+      result.push({ ...r, grn_list: grnList, asn_list: asnList })
+    }
+    res.json(result)
+  } catch (err) {
+    console.error('Payment history list error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Mark payment as done
+router.patch('/payments/:id/mark-done', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_id' })
+    const userId = req.user?.user_id
+    const { rows } = await pool.query(
+      'UPDATE payment_approvals SET status = $1, payment_done_by = $2, payment_done_at = NOW(), updated_at = NOW() WHERE id = $3 AND status = $4 RETURNING id, invoice_id',
+      ['payment_done', userId, id, 'approved']
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'not_found', message: 'Approval record not found or not in approved status' })
+    }
+    const invoiceId = rows[0].invoice_id
+    if (invoiceId) {
+      await pool.query(
+        "UPDATE invoices SET status = 'completed', updated_at = NOW() WHERE invoice_id = $1",
+        [invoiceId]
+      )
+    }
+    res.json({ success: true, message: 'Payment marked as done' })
+  } catch (err) {
+    console.error('Mark done error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
 
 // Mount API routes under /api prefix
 app.use('/api', router)

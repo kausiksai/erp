@@ -1,6 +1,6 @@
 .invoiceDetailsPage {
   min-height: 100vh;
-  background: #f5f7fa;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   padding: 0;
   position: relative;
 }
@@ -8,12 +8,12 @@
 .pageContainer {
   max-width: 1600px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 2rem 2.5rem;
   position: relative;
 }
 
 .pageHeader {
-  margin-bottom: 24px;
+  margin-bottom: 2rem;
   padding: 0;
 }
 
@@ -31,6 +31,17 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.validateButton {
+  padding: 0.5rem 1rem;
 }
 
 .backButton {
@@ -130,6 +141,11 @@
   color: #92400e;
 }
 
+.statusBadge.open {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
 .statusBadge.approved {
   background: #dbeafe;
   color: #1e40af;
@@ -221,7 +237,7 @@
 /* Responsive */
 @media (max-width: 768px) {
   .pageContainer {
-    padding: 16px;
+    padding: 1rem 1.5rem;
   }
 
   .detailsGrid {
@@ -238,4 +254,63 @@
   .detailValue {
     text-align: left;
   }
+
+  .detailsCard,
+  .detailsCard .detailsList {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .pageContainer {
+    padding: 1rem;
+  }
+
+  .pageTitle {
+    font-size: 1.375rem;
+  }
+
+  .pageSubtitle {
+    font-size: 0.8125rem;
+  }
+
+  .headerContent {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .headerActions {
+    flex-wrap: wrap;
+  }
+}
+
+/* Validation mismatch dialog */
+.validationDialog :global(.p-dialog-content) {
+  padding-top: 0.5rem;
+}
+
+.validationDialogMessage {
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.validationDialogHint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.validationDialogFooter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.validationDialogButton {
+  min-width: 10rem;
 }

@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { InputText } from 'primereact/inputtext'
-import { Dropdown } from 'primereact/dropdown'
+import { MultiSelect } from 'primereact/multiselect'
 import { Button } from 'primereact/button'
 import { Tag } from 'primereact/tag'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
-import { apiUrl } from '../utils/api'
+import { apiUrl, getErrorMessageFromResponse } from '../utils/api'
 import styles from './InvoiceValidate.module.css'
 
 interface Invoice {
@@ -29,8 +29,10 @@ interface Invoice {
 }
 
 const statusOptions = [
-  { label: 'All Status', value: '' },
-  { label: 'Pending', value: 'pending' },
+  { label: 'Open', value: 'open' },
+  { label: 'Ready for payment', value: 'ready_for_payment' },
+  { label: 'Debit note approval', value: 'debit_note_approval' },
+  { label: 'Exception approval', value: 'exception_approval' },
   { label: 'Approved', value: 'approved' },
   { label: 'Rejected', value: 'rejected' },
   { label: 'Completed', value: 'completed' }
@@ -43,37 +45,40 @@ function InvoiceValidate() {
   const [loading, setLoading] = useState<boolean>(true)
   const [searchInvoiceNumber, setSearchInvoiceNumber] = useState<string>('')
   const [searchPONumber, setSearchPONumber] = useState<string>('')
-  const [selectedStatus, setSelectedStatus] = useState<string>('')
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
   const [globalFilter, setGlobalFilter] = useState<string>('')
 
   useEffect(() => {
     fetchInvoices()
-  }, [selectedStatus])
+  }, [selectedStatuses])
 
   const fetchInvoices = async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (selectedStatus) params.append('status', selectedStatus)
+      if (selectedStatuses.length > 0) params.append('status', selectedStatuses.join(','))
       if (searchInvoiceNumber) params.append('invoiceNumber', searchInvoiceNumber)
       if (searchPONumber) params.append('poNumber', searchPONumber)
-      
+
       const url = apiUrl('invoices') + (params.toString() ? `?${params.toString()}` : '')
-      const response = await fetch(url)
-      
+      const token = localStorage.getItem('authToken')
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+
       if (!response.ok) {
-        throw new Error('Failed to fetch invoices')
+        const msg = await getErrorMessageFromResponse(response, 'Failed to load invoices')
+        toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+        setInvoices([])
+        return
       }
-      
+
       const data = await response.json()
       setInvoices(data)
-    } catch (error: any) {
-      toast.current?.show({
-        severity: 'error',
-        summary: 'Error',
-        detail: error.message || 'Failed to load invoices',
-        life: 5000
-      })
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Failed to load invoices'
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+      setInvoices([])
     } finally {
       setLoading(false)
     }
@@ -86,7 +91,7 @@ function InvoiceValidate() {
   const handleClearSearch = () => {
     setSearchInvoiceNumber('')
     setSearchPONumber('')
-    setSelectedStatus('')
+    setSelectedStatuses([])
     setGlobalFilter('')
     fetchInvoices()
   }
@@ -111,12 +116,25 @@ function InvoiceValidate() {
     })
   }
 
+  const statusLabel = (status: string) => {
+    const s = (status || '').toLowerCase().replace(/\s+/g, '_')
+    if (s === 'pending' || s === 'open') return 'Open'
+    if (s === 'debit_note_approval') return 'Debit note'
+    if (s === 'exception_approval') return 'Exception'
+    if (s === 'ready_for_payment') return 'Ready for payment'
+    if (s === 'approved') return 'Approved'
+    if (s === 'rejected') return 'Rejected'
+    if (s === 'completed') return 'Completed'
+    return (status || 'Open').toUpperCase()
+  }
+
   const statusBodyTemplate = (rowData: Invoice) => {
     const status = rowData.status || 'pending'
-    const severity = status === 'completed' ? 'success' : 
+    const severity = status === 'completed' ? 'success' :
                      status === 'approved' ? 'info' :
-                     status === 'rejected' ? 'danger' : 'warning'
-    return <Tag value={status.toUpperCase()} severity={severity} />
+                     status === 'rejected' ? 'danger' :
+                     /debit_note|exception|ready_for_payment/i.test(status) ? 'warning' : 'warning'
+    return <Tag value={statusLabel(status)} severity={severity} />
   }
 
   const amountBodyTemplate = (rowData: Invoice) => {
@@ -188,12 +206,14 @@ function InvoiceValidate() {
             </div>
             <div className={styles.searchField}>
               <label className={styles.searchLabel}>Status</label>
-              <Dropdown
-                value={selectedStatus}
+              <MultiSelect
+                value={selectedStatuses}
                 options={statusOptions}
-                onChange={(e) => setSelectedStatus(e.value)}
-                placeholder="All Status"
+                onChange={(e) => setSelectedStatuses(e.value ?? [])}
+                placeholder="All statuses"
                 className={styles.searchDropdown}
+                display="chip"
+                maxSelectedLabels={2}
               />
             </div>
             <div className={styles.searchActions}>
@@ -244,47 +264,12 @@ function InvoiceValidate() {
                 </div>
               }
             >
-              <Column
-                field="invoice_number"
-                header="Invoice Number"
-                sortable
-                body={invoiceNumberBodyTemplate}
-                style={{ minWidth: '180px' }}
-              />
-              <Column
-                field="po_number"
-                header="PO Number"
-                sortable
-                body={poNumberBodyTemplate}
-                style={{ minWidth: '180px' }}
-              />
-              <Column
-                field="invoice_date"
-                header="Invoice Date"
-                sortable
-                body={dateBodyTemplate}
-                style={{ minWidth: '150px' }}
-              />
-              <Column
-                field="supplier_name"
-                header="Supplier"
-                sortable
-                style={{ minWidth: '250px' }}
-              />
-              <Column
-                field="total_amount"
-                header="Total Amount"
-                sortable
-                body={amountBodyTemplate}
-                style={{ minWidth: '150px', textAlign: 'right' }}
-              />
-              <Column
-                field="status"
-                header="Status"
-                sortable
-                body={statusBodyTemplate}
-                style={{ minWidth: '120px' }}
-              />
+              <Column field="invoice_number" header="Invoice Number" sortable body={invoiceNumberBodyTemplate} />
+              <Column field="po_number" header="PO Number" sortable body={poNumberBodyTemplate} />
+              <Column field="invoice_date" header="Invoice Date" sortable body={dateBodyTemplate} />
+              <Column field="supplier_name" header="Supplier" sortable />
+              <Column field="total_amount" header="Total Amount" sortable body={amountBodyTemplate} />
+              <Column field="status" header="Status" sortable body={statusBodyTemplate} />
             </DataTable>
           )}
         </div>

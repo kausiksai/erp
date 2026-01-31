@@ -3,3 +3,16 @@
   padding: 0;
   text-align: left;
 }
+
+.appLoadingWrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.appLoadingWrap i {
+  font-size: 2rem;
+  color: #2563eb;
+}

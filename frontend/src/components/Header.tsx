@@ -49,6 +49,9 @@ function Header() {
 
   return (
     <header className={`${styles.header} ${isScrolled ? styles.scrolled : ''}`}>
+      <a href="#main-content" className="skipLink">
+        Skip to main content
+      </a>
       <div className={styles.headerBackground}></div>
       <div className={styles.container}>
         <div className={styles.logoSection} onClick={handleHomeClick}>

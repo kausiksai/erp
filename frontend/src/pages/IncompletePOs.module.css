@@ -3,13 +3,18 @@
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
 }
 
 .container {
   max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
   padding: 2rem 2rem;
   flex: 1;
+  min-width: 0;
+  display: block;
+  box-sizing: border-box;
 }
 
 .header {
@@ -48,22 +53,380 @@
   min-height: 400px;
 }
 
-.tableContainer {
-  background: white;
-  border-radius: 16px;
+.section {
+  display: block;
+  position: relative;
+  margin-bottom: 2.5rem;
+  clear: both;
+  width: 100%;
+  min-height: 0;
+}
+
+.sectionTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.35rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sectionSubtitle {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin: 0 0 1rem 0;
+  line-height: 1.5;
+}
+
+/* Debit note section – distinct card */
+.debitNoteSection {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   padding: 1.5rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+  margin-bottom: 2rem;
+  border-left: 4px solid #ca8a04;
+}
+
+.debitNoteSection .sectionTitle {
+  color: #92400e;
+}
+
+.debitNoteSection .sectionSubtitle {
+  margin-bottom: 1.25rem;
+}
+
+/* Incomplete POs section – card so it stacks below debit note, no overlap */
+.incompleteSection {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  padding: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.emptySection {
+  padding: 1.5rem 1.25rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  font-size: 0.9375rem;
+  color: #78716c;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.emptySection p {
+  margin: 0;
+}
+
+.reasonText {
+  font-size: 0.8125rem;
+  color: #475569;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.debitNoteInput {
+  width: 100%;
+  max-width: 150px;
+}
+
+.debitNoteSection .debitNoteInput {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.debitNoteSection .debitNoteInput :global(.p-inputnumber),
+.debitNoteSection .debitNoteInput :global(.p-inputnumber-input) {
+  width: 100% !important;
+  max-width: 100%;
+}
+
+.debitNoteInput :global(.p-inputnumber-input) {
+  font-size: 0.875rem;
+  padding: 0.5rem 0.75rem;
+  text-align: right;
+}
+
+.debitNoteSection .debitNoteInput :global(.p-inputnumber-input) {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.45rem;
+  text-align: right;
+  min-width: 0;
+}
+
+.tableWrapper {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  min-width: 0;
+  margin: 0;
+  border-radius: 12px;
+}
+
+.tableContainer {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.debitNoteSection .tableContainer {
+  padding: 1rem;
+  border: none;
+  box-shadow: none;
+  background: #fafafa;
+  border-radius: 8px;
 }
 
 .dataTable {
   width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  display: table;
+}
+
+.debitNoteSection .dataTable {
+  min-width: 1px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* Debit note table: scroll container, clean alignment */
+.debitNoteSection .tableWrapper {
+  overflow-x: auto;
+  overflow-y: visible;
+  margin: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.debitNoteSection .tableContainer {
+  min-width: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.debitNoteSection .tableContainer :global(.p-datatable-wrapper) {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  max-height: none !important;
+  display: block;
+  width: 100%;
+}
+
+.debitNoteSection .tableContainer :global(.p-datatable-table) {
+  width: 100%;
+  min-width: 1102px;
+  table-layout: fixed;
+}
+
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th) {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  padding: 0.65rem 0.6rem;
+  border-bottom: 2px solid #e2e8f0;
+  vertical-align: middle;
+  box-sizing: border-box;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td) {
+  padding: 0.65rem 0.6rem;
+  font-size: 0.875rem;
+  vertical-align: middle;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-wrap: break-word;
+}
+
+/* Debit note table: fixed column widths for clean alignment (8 columns) */
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(1)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(1)) { width: 95px; min-width: 95px; max-width: 95px; }
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(2)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(2)) { width: 95px; min-width: 95px; max-width: 95px; }
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(3)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(3)) { width: 120px; min-width: 120px; max-width: 120px; }
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(4)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(4)) { width: 22%; min-width: 160px; max-width: 280px; }
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(5)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(5)) { width: 130px; min-width: 130px; max-width: 130px; }
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(6)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(6)) { width: 120px; min-width: 120px; max-width: 120px; }
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(7)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(7)) { width: 110px; min-width: 110px; max-width: 110px; }
+.debitNoteSection .tableContainer :global(.p-datatable-thead > tr > th:nth-child(8)),
+.debitNoteSection .tableContainer :global(.p-datatable-tbody > tr > td:nth-child(8)) { width: 100px; min-width: 100px; max-width: 100px; }
+
+.debitNoteSection .debitNoteActions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.debitNoteSection .iconBtn {
+  padding: 0.4rem;
+  min-width: 2rem;
+}
+
+.debitNoteSection .iconBtn :global(.p-button-icon) {
+  margin: 0;
+}
+
+.hiddenFileInput {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.debitNotePdfCell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.debitNotePdfLinks {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.debitNotePdfLink {
+  background: none;
+  border: none;
+  color: #0d9488;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 75px;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.debitNotePdfLink:hover {
+  color: #0f766e;
+}
+
+.debitNoteSection .uploadIconBtn {
+  flex-shrink: 0;
+  padding: 0.4rem;
+  min-width: 2rem;
+}
+
+.debitNoteSection .uploadIconBtn :global(.p-button-icon) {
+  margin: 0;
+}
+
+/* Column class names (applied by PrimeReact to th/td) */
+.colInvoice { width: 95px !important; min-width: 95px !important; max-width: 95px !important; }
+.colPoNumber { width: 95px !important; min-width: 95px !important; max-width: 95px !important; }
+.colSupplier { width: 120px !important; min-width: 120px !important; max-width: 120px !important; }
+.colReason { width: 22% !important; min-width: 160px !important; max-width: 280px !important; }
+.colQuantities { width: 130px !important; min-width: 130px !important; max-width: 130px !important; }
+.colAmount { width: 120px !important; min-width: 120px !important; max-width: 120px !important; }
+.colDebitNotePdf { width: 110px !important; min-width: 110px !important; max-width: 110px !important; }
+.colActions { width: 100px !important; min-width: 100px !important; max-width: 100px !important; }
+
+/* PrimeReact DataTable – contain scroll, no overlap */
+.tableContainer :global(.p-datatable-wrapper) {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  max-height: none !important;
+  display: block;
+}
+
+.tableContainer :global(.p-datatable-table) {
+  width: 100%;
+  table-layout: auto;
+}
+
+.tableContainer :global(.p-datatable-thead > tr > th) {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  font-weight: 600;
+  padding: 0.75rem 0.875rem;
+  border-bottom: 2px solid #e2e8f0;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
+
+.tableContainer :global(.p-datatable-tbody > tr > td) {
+  padding: 0.75rem 0.875rem;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.875rem;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+}
+
+.tableContainer :global(.p-datatable-tbody > tr:hover) {
+  background-color: #f8fafc;
+}
+
+.tableContainer :global(.p-datatable-tbody > tr) {
+  cursor: default;
+}
+
+.tableContainer :global(.p-datatable) {
+  display: block !important;
+}
+
+.tableContainer :global(.p-paginator) {
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  flex-shrink: 0;
 }
 
 .missingItems {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.noMissing {
+  color: #94a3b8;
+  font-style: normal;
 }
 
 .missingBadge {
@@ -110,6 +473,86 @@
   margin: 0;
 }
 
+/* Expanded row: PO details + reason (partial / debit note / exception) */
+.expandedDetail {
+  padding: 1rem 1.25rem;
+  background: #f8fafc;
+  border-left: 4px solid #0d9488;
+  margin: 0 0 0 3rem;
+  font-size: 0.875rem;
+}
+
+.expandedLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.expandedReasonHeader {
+  font-weight: 600;
+  color: #0f766e;
+  margin-bottom: 0.35rem;
+}
+
+.expandedReason {
+  color: #475569;
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.expandedQty {
+  color: #64748b;
+  margin-bottom: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.expandedPoHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.expandedPoHeader span {
+  white-space: nowrap;
+}
+
+.expandedLineItems {
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.expandedLineItems strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.miniTable {
+  width: 100%;
+  max-width: 480px;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.miniTable th,
+.miniTable td {
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+}
+
+.miniTable th {
+  background: #f1f5f9;
+  font-weight: 600;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .container {
@@ -124,18 +567,65 @@
     font-size: 1.75rem;
   }
 
+  .sectionTitle {
+    font-size: 1.125rem;
+  }
+
+  .debitNoteSection {
+    padding: 1rem;
+  }
+
+  .debitNoteSection .tableContainer {
+    padding: 0.75rem;
+  }
+
+  .debitNoteInput {
+    max-width: 100%;
+  }
+
+  .reasonText {
+    -webkit-line-clamp: 2;
+  }
+
   .tableContainer {
     padding: 1rem;
     overflow-x: auto;
   }
 
   .actionButtons {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
   .actionButton,
   .viewButton {
-    width: 100%;
+    min-width: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 1rem;
+  }
+
+  .title {
+    font-size: 1.5rem;
+  }
+
+  .subtitle {
+    font-size: 0.875rem;
+  }
+
+  .sectionTitle {
+    font-size: 1rem;
+  }
+
+  .debitNoteSection {
+    padding: 0.75rem;
+  }
+
+  .tableContainer {
+    padding: 0.75rem;
   }
 }

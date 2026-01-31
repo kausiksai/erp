@@ -16,8 +16,32 @@ export function apiUrl(path: string): string {
   return `/${apiPrefix}/${cleanPath}`.replace(/\/+/g, '/')
 }
 
+const DEFAULT_ERROR = 'Something went wrong. Please try again.'
+
 /**
- * Fetch with authentication token
+ * Extract error message from API response body (e.g. { message: "..." }) or return fallback.
+ */
+export async function getErrorMessageFromResponse(
+  response: Response,
+  fallback: string = DEFAULT_ERROR
+): Promise<string> {
+  try {
+    const data = await response.json()
+    if (data && typeof data.message === 'string' && data.message.trim()) {
+      return data.message.trim()
+    }
+    if (data && typeof data.error === 'string' && data.error.trim()) {
+      return data.error.trim()
+    }
+  } catch {
+    // response not JSON or empty
+  }
+  return fallback
+}
+
+/**
+ * Fetch with authentication token.
+ * Use getErrorMessageFromResponse(response, fallback) when !response.ok to show server error in toast.
  */
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
   const token = localStorage.getItem('authToken')

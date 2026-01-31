@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { Button } from 'primereact/button'
+import { InputText } from 'primereact/inputtext'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Tag } from 'primereact/tag'
 import { Divider } from 'primereact/divider'
-import { apiUrl } from '../utils/api'
+import { apiUrl, getErrorMessageFromResponse } from '../utils/api'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
 import styles from './PurchaseOrderDetails.module.css'
@@ -14,30 +15,32 @@ import styles from './PurchaseOrderDetails.module.css'
 interface PurchaseOrderLineItem {
   po_line_id: number
   po_id: number
-  item_name: string
-  item_description: string | null
-  hsn_sac: string | null
-  uom: string | null
-  quantity: number
   sequence_number: number
+  item_id: string | null
+  description1: string | null
+  qty: number | null
+  unit_cost: number | null
+  disc_pct: number | null
+  raw_material: string | null
+  process_description: string | null
+  norms: string | null
+  process_cost: number | null
 }
 
 interface PurchaseOrder {
   po_id: number
   po_number: string
   po_date: string
-  bill_to: string
-  bill_to_address: string | null
-  bill_to_gstin: string | null
-  status: string
-  terms_and_conditions: string | null
-  payment_terms: string | null
-  delivery_terms: string | null
-  supplier_name: string | null
+  unit: string | null
+  ref_unit: string | null
+  pfx: string | null
+  amd_no: number | null
+  suplr_id: string | null
   supplier_id: number | null
+  supplier_name: string | null
+  terms: string | null
+  status: string
   line_item_count: number
-  created_at: string
-  updated_at: string
   lineItems?: PurchaseOrderLineItem[]
 }
 
@@ -45,48 +48,48 @@ function PurchaseOrderDetails() {
   const toast = useRef<Toast>(null)
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState<boolean>(true)
-  const [refreshing, setRefreshing] = useState<boolean>(false)
+  const [searchTerm, setSearchTerm] = useState('')
   const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({})
   const [loadingLineItems, setLoadingLineItems] = useState<Set<number>>(new Set())
 
+  const searchLower = searchTerm.trim().toLowerCase()
+  const filteredPOs = searchLower
+    ? purchaseOrders.filter((po) => {
+        const poNumber = (po.po_number ?? '').toLowerCase()
+        const supplier = (po.supplier_name ?? '').toLowerCase()
+        const unit = (po.unit ?? '').toLowerCase()
+        const pfx = (po.pfx ?? '').toLowerCase()
+        const terms = (po.terms ?? '').toLowerCase()
+        const status = (po.status ?? '').toLowerCase()
+        return poNumber.includes(searchLower) || supplier.includes(searchLower) || unit.includes(searchLower) || pfx.includes(searchLower) || terms.includes(searchLower) || status.includes(searchLower)
+      })
+    : purchaseOrders
+
   const fetchPurchaseOrders = async () => {
     try {
-      const response = await fetch(apiUrl('purchase-orders'))
+      setLoading(true)
+      const token = localStorage.getItem('authToken')
+      const response = await fetch(apiUrl('purchase-orders'), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       if (!response.ok) {
-        throw new Error('Failed to fetch purchase orders')
+        const msg = await getErrorMessageFromResponse(response, 'Failed to load purchase orders')
+        toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+        return
       }
       const data = await response.json()
       setPurchaseOrders(data)
-    } catch (error: any) {
-      toast.current?.show({
-        severity: 'error',
-        summary: 'Error',
-        detail: error.message || 'Failed to load purchase orders',
-        life: 5000
-      })
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Failed to load purchase orders'
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
   useEffect(() => {
     fetchPurchaseOrders()
   }, [])
-
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    // TODO: Call Python script to sync from ERP API
-    // For now, just refresh from database
-    await fetchPurchaseOrders()
-    
-    toast.current?.show({
-      severity: 'info',
-      summary: 'Refresh',
-      detail: 'Purchase orders refreshed. Python integration will be added later.',
-      life: 3000
-    })
-  }
 
   const dateBodyTemplate = (rowData: PurchaseOrder) => {
     if (!rowData.po_date) return '-'
@@ -99,7 +102,7 @@ function PurchaseOrderDetails() {
   }
 
   const statusBodyTemplate = (rowData: PurchaseOrder) => {
-    const status = rowData.status || 'pending'
+    const status = rowData.status || 'open'
     const severity = status === 'completed' ? 'success' : 
                      status === 'cancelled' ? 'danger' : 
                      status === 'in_progress' ? 'warning' : 'info'
@@ -128,26 +131,25 @@ function PurchaseOrderDetails() {
 
     setLoadingLineItems(prev => new Set(prev).add(poId))
     try {
-      const response = await fetch(apiUrl(`purchase-orders/${poId}/line-items`))
+      const token = localStorage.getItem('authToken')
+      const response = await fetch(apiUrl(`purchase-orders/${poId}/line-items`), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       if (!response.ok) {
-        throw new Error('Failed to fetch line items')
+        const msg = await getErrorMessageFromResponse(response, 'Failed to load line items')
+        toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+        return
       }
       const lineItems = await response.json()
-      
-      setPurchaseOrders(prev => 
-        prev.map(po => 
-          po.po_id === poId 
-            ? { ...po, lineItems } 
-            : po
+
+      setPurchaseOrders(prev =>
+        prev.map(po =>
+          po.po_id === poId ? { ...po, lineItems } : po
         )
       )
-    } catch (error: any) {
-      toast.current?.show({
-        severity: 'error',
-        summary: 'Error',
-        detail: error.message || 'Failed to load line items',
-        life: 3000
-      })
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Failed to load line items'
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
     } finally {
       setLoadingLineItems(prev => {
         const next = new Set(prev)
@@ -171,28 +173,28 @@ function PurchaseOrderDetails() {
         <div className={styles.poDetailsSection}>
           <div className={styles.detailRow}>
             <div className={styles.detailItem}>
-              <span className={styles.detailLabel}>Bill To Address:</span>
-              <span className={styles.detailValue}>{rowData.bill_to_address || '-'}</span>
+              <span className={styles.detailLabel}>Unit:</span>
+              <span className={styles.detailValue}>{rowData.unit || '-'}</span>
             </div>
             <div className={styles.detailItem}>
-              <span className={styles.detailLabel}>GSTIN:</span>
-              <span className={styles.detailValue}>{rowData.bill_to_gstin || '-'}</span>
+              <span className={styles.detailLabel}>Ref Unit:</span>
+              <span className={styles.detailValue}>{rowData.ref_unit || '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>PFX:</span>
+              <span className={styles.detailValue}>{rowData.pfx || '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Supplier Code (Suplr ID):</span>
+              <span className={styles.detailValue}>{rowData.suplr_id || '-'}</span>
             </div>
           </div>
-          {(rowData.payment_terms || rowData.delivery_terms) && (
+          {rowData.terms && (
             <div className={styles.detailRow}>
-              {rowData.payment_terms && (
-                <div className={styles.detailItem}>
-                  <span className={styles.detailLabel}>Payment Terms:</span>
-                  <span className={styles.detailValue}>{rowData.payment_terms}</span>
-                </div>
-              )}
-              {rowData.delivery_terms && (
-                <div className={styles.detailItem}>
-                  <span className={styles.detailLabel}>Delivery Terms:</span>
-                  <span className={styles.detailValue}>{rowData.delivery_terms}</span>
-                </div>
-              )}
+              <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}>
+                <span className={styles.detailLabel}>Terms:</span>
+                <span className={styles.detailValue}>{rowData.terms}</span>
+              </div>
             </div>
           )}
         </div>
@@ -218,22 +220,30 @@ function PurchaseOrderDetails() {
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>Item Name</th>
+                    <th>Item ID</th>
                     <th>Description</th>
-                    <th>HSN/SAC</th>
-                    <th>UOM</th>
-                    <th>Quantity</th>
+                    <th>Qty</th>
+                    <th>Unit Cost</th>
+                    <th>Disc %</th>
+                    <th>Raw Material</th>
+                    <th>Process Description</th>
+                    <th>Norms</th>
+                    <th>Process Cost</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lineItems.map((item, index) => (
                     <tr key={item.po_line_id}>
-                      <td className={styles.sequenceCell}>{item.sequence_number || index + 1}</td>
-                      <td className={styles.itemNameCell}>{item.item_name}</td>
-                      <td className={styles.descriptionCell}>{item.item_description || '-'}</td>
-                      <td className={styles.hsnCell}>{item.hsn_sac || '-'}</td>
-                      <td className={styles.uomCell}>{item.uom || '-'}</td>
-                      <td className={styles.quantityCell}>{item.quantity}</td>
+                      <td className={styles.sequenceCell}>{item.sequence_number ?? index + 1}</td>
+                      <td className={styles.itemIdCell}>{item.item_id || '-'}</td>
+                      <td className={styles.descriptionCell}>{item.description1 || '-'}</td>
+                      <td className={styles.quantityCell}>{item.qty != null ? item.qty : '-'}</td>
+                      <td className={styles.unitCostCell}>{item.unit_cost != null ? Number(item.unit_cost).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-'}</td>
+                      <td className={styles.discPctCell}>{item.disc_pct != null ? Number(item.disc_pct) : '-'}</td>
+                      <td className={styles.textCell}>{item.raw_material || '-'}</td>
+                      <td className={styles.textCell}>{item.process_description || '-'}</td>
+                      <td className={styles.textCell}>{item.norms || '-'}</td>
+                      <td className={styles.unitCostCell}>{item.process_cost != null ? Number(item.process_cost).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -257,18 +267,27 @@ function PurchaseOrderDetails() {
               <h1 className={styles.pageTitle}>Purchase Order Details</h1>
               <p className={styles.pageSubtitle}>View and manage all purchase orders</p>
             </div>
-            <PageNavigation />
-            <Button
-              label="Refresh"
-              icon="pi pi-refresh"
-              onClick={handleRefresh}
-              loading={refreshing}
-              className={styles.refreshButton}
-            />
+            <div className={styles.headerActions}>
+              <Button label="Refresh" icon="pi pi-refresh" className={styles.refreshButton} onClick={() => fetchPurchaseOrders()} />
+              <PageNavigation />
+            </div>
           </div>
         </div>
 
       <div className={styles.tableContainer}>
+        {!loading && (
+          <div className={styles.toolbar}>
+            <span className="p-input-icon-left">
+              <i className="pi pi-search" />
+              <InputText
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by PO number, supplier, unit, terms, status..."
+                className={styles.searchInput}
+              />
+            </span>
+          </div>
+        )}
         {loading ? (
           <div className={styles.loadingContainer}>
             <ProgressSpinner />
@@ -276,11 +295,11 @@ function PurchaseOrderDetails() {
           </div>
         ) : (
           <DataTable
-            value={purchaseOrders}
+            value={filteredPOs}
             paginator
             rows={10}
             rowsPerPageOptions={[10, 25, 50]}
-            emptyMessage="No purchase orders found"
+            emptyMessage={searchTerm ? 'No matching purchase orders' : 'No purchase orders found'}
             className={styles.dataTable}
             stripedRows
             expandedRows={expandedRows}
@@ -314,13 +333,24 @@ function PurchaseOrderDetails() {
               header="Supplier"
               sortable
               body={supplierBodyTemplate}
-              style={{ minWidth: '250px' }}
+              style={{ minWidth: '220px' }}
             />
             <Column
-              field="bill_to"
-              header="Bill To"
+              field="unit"
+              header="Unit"
               sortable
-              style={{ minWidth: '200px' }}
+              style={{ minWidth: '80px' }}
+              body={(rowData: PurchaseOrder) => rowData.unit || '-'}
+            />
+            <Column
+              field="terms"
+              header="Terms"
+              style={{ minWidth: '180px', maxWidth: '280px' }}
+              body={(rowData: PurchaseOrder) => (
+                <span title={rowData.terms || ''} className={styles.termsCell}>
+                  {rowData.terms ? (rowData.terms.length > 40 ? `${rowData.terms.slice(0, 40)}…` : rowData.terms) : '-'}
+                </span>
+              )}
             />
             <Column
               field="line_item_count"

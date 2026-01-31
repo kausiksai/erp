@@ -2,6 +2,7 @@
   display: flex;
   gap: 0.5rem;
   padding-top: 0.25rem;
+  flex-wrap: wrap;
 }
 
 .navButton {
@@ -9,6 +10,8 @@
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   width: 40px;
   height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   border-radius: 10px;
 }
 
@@ -16,4 +19,14 @@
   color: #9333ea;
   background: rgba(147, 51, 234, 0.1);
   transform: scale(1.05);
+}
+
+/* Touch-friendly targets on mobile */
+@media (max-width: 768px) {
+  .navButton {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

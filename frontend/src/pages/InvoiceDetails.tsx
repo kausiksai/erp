@@ -4,11 +4,12 @@ import { Button } from 'primereact/button'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Divider } from 'primereact/divider'
+import { Dialog } from 'primereact/dialog'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
-import { apiUrl } from '../utils/api'
+import { apiUrl, apiFetch } from '../utils/api'
 import styles from './InvoiceDetails.module.css'
 
 interface InvoiceLineItem {
@@ -30,12 +31,18 @@ interface InvoiceLineItem {
 
 interface POLineItem {
   po_line_id: number
+  po_id: number
+  sequence_number: number
+  item_id: string | null
   item_name: string
   item_description: string | null
-  hsn_sac: string | null
-  uom: string | null
   quantity: number
-  sequence_number: number
+  unit_cost: number | null
+  disc_pct: number | null
+  raw_material: string | null
+  process_description: string | null
+  norms: string | null
+  process_cost: number | null
 }
 
 interface InvoiceDetails {
@@ -46,6 +53,7 @@ interface InvoiceDetails {
   total_amount: number
   tax_amount: number
   status: string
+  debit_note_value?: number | null
   notes: string | null
   supplier_name: string | null
   supplier_gst: string | null
@@ -71,12 +79,51 @@ function InvoiceDetails() {
   const toast = useRef<Toast>(null)
   const [invoice, setInvoice] = useState<InvoiceDetails | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
+  const [validating, setValidating] = useState<boolean>(false)
+  const [debitNoteApproving, setDebitNoteApproving] = useState<boolean>(false)
+  const [debitNoteValue, setDebitNoteValue] = useState<string>('')
+  const [validationSummary, setValidationSummary] = useState<{
+    reason?: string
+    validationFailureReason?: string
+    thisInvQty?: number
+    poQty?: number
+    grnQty?: number
+    isShortfall?: boolean
+  } | null>(null)
+  const [validationMismatchData, setValidationMismatchData] = useState<{
+    validationFailureReason?: string
+    thisInvQty?: number
+    poQty?: number
+    grnQty?: number
+  } | null>(null)
+  const [resolvingValidation, setResolvingValidation] = useState<boolean>(false)
 
   useEffect(() => {
     if (id) {
       fetchInvoiceDetails(parseInt(id))
     }
   }, [id])
+
+  // When invoice is in debit_note_approval, fetch validation summary and set default debit note value
+  useEffect(() => {
+    if (!invoice || (invoice.status || '').toLowerCase() !== 'debit_note_approval') {
+      setValidationSummary(null)
+      return
+    }
+    setDebitNoteValue(invoice.total_amount != null ? String(invoice.total_amount) : '')
+    const fetchValidationSummary = async () => {
+      try {
+        const res = await apiFetch(`invoices/${invoice.invoice_id}/validation-summary`)
+        if (res.ok) {
+          const data = await res.json()
+          setValidationSummary(data)
+        }
+      } catch {
+        setValidationSummary(null)
+      }
+    }
+    fetchValidationSummary()
+  }, [invoice?.invoice_id, invoice?.status, invoice?.total_amount])
 
   const fetchInvoiceDetails = async (invoiceId: number) => {
     setLoading(true)
@@ -101,6 +148,106 @@ function InvoiceDetails() {
 
   const handleBack = () => {
     navigate('/invoices/validate')
+  }
+
+  const handleValidate = async () => {
+    if (!invoice?.invoice_id || validating) return
+    setValidating(true)
+    try {
+      const res = await apiFetch(`invoices/${invoice.invoice_id}/validate`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Validation failed',
+          detail: data.message || data.error || 'Could not validate invoice',
+          life: 6000
+        })
+        return
+      }
+      const action = data.action || data.status
+      if (action === 'shortfall') {
+        setValidationMismatchData({
+          validationFailureReason: data.validationFailureReason || data.reason,
+          thisInvQty: data.thisInvQty,
+          poQty: data.poQty,
+          grnQty: data.grnQty
+        })
+        setValidating(false)
+        return
+      }
+      if (action === 'ready_for_payment') {
+        toast.current?.show({
+          severity: 'success',
+          summary: 'Ready for payment',
+          detail: 'Invoice validated. It will appear on Approve Payments for manager approval.',
+          life: 6000
+        })
+      } else if (action === 'exception_approval') {
+        toast.current?.show({
+          severity: 'info',
+          summary: 'Exception approval required',
+          detail: 'Invoice is for an already-fulfilled PO. Use Exception Approve when ready.',
+          life: 6000
+        })
+      } else {
+        toast.current?.show({
+          severity: 'info',
+          summary: 'Validated',
+          detail: data.message || 'Invoice validation completed.',
+          life: 5000
+        })
+      }
+      await fetchInvoiceDetails(invoice.invoice_id)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Validation failed'
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const handleValidationResolution = async (resolution: 'proceed_to_payment' | 'send_to_debit_note') => {
+    if (!invoice?.invoice_id || resolvingValidation || !validationMismatchData) return
+    setResolvingValidation(true)
+    try {
+      const res = await apiFetch(`invoices/${invoice.invoice_id}/validate-resolution`, {
+        method: 'POST',
+        body: JSON.stringify({ resolution })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Error',
+          detail: (data as { message?: string }).message || data.error || 'Could not apply choice',
+          life: 5000
+        })
+        return
+      }
+      setValidationMismatchData(null)
+      if (resolution === 'proceed_to_payment') {
+        toast.current?.show({
+          severity: 'success',
+          summary: 'Ready for payment',
+          detail: 'Invoice will appear on Approve Payments for manager approval.',
+          life: 6000
+        })
+      } else {
+        toast.current?.show({
+          severity: 'info',
+          summary: 'Sent to debit note',
+          detail: 'Invoice is in Debit note approval. You can set amount and approve from Incomplete POs.',
+          life: 6000
+        })
+      }
+      await fetchInvoiceDetails(invoice.invoice_id)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Request failed'
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+    } finally {
+      setResolvingValidation(false)
+    }
   }
 
   const handlePOClick = () => {
@@ -157,11 +304,54 @@ function InvoiceDetails() {
     )
   }
 
+  const mismatchReason = validationMismatchData?.validationFailureReason || 'Quantity or GRN mismatch detected.'
+  const mismatchQty =
+    validationMismatchData?.thisInvQty != null ||
+    validationMismatchData?.poQty != null ||
+    validationMismatchData?.grnQty != null
+      ? ` Invoice qty: ${validationMismatchData?.thisInvQty ?? '—'}, PO total: ${validationMismatchData?.poQty ?? '—'}, GRN total: ${validationMismatchData?.grnQty ?? '—'}`
+      : ''
+
   return (
     <div className={styles.invoiceDetailsPage}>
       <Header />
       <Toast ref={toast} />
-      
+      <Dialog
+        visible={!!validationMismatchData}
+        onHide={() => !resolvingValidation && setValidationMismatchData(null)}
+        header="Validation mismatch (partial fulfillment)"
+        className={styles.validationDialog}
+        modal
+        closable={!resolvingValidation}
+        footer={
+          <div className={styles.validationDialogFooter}>
+            <Button
+              label="Confirm and proceed for payment"
+              icon="pi pi-check"
+              severity="success"
+              loading={resolvingValidation}
+              disabled={resolvingValidation}
+              onClick={() => handleValidationResolution('proceed_to_payment')}
+              className={styles.validationDialogButton}
+            />
+            <Button
+              label="Send to debit note"
+              icon="pi pi-file-edit"
+              severity="secondary"
+              loading={resolvingValidation}
+              disabled={resolvingValidation}
+              onClick={() => handleValidationResolution('send_to_debit_note')}
+              className={styles.validationDialogButton}
+              outlined
+            />
+          </div>
+        }
+      >
+        <p className={styles.validationDialogMessage}>{mismatchReason}{mismatchQty}</p>
+        <p className={styles.validationDialogHint}>
+          Choose &quot;Confirm and proceed for payment&quot; to move this invoice to Approve Payments, or &quot;Send to debit note&quot; to handle the shortfall in Incomplete POs.
+        </p>
+      </Dialog>
       <div className={styles.pageContainer}>
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
@@ -169,7 +359,24 @@ function InvoiceDetails() {
               <h1 className={styles.pageTitle}>Invoice Details</h1>
               <p className={styles.pageSubtitle}>Invoice Number: {invoice.invoice_number}</p>
             </div>
-            <PageNavigation />
+            <div className={styles.headerActions}>
+              {(() => {
+                const statusLower = (invoice.status || '').toLowerCase()
+                const canValidate = !['ready_for_payment', 'approved', 'rejected', 'completed'].includes(statusLower)
+                return canValidate ? (
+                  <Button
+                    label="Validate"
+                    icon="pi pi-check-circle"
+                    onClick={handleValidate}
+                    loading={validating}
+                    disabled={validating}
+                    className={styles.validateButton}
+                    severity="success"
+                  />
+                ) : null
+              })()}
+              <PageNavigation />
+            </div>
           </div>
         </div>
 
@@ -248,8 +455,8 @@ function InvoiceDetails() {
                 <div className={styles.detailItem}>
                   <span className={styles.detailLabel}>PO Status:</span>
                   <span className={styles.detailValue}>
-                    <span className={`${styles.statusBadge} ${styles[invoice.po_status || 'pending'] || styles.pending}`}>
-                      {(invoice.po_status || 'PENDING').toUpperCase()}
+                    <span className={`${styles.statusBadge} ${styles[invoice.po_status || 'open'] || styles.open}`}>
+                      {(invoice.po_status || 'OPEN').toUpperCase()}
                     </span>
                   </span>
                 </div>
@@ -397,41 +604,74 @@ function InvoiceDetails() {
                   emptyMessage="No PO line items found"
                   className={styles.dataTable}
                   stripedRows
+                  scrollable
+                  scrollHeight="400px"
                 >
                   <Column
                     field="sequence_number"
                     header="#"
-                    style={{ width: '60px', textAlign: 'center' }}
-                    body={(rowData: POLineItem) => rowData.sequence_number || '-'}
+                    style={{ width: '50px', textAlign: 'center' }}
+                    body={(rowData: POLineItem) => rowData.sequence_number ?? '-'}
+                  />
+                  <Column
+                    field="item_id"
+                    header="Item ID"
+                    style={{ minWidth: '100px' }}
+                    body={(rowData: POLineItem) => rowData.item_id ?? '-'}
                   />
                   <Column
                     field="item_name"
                     header="Item Name"
-                    style={{ minWidth: '200px' }}
+                    style={{ minWidth: '180px' }}
+                    body={(rowData: POLineItem) => rowData.item_name ?? '-'}
                   />
                   <Column
                     field="item_description"
                     header="Description"
-                    style={{ minWidth: '250px' }}
-                    body={(rowData: POLineItem) => rowData.item_description || '-'}
-                  />
-                  <Column
-                    field="hsn_sac"
-                    header="HSN/SAC"
-                    style={{ minWidth: '120px' }}
-                    body={(rowData: POLineItem) => rowData.hsn_sac || '-'}
+                    style={{ minWidth: '200px' }}
+                    body={(rowData: POLineItem) => rowData.item_description ?? '-'}
                   />
                   <Column
                     field="quantity"
-                    header="Quantity"
-                    style={{ minWidth: '100px', textAlign: 'right' }}
+                    header="Qty"
+                    style={{ minWidth: '90px', textAlign: 'right' }}
                     body={(rowData: POLineItem) => quantityBodyTemplate(rowData.quantity)}
                   />
                   <Column
-                    field="uom"
-                    header="UOM"
-                    style={{ minWidth: '80px', textAlign: 'center' }}
-                    body={(rowData: POLineItem) => rowData.uom || '-'}
+                    field="unit_cost"
+                    header="Unit Cost"
+                    style={{ minWidth: '110px', textAlign: 'right' }}
+                    body={(rowData: POLineItem) => amountBodyTemplate(rowData.unit_cost)}
+                  />
+                  <Column
+                    field="disc_pct"
+                    header="Disc %"
+                    style={{ minWidth: '80px', textAlign: 'right' }}
+                    body={(rowData: POLineItem) => rowData.disc_pct != null ? `${rowData.disc_pct}%` : '-'}
+                  />
+                  <Column
+                    field="process_cost"
+                    header="Process Cost"
+                    style={{ minWidth: '120px', textAlign: 'right' }}
+                    body={(rowData: POLineItem) => amountBodyTemplate(rowData.process_cost)}
+                  />
+                  <Column
+                    field="raw_material"
+                    header="Raw Material"
+                    style={{ minWidth: '140px' }}
+                    body={(rowData: POLineItem) => rowData.raw_material ?? '-'}
+                  />
+                  <Column
+                    field="process_description"
+                    header="Process Description"
+                    style={{ minWidth: '180px' }}
+                    body={(rowData: POLineItem) => rowData.process_description ?? '-'}
+                  />
+                  <Column
+                    field="norms"
+                    header="Norms"
+                    style={{ minWidth: '120px' }}
+                    body={(rowData: POLineItem) => rowData.norms ?? '-'}
                   />
                 </DataTable>
               </div>

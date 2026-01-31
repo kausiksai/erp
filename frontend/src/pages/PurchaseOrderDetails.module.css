@@ -1,6 +1,6 @@
 .purchaseOrderPage {
   min-height: 100vh;
-  background: #f5f7fa;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   padding: 0;
   position: relative;
 }
@@ -8,7 +8,7 @@
 .pageContainer {
   max-width: 1600px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 2rem 2.5rem;
   position: relative;
 }
 
@@ -25,6 +25,12 @@
   padding-bottom: 20px;
   border-bottom: 1px solid #e4e7eb;
   flex-wrap: wrap;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .headerText {
@@ -75,6 +81,27 @@
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+}
+
+.toolbar {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.searchInput {
+  width: 100%;
+  max-width: 400px;
+  padding: 0.625rem 1rem 0.625rem 2.5rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  font-size: 0.9375rem;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
 .loadingContainer {
@@ -252,10 +279,24 @@
   width: 60px;
 }
 
+.itemIdCell {
+  font-family: 'Courier New', monospace;
+  font-weight: 500;
+  color: #475569;
+  min-width: 100px;
+}
+
 .itemNameCell {
   font-weight: 600;
   color: #1e293b;
   min-width: 200px;
+}
+
+.descriptionSub {
+  font-size: 0.8125rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+  font-weight: 400;
 }
 
 .descriptionCell {
@@ -266,16 +307,34 @@
   white-space: nowrap;
 }
 
-.hsnCell {
-  font-family: 'Courier New', monospace;
-  color: #475569;
-  min-width: 120px;
+.unitCostCell {
+  text-align: right;
+  font-weight: 500;
+  color: #1e293b;
+  min-width: 100px;
 }
 
-.uomCell {
+.discPctCell {
   text-align: center;
   color: #64748b;
-  min-width: 80px;
+  min-width: 70px;
+}
+
+.termsCell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.textCell {
+  color: #475569;
+  font-size: 0.9375rem;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quantityCell {
@@ -326,7 +385,7 @@
 /* Responsive */
 @media (max-width: 768px) {
   .pageContainer {
-    padding: 16px;
+    padding: 1rem 1.5rem;
   }
 
   .headerContent {
@@ -358,5 +417,37 @@
 
   .descriptionCell {
     max-width: 150px;
+  }
+
+  .lineItemsTable {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .lineItemsTable table {
+    min-width: 500px;
+  }
+}
+
+@media (max-width: 480px) {
+  .pageContainer {
+    padding: 1rem;
+  }
+
+  .pageTitle {
+    font-size: 1.25rem;
+  }
+
+  .pageSubtitle {
+    font-size: 0.8125rem;
+  }
+
+  .headerActions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .refreshButton {
+    width: 100%;
   }
 }
