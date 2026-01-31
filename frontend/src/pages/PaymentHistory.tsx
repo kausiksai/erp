@@ -229,39 +229,45 @@ function PaymentHistory() {
           </div>
         </div>
 
-        <div className={styles.tableContainer}>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">Payment history</h2>
+          <p className="dts-sectionSubtitle">
+            All payments marked as done. Expand a row to see supplier, banking, PO, GRN, and ASN details.
+          </p>
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />
               <p>Loading payment history...</p>
             </div>
           ) : list.length === 0 ? (
-            <div className={styles.emptyState}>
-              <h2>No payment history</h2>
-              <p>Payments marked as done on Ready for Payments will appear here.</p>
+            <div className="dts-emptySection">
+              <p>No payment history. Payments marked as done on Ready for Payments will appear here.</p>
             </div>
           ) : (
-            <DataTable
-              value={list}
-              dataKey="id"
-              expandedRows={expandedRows}
-              onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
-              rowExpansionTemplate={rowExpansionTemplate}
-              className={styles.dataTable}
-              stripedRows
-              size="small"
-              paginator
-              rows={10}
-              rowsPerPageOptions={[10, 25, 50]}
-            >
-              <Column expander style={{ width: '3rem' }} />
-              <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
-              <Column field="po_number" header="PO Number" sortable style={{ minWidth: '120px' }} />
-              <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
-              <Column header="Amount" body={amountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
-              <Column header="Payment done at" body={(r) => dateTimeDisplay(r.payment_done_at)} sortable sortField="payment_done_at" style={{ minWidth: '160px' }} />
-              <Column header="Done by" body={doneByDisplay} style={{ minWidth: '140px' }} />
-            </DataTable>
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
+                <DataTable
+                  value={list}
+                  dataKey="id"
+                  expandedRows={expandedRows}
+                  onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
+                  rowExpansionTemplate={rowExpansionTemplate}
+                  stripedRows
+                  size="small"
+                  paginator
+                  rows={10}
+                  rowsPerPageOptions={[10, 25, 50]}
+                >
+                  <Column expander style={{ width: '3rem' }} />
+                  <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
+                  <Column field="po_number" header="PO Number" sortable style={{ minWidth: '120px' }} />
+                  <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
+                  <Column header="Amount" body={amountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
+                  <Column header="Payment done at" body={(r) => dateTimeDisplay(r.payment_done_at)} sortable sortField="payment_done_at" style={{ minWidth: '160px' }} />
+                  <Column header="Done by" body={doneByDisplay} style={{ minWidth: '140px' }} />
+                </DataTable>
+              </div>
+            </div>
           )}
         </div>
       </div>

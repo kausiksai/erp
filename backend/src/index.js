@@ -782,6 +782,35 @@ router.get('/invoices/pending-debit-note', authenticateToken, authorize(['admin'
   }
 })
 
+// Exception invoices: received after PO was already fulfilled – must be before /invoices/:id
+router.get('/invoices/pending-exception', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.total_amount, i.status,
+              i.po_id, po.po_number, COALESCE(s.supplier_name, '') AS supplier_name
+       FROM invoices i
+       LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+       LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+       WHERE LOWER(TRIM(COALESCE(i.status, ''))) = 'exception_approval'
+       ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC`
+    )
+    const result = []
+    for (const inv of rows) {
+      const validation = await validateInvoiceAgainstPoGrn(inv.invoice_id)
+      result.push({
+        ...inv,
+        validation: {
+          reason: validation.reason || 'PO already fulfilled; invoice received after PO was closed.'
+        }
+      })
+    }
+    res.json(result)
+  } catch (err) {
+    console.error('Pending exception list error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 // Get invoice PDF (main invoice attachment)
 router.get('/invoices/:id/pdf', async (req, res) => {
   try {
@@ -1412,8 +1441,8 @@ router.get('/purchase-orders', async (req, res) => {
   }
 })
 
-// Incomplete POs: missing Invoice/GRN/ASN OR status = partially_fulfilled (Force Close option)
-// Also returns pending_invoice_id and pending_invoice_status when PO has invoice in debit_note_approval or exception_approval (for inline detail + reason)
+// Incomplete POs: only open POs that have missing records (invoice, GRN, or ASN).
+// Partially fulfilled and fulfilled POs are excluded; PO stays open until all invoices are in the system.
 router.get('/purchase-orders/incomplete', async (req, res) => {
   try {
     const result = await pool.query(
@@ -1426,7 +1455,6 @@ router.get('/purchase-orders/incomplete', async (req, res) => {
          EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id) AS has_invoice,
          EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id) AS has_grn,
          EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id) AS has_asn,
-         (po.status = 'partially_fulfilled') AS can_force_close,
          ARRAY_REMOVE(ARRAY[
            CASE WHEN NOT EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id) THEN 'Invoice' END,
            CASE WHEN NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id) THEN 'GRN' END,
@@ -1436,12 +1464,12 @@ router.get('/purchase-orders/incomplete', async (req, res) => {
          (SELECT LOWER(TRIM(i.status)) FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_status
        FROM purchase_orders po
        LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
-       WHERE po.status = 'partially_fulfilled'
-          OR NOT (
-         EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
-         AND EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
-         AND EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
-       )
+       WHERE COALESCE(po.status, 'open') NOT IN ('partially_fulfilled', 'fulfilled')
+         AND NOT (
+           EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
+           AND EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
+           AND EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
+         )
        ORDER BY po.date DESC, po.po_id DESC`
     )
     res.json(result.rows)

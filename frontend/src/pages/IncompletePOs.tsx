@@ -22,7 +22,6 @@ interface IncompletePO {
   has_invoice: boolean
   has_grn: boolean
   has_asn: boolean
-  can_force_close?: boolean
   missing_items: string[]
   pending_invoice_id?: number | null
   pending_invoice_status?: string | null
@@ -52,14 +51,27 @@ interface PendingDebitNote {
   }
 }
 
+interface PendingException {
+  invoice_id: number
+  invoice_number: string
+  invoice_date: string | null
+  total_amount: number
+  status: string
+  po_id: number | null
+  po_number: string | null
+  supplier_name: string
+  validation: { reason?: string }
+}
+
 function IncompletePOs() {
   const navigate = useNavigate()
   const toast = useRef<Toast>(null)
   const [incompletePOs, setIncompletePOs] = useState<IncompletePO[]>([])
   const [debitNoteInvoices, setDebitNoteInvoices] = useState<PendingDebitNote[]>([])
+  const [exceptionInvoices, setExceptionInvoices] = useState<PendingException[]>([])
   const [loading, setLoading] = useState(true)
-  const [forceClosingId, setForceClosingId] = useState<number | null>(null)
   const [debitNoteApprovingId, setDebitNoteApprovingId] = useState<number | null>(null)
+  const [exceptionApprovingId, setExceptionApprovingId] = useState<number | null>(null)
   const [debitNoteValues, setDebitNoteValues] = useState<Record<number, number>>({})
   const [debitNoteUploadingId, setDebitNoteUploadingId] = useState<number | null>(null)
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
@@ -107,10 +119,31 @@ function IncompletePOs() {
     }
   }
 
+  const fetchExceptionInvoices = async () => {
+    try {
+      const res = await apiFetch('invoices/pending-exception')
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        if (res.status === 403) {
+          toast.current?.show({ severity: 'warn', summary: 'Access', detail: 'You do not have permission to view exception invoices.', life: 5000 })
+        } else {
+          toast.current?.show({ severity: 'error', summary: 'Error', detail: (err as { message?: string }).message || 'Failed to load exception invoices.', life: 5000 })
+        }
+        setExceptionInvoices([])
+        return
+      }
+      const data = await res.json()
+      setExceptionInvoices(Array.isArray(data) ? data : [])
+    } catch (e) {
+      setExceptionInvoices([])
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: e instanceof Error ? e.message : 'Failed to load exception invoices.', life: 5000 })
+    }
+  }
+
   const fetchAll = async () => {
     try {
       setLoading(true)
-      await Promise.all([fetchIncompletePOs(), fetchDebitNoteInvoices()])
+      await Promise.all([fetchIncompletePOs(), fetchDebitNoteInvoices(), fetchExceptionInvoices()])
     } catch (e) {
       toast.current?.show({ severity: 'error', summary: 'Error', detail: 'Failed to load data', life: 5000 })
     } finally {
@@ -127,6 +160,40 @@ function IncompletePOs() {
       accept: () => handleDebitNoteApprove(invoiceId),
       reject: () => {}
     })
+  }
+
+  const confirmExceptionApprove = (invoiceId: number) => {
+    confirmDialog({
+      message: 'Are you sure you want to approve this exception invoice and send to payments?',
+      header: 'Confirm send to payments',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleExceptionApprove(invoiceId),
+      reject: () => {}
+    })
+  }
+
+  const handleExceptionApprove = async (invoiceId: number) => {
+    setExceptionApprovingId(invoiceId)
+    try {
+      const res = await apiFetch(`invoices/${invoiceId}/exception-approve`, { method: 'PATCH' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { message?: string }).message || 'Exception approve failed')
+      }
+      toast.current?.show({
+        severity: 'success',
+        summary: 'Exception approved',
+        detail: 'Invoice moved to Ready for Payment. You can approve payment from Approve Payments.',
+        life: 5000
+      })
+      await Promise.all([fetchExceptionInvoices(), fetchDebitNoteInvoices()])
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Exception approve failed'
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+    } finally {
+      setExceptionApprovingId(null)
+    }
   }
 
   const handleDebitNoteApprove = async (invoiceId: number) => {
@@ -266,52 +333,8 @@ function IncompletePOs() {
     }
   }
 
-  const confirmForceClose = (poId: number) => {
-    confirmDialog({
-      message: 'Are you sure you want to force close this PO? It will be marked as Fulfilled.',
-      header: 'Confirm force close',
-      icon: 'pi pi-question-circle',
-      acceptClassName: 'p-button-success',
-      accept: () => handleForceClose(poId),
-      reject: () => {}
-    })
-  }
-
-  const handleForceClose = async (poId: number) => {
-    try {
-      setForceClosingId(poId)
-      const res = await apiFetch(`purchase-orders/${poId}/force-close`, { method: 'PATCH' })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.message || 'Force close failed')
-      }
-      toast.current?.show({ severity: 'success', summary: 'PO force closed', detail: 'PO status updated to Fulfilled.', life: 4000 })
-      await fetchIncompletePOs()
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Force close failed'
-      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
-    } finally {
-      setForceClosingId(null)
-    }
-  }
-
-  const actionTemplate = (rowData: IncompletePO) => {
-    const showForceClose = rowData.can_force_close && rowData.po_status !== 'partially_fulfilled'
-    return (
+  const actionTemplate = (rowData: IncompletePO) => (
       <div className={styles.actionButtons}>
-        {showForceClose && (
-          <Button
-            label="Force Close"
-            icon="pi pi-check"
-            size="small"
-            severity="success"
-            loading={forceClosingId === rowData.po_id}
-            disabled={forceClosingId !== null}
-            onClick={() => confirmForceClose(rowData.po_id)}
-            title="Mark PO as Fulfilled"
-            className={styles.actionButton}
-          />
-        )}
         {!rowData.has_invoice && (
           <Button
             label="Add Invoice"
@@ -353,7 +376,6 @@ function IncompletePOs() {
         />
       </div>
     )
-  }
 
   const statusTemplate = (rowData: IncompletePO) => {
     const s = rowData.po_status || 'open'
@@ -387,7 +409,7 @@ function IncompletePOs() {
           <div>
             <h1 className={styles.title}>Incomplete Purchase Orders</h1>
             <p className={styles.subtitle}>
-              Debit note invoices (quantity mismatch) and POs missing Invoice, GRN, or ASN, or Partially Fulfilled.
+              Debit note invoices (quantity mismatch), exception invoices (received after PO fulfilled), and open POs missing Invoice, GRN, or ASN. PO remains open until all invoices are in the system.
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -402,25 +424,24 @@ function IncompletePOs() {
         </div>
 
         {/* Debit note approval section - always show so user knows where to find debit note POs */}
-        <div className={`${styles.section} ${styles.debitNoteSection}`}>
-          <h2 className={styles.sectionTitle}>Debit note approval</h2>
-          <p className={styles.sectionSubtitle}>
+        <div className={`dts-section dts-section-accent ${styles.debitNoteSection}`}>
+          <h2 className="dts-sectionTitle">Debit note approval</h2>
+          <p className="dts-sectionSubtitle">
             Invoices in debit note status (quantity mismatch or GRN &lt; invoice). Upload debit note PDF, enter amount to pay, and approve to move to Ready for Payment.
           </p>
           {debitNoteInvoices.length === 0 ? (
-            <div className={styles.emptySection}>
+            <div className="dts-emptySection">
               <p>No invoices awaiting debit note approval. Invoices that fail validation (e.g. GRN qty &lt; invoice qty) appear here after you click Validate on Invoice Details.</p>
             </div>
           ) : (
-            <div className={styles.tableWrapper}>
-              <div className={styles.tableContainer}>
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
                 <DataTable
                   value={debitNoteInvoices}
                   paginator
                   rows={10}
                   rowsPerPageOptions={[5, 10, 25]}
                   emptyMessage="No debit note invoices"
-                  className={styles.dataTable}
                   stripedRows
                 >
                   <Column field="invoice_number" header="Invoice" sortable className={styles.colInvoice} />
@@ -429,7 +450,7 @@ function IncompletePOs() {
                   <Column
                     header="Reason"
                     body={(row: PendingDebitNote) => (
-                      <span className={styles.reasonText} title={row.validation?.reason}>
+                      <span className="dts-reasonText" title={row.validation?.reason}>
                         {row.validation?.reason || '—'}
                       </span>
                     )}
@@ -494,7 +515,7 @@ function IncompletePOs() {
                 <Column
                   header="Actions"
                   body={(row: PendingDebitNote) => (
-                    <div className={styles.debitNoteActions}>
+                    <div className="dts-actionButtons">
                       <Button
                         icon="pi pi-eye"
                         size="small"
@@ -502,7 +523,7 @@ function IncompletePOs() {
                         tooltip="View invoice"
                         tooltipOptions={{ position: 'top' }}
                         onClick={() => navigate(`/invoices/validate/${row.invoice_id}`)}
-                        className={styles.iconBtn}
+                        className="dts-iconBtn"
                       />
                       <Button
                         icon="pi pi-check"
@@ -513,7 +534,7 @@ function IncompletePOs() {
                         loading={debitNoteApprovingId === row.invoice_id}
                         disabled={debitNoteApprovingId !== null}
                         onClick={() => confirmDebitNoteApprove(row.invoice_id)}
-                        className={styles.iconBtn}
+                        className="dts-iconBtn"
                       />
                     </div>
                   )}
@@ -525,10 +546,92 @@ function IncompletePOs() {
           )}
         </div>
 
-        <div className={`${styles.section} ${styles.incompleteSection}`}>
-          <h2 className={styles.sectionTitle}>Incomplete purchase orders</h2>
-          <div className={styles.tableWrapper}>
-            <div className={styles.tableContainer}>
+        {/* Exception invoices: received after PO was already fulfilled */}
+        <div className={`dts-section dts-section-accent ${styles.debitNoteSection}`}>
+          <h2 className="dts-sectionTitle">Exception invoices</h2>
+          <p className="dts-sectionSubtitle">
+            Invoices received after the PO was already fulfilled. Review and approve to send to Ready for Payment.
+          </p>
+          {exceptionInvoices.length === 0 ? (
+            <div className="dts-emptySection">
+              <p>No exception invoices. These appear when an invoice is validated for a PO that is already fulfilled.</p>
+            </div>
+          ) : (
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
+                <DataTable
+                  value={exceptionInvoices}
+                  paginator
+                  rows={10}
+                  rowsPerPageOptions={[5, 10, 25]}
+                  emptyMessage="No exception invoices"
+                  stripedRows
+                >
+                  <Column field="invoice_number" header="Invoice" sortable className={styles.colInvoice} />
+                  <Column field="po_number" header="PO Number" sortable body={(r: PendingException) => r.po_number ?? '—'} className={styles.colPoNumber} />
+                  <Column field="supplier_name" header="Supplier" sortable className={styles.colSupplier} />
+                  <Column
+                    header="Amount"
+                    body={(row: PendingException) =>
+                      row.total_amount != null
+                        ? `₹${Number(row.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : '—'
+                    }
+                    sortable
+                    sortField="total_amount"
+                    className={styles.colAmount}
+                  />
+                  <Column
+                    header="Reason"
+                    body={(row: PendingException) => (
+                      <span className="dts-reasonText" title={row.validation?.reason}>
+                        {row.validation?.reason || 'PO already fulfilled'}
+                      </span>
+                    )}
+                    className={styles.colReason}
+                  />
+                  <Column
+                    header="Actions"
+                    body={(row: PendingException) => (
+                      <div className="dts-actionButtons">
+                        <Button
+                          icon="pi pi-eye"
+                          size="small"
+                          outlined
+                          tooltip="View invoice"
+                          tooltipOptions={{ position: 'top' }}
+                          onClick={() => navigate(`/invoices/validate/${row.invoice_id}`)}
+                          className="dts-iconBtn"
+                        />
+                        <Button
+                          icon="pi pi-check"
+                          size="small"
+                          severity="success"
+                          tooltip="Approve exception"
+                          tooltipOptions={{ position: 'top' }}
+                          loading={exceptionApprovingId === row.invoice_id}
+                          disabled={exceptionApprovingId !== null}
+                          onClick={() => confirmExceptionApprove(row.invoice_id)}
+                          className="dts-iconBtn"
+                        />
+                      </div>
+                    )}
+                    className={styles.colActions}
+                  />
+                </DataTable>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Same section/table CSS as Exception invoices block */}
+        <div className={`dts-section dts-section-accent ${styles.debitNoteSection}`}>
+          <h2 className="dts-sectionTitle">Incomplete purchase orders</h2>
+          <p className="dts-sectionSubtitle">
+            Open POs missing Invoice, GRN, or ASN. PO remains open until all invoices are in the system.
+          </p>
+          <div className="dts-tableWrapper">
+            <div className="dts-tableContainer">
               <DataTable
                 value={incompletePOs}
                 dataKey="po_id"
@@ -597,12 +700,11 @@ function IncompletePOs() {
                     </div>
                   )
                 }}
-                expandableRowCondition={showInlineDetail}
                 paginator
                 rows={10}
                 rowsPerPageOptions={[10, 25, 50]}
                 emptyMessage="No incomplete purchase orders found"
-                className={styles.dataTable}
+                stripedRows
               >
                 <Column expander style={{ width: '3rem' }} />
                 <Column

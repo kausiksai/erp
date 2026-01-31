@@ -1,0 +1,163 @@
+/**
+ * Shared section + table styles (same as Debit note / Exception invoices on Incomplete POs).
+ * Use classes: dts-section, dts-sectionTitle, dts-sectionSubtitle, dts-tableWrapper,
+ * dts-tableContainer, dts-emptySection, dts-actionButtons, dts-iconBtn
+ */
+
+.dts-section {
+  display: block;
+  position: relative;
+  margin-bottom: 2.5rem;
+  width: 100%;
+  min-height: 0;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  padding: 1.5rem;
+}
+
+/* Amber left border for Debit note / Exception / Incomplete POs blocks */
+.dts-section.dts-section-accent {
+  border-left: 4px solid #ca8a04;
+}
+
+.dts-sectionTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.35rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dts-sectionSubtitle {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin: 0 0 1rem 0;
+  line-height: 1.5;
+}
+
+.dts-tableWrapper {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  min-width: 0;
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.dts-tableContainer {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 1rem;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.dts-tableContainer :global(.p-datatable-wrapper) {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  max-height: none !important;
+  display: block;
+  width: 100%;
+}
+
+.dts-tableContainer :global(.p-datatable-table) {
+  width: 100%;
+  table-layout: auto;
+}
+
+.dts-tableContainer :global(.p-datatable-thead > tr > th) {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  font-weight: 600;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 2px solid #e2e8f0;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  vertical-align: middle;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.dts-tableContainer :global(.p-datatable-tbody > tr > td) {
+  padding: 0.65rem 0.75rem;
+  font-size: 0.875rem;
+  vertical-align: middle;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-wrap: break-word;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.dts-tableContainer :global(.p-datatable-tbody > tr:hover) {
+  background-color: #f8fafc;
+}
+
+.dts-tableContainer :global(.p-datatable) {
+  display: block !important;
+}
+
+.dts-tableContainer :global(.p-paginator) {
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  flex-shrink: 0;
+}
+
+.dts-emptySection {
+  padding: 1.5rem 1.25rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  font-size: 0.9375rem;
+  color: #78716c;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.dts-emptySection p {
+  margin: 0;
+}
+
+.dts-actionButtons {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.dts-iconBtn {
+  padding: 0.4rem;
+  min-width: 2rem;
+}
+
+.dts-iconBtn :global(.p-button-icon) {
+  margin: 0;
+}
+
+.dts-reasonText {
+  font-size: 0.8125rem;
+  color: #475569;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 100%;
+}

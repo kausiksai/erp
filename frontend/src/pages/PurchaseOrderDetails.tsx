@@ -274,7 +274,9 @@ function PurchaseOrderDetails() {
           </div>
         </div>
 
-      <div className={styles.tableContainer}>
+      <div className="dts-section dts-section-accent">
+        <h2 className="dts-sectionTitle">Purchase orders</h2>
+        <p className="dts-sectionSubtitle">View and manage all purchase orders. Expand a row to see line items.</p>
         {!loading && (
           <div className={styles.toolbar}>
             <span className="p-input-icon-left">
@@ -294,20 +296,21 @@ function PurchaseOrderDetails() {
             <p>Loading purchase orders...</p>
           </div>
         ) : (
-          <DataTable
-            value={filteredPOs}
-            paginator
-            rows={10}
-            rowsPerPageOptions={[10, 25, 50]}
-            emptyMessage={searchTerm ? 'No matching purchase orders' : 'No purchase orders found'}
-            className={styles.dataTable}
-            stripedRows
-            expandedRows={expandedRows}
-            onRowToggle={(e) => setExpandedRows(e.data)}
-            rowExpansionTemplate={rowExpansionTemplate}
-            onRowExpand={onRowExpand}
-            dataKey="po_id"
-          >
+          <div className="dts-tableWrapper">
+            <div className="dts-tableContainer">
+              <DataTable
+                value={filteredPOs}
+                paginator
+                rows={10}
+                rowsPerPageOptions={[10, 25, 50]}
+                emptyMessage={searchTerm ? 'No matching purchase orders' : 'No purchase orders found'}
+                stripedRows
+                expandedRows={expandedRows}
+                onRowToggle={(e) => setExpandedRows(e.data)}
+                rowExpansionTemplate={rowExpansionTemplate}
+                onRowExpand={onRowExpand}
+                dataKey="po_id"
+              >
             <Column expander style={{ width: '3rem' }} />
             <Column
               field="po_number"
@@ -365,7 +368,9 @@ function PurchaseOrderDetails() {
               body={statusBodyTemplate}
               style={{ minWidth: '150px' }}
             />
-          </DataTable>
+              </DataTable>
+            </div>
+          </div>
         )}
       </div>
       </div>

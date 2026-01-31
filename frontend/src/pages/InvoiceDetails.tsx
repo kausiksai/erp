@@ -98,9 +98,13 @@ function InvoiceDetails() {
     grnQty?: number
   } | null>(null)
   const [resolvingValidation, setResolvingValidation] = useState<boolean>(false)
+  const [validationAttemptFailed, setValidationAttemptFailed] = useState<boolean>(false)
+  const [successDialogVisible, setSuccessDialogVisible] = useState<boolean>(false)
+  const [successDialogContent, setSuccessDialogContent] = useState<{ summary: string; detail: string }>({ summary: '', detail: '' })
 
   useEffect(() => {
     if (id) {
+      setValidationAttemptFailed(false)
       fetchInvoiceDetails(parseInt(id))
     }
   }, [id])
@@ -158,6 +162,7 @@ function InvoiceDetails() {
       const res = await apiFetch(`invoices/${invoice.invoice_id}/validate`, { method: 'POST' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        setValidationAttemptFailed(true)
         toast.current?.show({
           severity: 'error',
           summary: 'Validation failed',
@@ -166,6 +171,7 @@ function InvoiceDetails() {
         })
         return
       }
+      setValidationAttemptFailed(false)
       const action = data.action || data.status
       if (action === 'shortfall') {
         setValidationMismatchData({
@@ -178,29 +184,27 @@ function InvoiceDetails() {
         return
       }
       if (action === 'ready_for_payment') {
-        toast.current?.show({
-          severity: 'success',
-          summary: 'Ready for payment',
-          detail: 'Invoice validated. It will appear on Approve Payments for manager approval.',
-          life: 6000
+        setSuccessDialogContent({
+          summary: 'Validation successful',
+          detail: 'Invoice validated successfully. It will appear on Approve Payments for manager approval.'
         })
+        setSuccessDialogVisible(true)
       } else if (action === 'exception_approval') {
-        toast.current?.show({
-          severity: 'info',
-          summary: 'Exception approval required',
-          detail: 'Invoice is for an already-fulfilled PO. Use Exception Approve when ready.',
-          life: 6000
+        setSuccessDialogContent({
+          summary: 'Validation successful',
+          detail: 'Invoice is for an already-fulfilled PO. Use Exception Approve on Incomplete POs when ready.'
         })
+        setSuccessDialogVisible(true)
       } else {
-        toast.current?.show({
-          severity: 'info',
-          summary: 'Validated',
-          detail: data.message || 'Invoice validation completed.',
-          life: 5000
+        setSuccessDialogContent({
+          summary: 'Validation successful',
+          detail: data.message || 'Invoice validation completed.'
         })
+        setSuccessDialogVisible(true)
       }
       await fetchInvoiceDetails(invoice.invoice_id)
     } catch (e: unknown) {
+      setValidationAttemptFailed(true)
       const msg = e instanceof Error ? e.message : 'Validation failed'
       toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
     } finally {
@@ -330,6 +334,25 @@ function InvoiceDetails() {
       <Toast ref={toast} />
       <ConfirmDialog />
       <Dialog
+        visible={successDialogVisible}
+        onHide={() => setSuccessDialogVisible(false)}
+        header={successDialogContent.summary}
+        className={styles.validationDialog}
+        modal
+        closable
+        footer={
+          <Button
+            label="OK"
+            icon="pi pi-check"
+            onClick={() => {
+              setSuccessDialogVisible(false)
+            }}
+          />
+        }
+      >
+        <p className={styles.validationDialogMessage}>{successDialogContent.detail}</p>
+      </Dialog>
+      <Dialog
         visible={!!validationMismatchData}
         onHide={() => !resolvingValidation && setValidationMismatchData(null)}
         header="Validation mismatch (partial fulfillment)"
@@ -374,17 +397,25 @@ function InvoiceDetails() {
             </div>
             <div className={styles.headerActions}>
               {(() => {
-                const statusLower = (invoice.status || '').toLowerCase()
-                const canValidate = !['ready_for_payment', 'approved', 'rejected', 'completed'].includes(statusLower)
+                const statusNorm = (invoice.status || '').toLowerCase().replace(/\s+/g, '_').trim()
+                const alreadyValidatedOrInWorkflow = [
+                  'ready_for_payment',
+                  'approved',
+                  'rejected',
+                  'completed',
+                  'debit_note_approval',
+                  'exception_approval'
+                ].includes(statusNorm)
+                const canValidate = !alreadyValidatedOrInWorkflow
                 return canValidate ? (
                   <Button
-                    label="Validate"
+                    label={validationAttemptFailed ? 'Re-validate' : 'Validate'}
                     icon="pi pi-check-circle"
                     onClick={handleValidate}
                     loading={validating}
                     disabled={validating}
-                    className={styles.validateButton}
-                    severity="success"
+                    className={validationAttemptFailed ? styles.revalidateButton : styles.validateButton}
+                    severity={validationAttemptFailed ? 'danger' : 'success'}
                   />
                 ) : null
               })()}
@@ -515,18 +546,18 @@ function InvoiceDetails() {
         <Divider />
 
         {/* Invoice Line Items */}
-        <div className={styles.lineItemsSection}>
-          <h3 className={styles.sectionTitle}>
+        <div className="dts-section dts-section-accent">
+          <h3 className="dts-sectionTitle">
             <i className="pi pi-list" style={{ marginRight: '0.5rem' }}></i>
             Invoice Line Items ({invoice.items.length})
           </h3>
-          <div className={styles.tableContainer}>
-            <DataTable
-              value={invoice.items}
-              emptyMessage="No line items found"
-              className={styles.dataTable}
-              stripedRows
-            >
+          <div className="dts-tableWrapper">
+            <div className="dts-tableContainer">
+              <DataTable
+                value={invoice.items}
+                emptyMessage="No line items found"
+                stripedRows
+              >
               <Column
                 field="sequence_number"
                 header="#"
@@ -598,7 +629,8 @@ function InvoiceDetails() {
                 style={{ minWidth: '150px', textAlign: 'right', fontWeight: '600' }}
                 body={(rowData: InvoiceLineItem) => amountBodyTemplate(rowData.line_total)}
               />
-            </DataTable>
+              </DataTable>
+            </div>
           </div>
         </div>
 
@@ -606,20 +638,20 @@ function InvoiceDetails() {
         {invoice.poLineItems && invoice.poLineItems.length > 0 && (
           <>
             <Divider />
-            <div className={styles.lineItemsSection}>
-              <h3 className={styles.sectionTitle}>
+            <div className="dts-section dts-section-accent">
+              <h3 className="dts-sectionTitle">
                 <i className="pi pi-list" style={{ marginRight: '0.5rem' }}></i>
                 Purchase Order Line Items ({invoice.poLineItems.length})
               </h3>
-              <div className={styles.tableContainer}>
-                <DataTable
-                  value={invoice.poLineItems}
-                  emptyMessage="No PO line items found"
-                  className={styles.dataTable}
-                  stripedRows
-                  scrollable
-                  scrollHeight="400px"
-                >
+              <div className="dts-tableWrapper">
+                <div className="dts-tableContainer">
+                  <DataTable
+                    value={invoice.poLineItems}
+                    emptyMessage="No PO line items found"
+                    stripedRows
+                    scrollable
+                    scrollHeight="400px"
+                  >
                   <Column
                     field="sequence_number"
                     header="#"
@@ -686,7 +718,8 @@ function InvoiceDetails() {
                     style={{ minWidth: '120px' }}
                     body={(rowData: POLineItem) => rowData.norms ?? '-'}
                   />
-                </DataTable>
+                  </DataTable>
+                </div>
               </div>
             </div>
           </>

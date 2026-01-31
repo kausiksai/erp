@@ -251,26 +251,30 @@ function InvoiceReports() {
               </div>
             </div>
 
-            <section className={styles.detailSection}>
-              <h3 className={styles.sectionTitle}>Status breakdown (detail)</h3>
-              <p className={styles.sectionSubtitle}>Count and share per status</p>
-              <div className={styles.tableWrap}>
-                <DataTable value={statusWithPct} size="small" stripedRows emptyMessage="No status data." className={styles.dataTable}>
-                  <Column field="status" header="Status" />
-                  <Column field="count" header="Count" />
-                  <Column field="pct" header="%" body={(row) => `${row.pct}%`} />
-                </DataTable>
+            <section className="dts-section dts-section-accent">
+              <h3 className="dts-sectionTitle">Status breakdown (detail)</h3>
+              <p className="dts-sectionSubtitle">Count and share per status</p>
+              <div className="dts-tableWrapper">
+                <div className="dts-tableContainer">
+                  <DataTable value={statusWithPct} size="small" stripedRows emptyMessage="No status data.">
+                    <Column field="status" header="Status" />
+                    <Column field="count" header="Count" />
+                    <Column field="pct" header="%" body={(row) => `${row.pct}%`} />
+                  </DataTable>
+                </div>
               </div>
             </section>
 
-            <section className={styles.detailSection}>
-              <h3 className={styles.sectionTitle}>Monthly volume (detail)</h3>
-              <p className={styles.sectionSubtitle}>Invoice count by month</p>
-              <div className={styles.tableWrap}>
-                <DataTable value={data.byMonth ?? []} size="small" stripedRows emptyMessage="No monthly data." className={styles.dataTable}>
-                  <Column field="month_label" header="Month" />
-                  <Column field="count" header="Invoice count" />
-                </DataTable>
+            <section className="dts-section dts-section-accent">
+              <h3 className="dts-sectionTitle">Monthly volume (detail)</h3>
+              <p className="dts-sectionSubtitle">Invoice count by month</p>
+              <div className="dts-tableWrapper">
+                <div className="dts-tableContainer">
+                  <DataTable value={data.byMonth ?? []} size="small" stripedRows emptyMessage="No monthly data.">
+                    <Column field="month_label" header="Month" />
+                    <Column field="count" header="Invoice count" />
+                  </DataTable>
+                </div>
               </div>
             </section>
           </>

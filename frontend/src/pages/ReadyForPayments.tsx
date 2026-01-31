@@ -237,35 +237,41 @@ function ReadyForPayments() {
           <PageNavigation />
         </div>
 
-        <div className={styles.tableContainer}>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">Ready for payment</h2>
+          <p className="dts-sectionSubtitle">
+            Approved payments with full PO, supplier, invoice, GRN, ASN and banking details. Mark as done when payment is completed.
+          </p>
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />
               <p>Loading ready payments...</p>
             </div>
           ) : list.length === 0 ? (
-            <div className={styles.emptyState}>
-              <h2>No ready payments</h2>
-              <p>Approved payments from Approve Payments will appear here. Mark as done when payment is completed.</p>
+            <div className="dts-emptySection">
+              <p>No ready payments. Approved payments from Approve Payments will appear here. Mark as done when payment is completed.</p>
             </div>
           ) : (
-            <DataTable
-              value={list}
-              dataKey="id"
-              expandedRows={expandedRows}
-              onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
-              rowExpansionTemplate={rowExpansionTemplate}
-              className={styles.dataTable}
-              stripedRows
-              size="small"
-            >
-              <Column expander style={{ width: '3rem' }} />
-              <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
-              <Column field="po_number" header="PO Number" sortable style={{ minWidth: '120px' }} />
-              <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
-              <Column header="Amount" body={amountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
-              <Column header="Approved at" body={(r) => dateDisplay(r.approved_at)} sortable sortField="approved_at" style={{ minWidth: '120px' }} />
-            </DataTable>
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
+                <DataTable
+                  value={list}
+                  dataKey="id"
+                  expandedRows={expandedRows}
+                  onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
+                  rowExpansionTemplate={rowExpansionTemplate}
+                  stripedRows
+                  size="small"
+                >
+                  <Column expander style={{ width: '3rem' }} />
+                  <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
+                  <Column field="po_number" header="PO Number" sortable style={{ minWidth: '120px' }} />
+                  <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
+                  <Column header="Amount" body={amountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
+                  <Column header="Approved at" body={(r) => dateDisplay(r.approved_at)} sortable sortField="approved_at" style={{ minWidth: '120px' }} />
+                </DataTable>
+              </div>
+            </div>
           )}
         </div>
       </div>

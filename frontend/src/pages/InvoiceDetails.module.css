@@ -44,6 +44,18 @@
   padding: 0.5rem 1rem;
 }
 
+.revalidateButton {
+  padding: 0.5rem 1rem;
+  color: #fff !important;
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+}
+
+.revalidateButton:hover:not(:disabled) {
+  background: #b91c1c !important;
+  border-color: #b91c1c !important;
+}
+
 .backButton {
   align-self: flex-start;
   margin-bottom: 0.5rem;

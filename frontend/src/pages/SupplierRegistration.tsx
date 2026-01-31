@@ -316,24 +316,29 @@ function SupplierRegistration() {
           </div>
         </div>
 
-        <div className={styles.tableCard}>
-          <DataTable
-            value={suppliers}
-            dataKey="supplier_id"
-            paginator
-            rows={10}
-            rowsPerPageOptions={[5, 10, 25, 50]}
-            emptyMessage="No suppliers found. Add one to get started."
-            className={styles.dataTable}
-            stripedRows
-          >
-            <Column field="supplier_name" header="Supplier Name" sortable style={{ minWidth: '180px' }} />
-            <Column field="gst_number" header="GST Number" sortable style={{ minWidth: '140px' }} />
-            <Column field="city" header="City" sortable style={{ minWidth: '120px' }} />
-            <Column field="email" header="Email" sortable style={{ minWidth: '180px' }} />
-            <Column field="contact_person" header="Contact Person" sortable style={{ minWidth: '140px' }} />
-            <Column header="Actions" body={actionsBody} style={{ width: '120px' }} />
-          </DataTable>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">Suppliers</h2>
+          <p className="dts-sectionSubtitle">Manage supplier records. Add, edit, or remove suppliers.</p>
+          <div className="dts-tableWrapper">
+            <div className="dts-tableContainer">
+              <DataTable
+                value={suppliers}
+                dataKey="supplier_id"
+                paginator
+                rows={10}
+                rowsPerPageOptions={[5, 10, 25, 50]}
+                emptyMessage="No suppliers found. Add one to get started."
+                stripedRows
+              >
+                <Column field="supplier_name" header="Supplier Name" sortable style={{ minWidth: '180px' }} />
+                <Column field="gst_number" header="GST Number" sortable style={{ minWidth: '140px' }} />
+                <Column field="city" header="City" sortable style={{ minWidth: '120px' }} />
+                <Column field="email" header="Email" sortable style={{ minWidth: '180px' }} />
+                <Column field="contact_person" header="Contact Person" sortable style={{ minWidth: '140px' }} />
+                <Column header="Actions" body={actionsBody} style={{ width: '120px' }} />
+              </DataTable>
+            </div>
+          </div>
         </div>
       </div>
 

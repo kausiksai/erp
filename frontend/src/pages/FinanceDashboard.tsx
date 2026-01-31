@@ -286,31 +286,32 @@ function FinanceDashboard() {
             </section>
 
             {data.invoiceByStatus && data.invoiceByStatus.length > 0 && (
-              <section className={styles.summaryBlock} aria-label="Invoice status breakdown">
-                <h2 className={styles.blockTitle}>Invoice status breakdown</h2>
-                <p className={styles.blockSubtitle}>Count and value by invoice status</p>
-                <div className={styles.tableWrap}>
-                  <DataTable
-                    value={data.invoiceByStatus}
-                    size="small"
-                    stripedRows
-                    className={styles.dataTable}
-                    emptyMessage="No invoice data"
-                  >
-                    <Column
-                      field="status"
-                      header="Status"
-                      body={(row) => statusLabel(row.status)}
-                      style={{ minWidth: '160px' }}
-                    />
-                    <Column field="count" header="Count" style={{ minWidth: '80px' }} />
-                    <Column
-                      field="total_amount"
-                      header="Amount (₹)"
-                      body={(row) => formatCurrency(row.total_amount)}
-                      style={{ minWidth: '140px' }}
-                    />
-                  </DataTable>
+              <section className="dts-section dts-section-accent" aria-label="Invoice status breakdown">
+                <h2 className="dts-sectionTitle">Invoice status breakdown</h2>
+                <p className="dts-sectionSubtitle">Count and value by invoice status</p>
+                <div className="dts-tableWrapper">
+                  <div className="dts-tableContainer">
+                    <DataTable
+                      value={data.invoiceByStatus}
+                      size="small"
+                      stripedRows
+                      emptyMessage="No invoice data"
+                    >
+                      <Column
+                        field="status"
+                        header="Status"
+                        body={(row) => statusLabel(row.status)}
+                        style={{ minWidth: '160px' }}
+                      />
+                      <Column field="count" header="Count" style={{ minWidth: '80px' }} />
+                      <Column
+                        field="total_amount"
+                        header="Amount (₹)"
+                        body={(row) => formatCurrency(row.total_amount)}
+                        style={{ minWidth: '140px' }}
+                      />
+                    </DataTable>
+                  </div>
                 </div>
               </section>
             )}
@@ -405,68 +406,71 @@ function FinanceDashboard() {
             )}
 
             {data.byMonth && data.byMonth.length > 0 && (
-              <section className={styles.summaryBlock} aria-label="Monthly summary">
-                <h2 className={styles.blockTitle}>Monthly financial summary</h2>
-                <p className={styles.blockSubtitle}>Invoices, billed amount, and tax by month (last 12 months)</p>
-                <div className={styles.tableWrap}>
-                  <DataTable
-                    value={data.byMonth.slice(-12).reverse()}
-                    size="small"
-                    stripedRows
-                    className={styles.dataTable}
-                    emptyMessage="No monthly data"
-                  >
-                    <Column field="month_label" header="Month" style={{ minWidth: '120px' }} />
-                    <Column field="invoice_count" header="Invoices" style={{ minWidth: '90px' }} />
-                    <Column field="amount" header="Billed (₹)" body={(row) => formatCurrency(row.amount)} style={{ minWidth: '130px' }} />
-                    <Column field="tax_amount" header="Tax (₹)" body={(row) => formatCurrency(row.tax_amount)} style={{ minWidth: '130px' }} />
-                  </DataTable>
+              <section className="dts-section dts-section-accent" aria-label="Monthly summary">
+                <h2 className="dts-sectionTitle">Monthly financial summary</h2>
+                <p className="dts-sectionSubtitle">Invoices, billed amount, and tax by month (last 12 months)</p>
+                <div className="dts-tableWrapper">
+                  <div className="dts-tableContainer">
+                    <DataTable
+                      value={data.byMonth.slice(-12).reverse()}
+                      size="small"
+                      stripedRows
+                      emptyMessage="No monthly data"
+                    >
+                      <Column field="month_label" header="Month" style={{ minWidth: '120px' }} />
+                      <Column field="invoice_count" header="Invoices" style={{ minWidth: '90px' }} />
+                      <Column field="amount" header="Billed (₹)" body={(row) => formatCurrency(row.amount)} style={{ minWidth: '130px' }} />
+                      <Column field="tax_amount" header="Tax (₹)" body={(row) => formatCurrency(row.tax_amount)} style={{ minWidth: '130px' }} />
+                    </DataTable>
+                  </div>
                 </div>
               </section>
             )}
 
             <div className={styles.twoCol}>
               {data.topSuppliers && data.topSuppliers.length > 0 && (
-                <section className={styles.summaryBlock} aria-label="Top suppliers">
-                  <h2 className={styles.blockTitle}>Top suppliers by billed amount</h2>
-                  <p className={styles.blockSubtitle}>Top 10 by total invoice value</p>
-                  <div className={styles.tableWrap}>
-                    <DataTable
-                      value={data.topSuppliers}
-                      size="small"
-                      stripedRows
-                      className={styles.dataTable}
-                      emptyMessage="No supplier data"
-                    >
-                      <Column field="supplier_name" header="Supplier" style={{ minWidth: '180px' }} />
-                      <Column field="invoice_count" header="Invoices" style={{ minWidth: '80px' }} />
-                      <Column
-                        field="total_amount"
-                        header="Total (₹)"
-                        body={(row) => formatCurrency(row.total_amount)}
-                        style={{ minWidth: '120px' }}
-                      />
-                    </DataTable>
+                <section className="dts-section dts-section-accent" aria-label="Top suppliers">
+                  <h2 className="dts-sectionTitle">Top suppliers by billed amount</h2>
+                  <p className="dts-sectionSubtitle">Top 10 by total invoice value</p>
+                  <div className="dts-tableWrapper">
+                    <div className="dts-tableContainer">
+                      <DataTable
+                        value={data.topSuppliers}
+                        size="small"
+                        stripedRows
+                        emptyMessage="No supplier data"
+                      >
+                        <Column field="supplier_name" header="Supplier" style={{ minWidth: '180px' }} />
+                        <Column field="invoice_count" header="Invoices" style={{ minWidth: '80px' }} />
+                        <Column
+                          field="total_amount"
+                          header="Total (₹)"
+                          body={(row) => formatCurrency(row.total_amount)}
+                          style={{ minWidth: '120px' }}
+                        />
+                      </DataTable>
+                    </div>
                   </div>
                 </section>
               )}
               {data.recentPayments && data.recentPayments.length > 0 && (
-                <section className={styles.summaryBlock} aria-label="Recent payments">
-                  <h2 className={styles.blockTitle}>Recent payments</h2>
-                  <p className={styles.blockSubtitle}>Last 10 completed payments</p>
-                  <div className={styles.tableWrap}>
-                    <DataTable
-                      value={data.recentPayments}
-                      size="small"
-                      stripedRows
-                      className={styles.dataTable}
-                      emptyMessage="No recent payments"
-                    >
-                      <Column field="invoice_number" header="Invoice" style={{ minWidth: '120px' }} />
-                      <Column field="supplier_name" header="Supplier" body={(row) => row.supplier_name || '—'} style={{ minWidth: '140px' }} />
-                      <Column field="amount" header="Amount (₹)" body={(row) => formatCurrency(row.amount)} style={{ minWidth: '110px' }} />
-                      <Column field="payment_done_at" header="Paid on" body={(row) => formatDate(row.payment_done_at)} style={{ minWidth: '110px' }} />
-                    </DataTable>
+                <section className="dts-section dts-section-accent" aria-label="Recent payments">
+                  <h2 className="dts-sectionTitle">Recent payments</h2>
+                  <p className="dts-sectionSubtitle">Last 10 completed payments</p>
+                  <div className="dts-tableWrapper">
+                    <div className="dts-tableContainer">
+                      <DataTable
+                        value={data.recentPayments}
+                        size="small"
+                        stripedRows
+                        emptyMessage="No recent payments"
+                      >
+                        <Column field="invoice_number" header="Invoice" style={{ minWidth: '120px' }} />
+                        <Column field="supplier_name" header="Supplier" body={(row) => row.supplier_name || '—'} style={{ minWidth: '140px' }} />
+                        <Column field="amount" header="Amount (₹)" body={(row) => formatCurrency(row.amount)} style={{ minWidth: '110px' }} />
+                        <Column field="payment_done_at" header="Paid on" body={(row) => formatDate(row.payment_done_at)} style={{ minWidth: '110px' }} />
+                      </DataTable>
+                    </div>
                   </div>
                   <Button
                     label="View full payment history"

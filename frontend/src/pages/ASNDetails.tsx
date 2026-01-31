@@ -164,7 +164,9 @@ function ASNDetails() {
           </div>
         </div>
 
-        <div className={styles.tableContainer}>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">ASN records</h2>
+          <p className="dts-sectionSubtitle">View all Advanced Shipping Notices (loaded from Excel import). Expand a row for more details.</p>
           {!loading && (
             <div className={styles.toolbar}>
               <span className="p-input-icon-left">
@@ -184,30 +186,33 @@ function ASNDetails() {
               <p>Loading ASN...</p>
             </div>
           ) : (
-            <DataTable
-              value={filteredRecords}
-              paginator
-              rows={10}
-              rowsPerPageOptions={[10, 25, 50]}
-              emptyMessage={searchTerm ? 'No matching ASN records' : 'No ASN records found'}
-              className={styles.dataTable}
-              stripedRows
-              expandedRows={expandedRows}
-              onRowToggle={(e) => setExpandedRows(e.data)}
-              rowExpansionTemplate={rowExpansionTemplate}
-              dataKey="id"
-            >
-              <Column expander style={{ width: '3rem' }} />
-              <Column field="asn_no" header="ASN No" sortable style={{ minWidth: '140px' }} body={(r) => <strong>{r.asn_no ?? '-'}</strong>} />
-              <Column field="po_number" header="PO Number" sortable style={{ minWidth: '130px' }} body={(r) => r.po_number ?? '-'} />
-              <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '200px' }} body={(r) => r.supplier_name ?? r.supplier ?? '-'} />
-              <Column field="dc_no" header="DC No" sortable style={{ minWidth: '120px' }} body={(r) => r.dc_no ?? '-'} />
-              <Column field="dc_date" header="DC Date" sortable body={dateBodyTemplate} style={{ minWidth: '120px' }} />
-              <Column field="lr_no" header="LR No" style={{ minWidth: '120px' }} body={(r) => r.lr_no ?? '-'} />
-              <Column field="lr_date" header="LR Date" body={lrDateBodyTemplate} style={{ minWidth: '120px' }} />
-              <Column field="transporter" header="Transporter" style={{ minWidth: '140px' }} body={(r) => r.transporter ?? r.transporter_name ?? '-'} />
-              <Column field="status" header="Status" body={statusBodyTemplate} style={{ minWidth: '120px' }} />
-            </DataTable>
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
+                <DataTable
+                  value={filteredRecords}
+                  paginator
+                  rows={10}
+                  rowsPerPageOptions={[10, 25, 50]}
+                  emptyMessage={searchTerm ? 'No matching ASN records' : 'No ASN records found'}
+                  stripedRows
+                  expandedRows={expandedRows}
+                  onRowToggle={(e) => setExpandedRows(e.data)}
+                  rowExpansionTemplate={rowExpansionTemplate}
+                  dataKey="id"
+                >
+                  <Column expander style={{ width: '3rem' }} />
+                  <Column field="asn_no" header="ASN No" sortable style={{ minWidth: '140px' }} body={(r) => <strong>{r.asn_no ?? '-'}</strong>} />
+                  <Column field="po_number" header="PO Number" sortable style={{ minWidth: '130px' }} body={(r) => r.po_number ?? '-'} />
+                  <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '200px' }} body={(r) => r.supplier_name ?? r.supplier ?? '-'} />
+                  <Column field="dc_no" header="DC No" sortable style={{ minWidth: '120px' }} body={(r) => r.dc_no ?? '-'} />
+                  <Column field="dc_date" header="DC Date" sortable body={dateBodyTemplate} style={{ minWidth: '120px' }} />
+                  <Column field="lr_no" header="LR No" style={{ minWidth: '120px' }} body={(r) => r.lr_no ?? '-'} />
+                  <Column field="lr_date" header="LR Date" body={lrDateBodyTemplate} style={{ minWidth: '120px' }} />
+                  <Column field="transporter" header="Transporter" style={{ minWidth: '140px' }} body={(r) => r.transporter ?? r.transporter_name ?? '-'} />
+                  <Column field="status" header="Status" body={statusBodyTemplate} style={{ minWidth: '120px' }} />
+                </DataTable>
+              </div>
+            </div>
           )}
         </div>
       </div>

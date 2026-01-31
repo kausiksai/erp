@@ -234,43 +234,48 @@ function InvoiceValidate() {
           </div>
         </div>
 
-        <div className={styles.tableContainer}>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">Invoices</h2>
+          <p className="dts-sectionSubtitle">Select an invoice to validate and match with PO / GRN.</p>
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />
               <p>Loading invoices...</p>
             </div>
           ) : (
-            <DataTable
-              value={invoices}
-              paginator
-              rows={10}
-              rowsPerPageOptions={[10, 25, 50, 100]}
-              emptyMessage="No invoices found"
-              className={styles.dataTable}
-              stripedRows
-              globalFilter={globalFilter}
-              onRowClick={(e) => handleInvoiceClick(e.data.invoice_id)}
-              rowHover
-              header={
-                <div className={styles.tableHeader}>
-                  <span className={styles.tableTitle}>Invoices ({invoices.length})</span>
-                  <InputText
-                    value={globalFilter}
-                    onChange={(e) => setGlobalFilter(e.target.value)}
-                    placeholder="Global search..."
-                    className={styles.globalSearch}
-                  />
-                </div>
-              }
-            >
-              <Column field="invoice_number" header="Invoice Number" sortable body={invoiceNumberBodyTemplate} />
-              <Column field="po_number" header="PO Number" sortable body={poNumberBodyTemplate} />
-              <Column field="invoice_date" header="Invoice Date" sortable body={dateBodyTemplate} />
-              <Column field="supplier_name" header="Supplier" sortable />
-              <Column field="total_amount" header="Total Amount" sortable body={amountBodyTemplate} />
-              <Column field="status" header="Status" sortable body={statusBodyTemplate} />
-            </DataTable>
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
+                <DataTable
+                  value={invoices}
+                  paginator
+                  rows={10}
+                  rowsPerPageOptions={[10, 25, 50, 100]}
+                  emptyMessage="No invoices found"
+                  stripedRows
+                  globalFilter={globalFilter}
+                  onRowClick={(e) => handleInvoiceClick(e.data.invoice_id)}
+                  rowHover
+                  header={
+                    <div className={styles.tableHeader}>
+                      <span className={styles.tableTitle}>Invoices ({invoices.length})</span>
+                      <InputText
+                        value={globalFilter}
+                        onChange={(e) => setGlobalFilter(e.target.value)}
+                        placeholder="Global search..."
+                        className={styles.globalSearch}
+                      />
+                    </div>
+                  }
+                >
+                  <Column field="invoice_number" header="Invoice Number" sortable body={invoiceNumberBodyTemplate} />
+                  <Column field="po_number" header="PO Number" sortable body={poNumberBodyTemplate} />
+                  <Column field="invoice_date" header="Invoice Date" sortable body={dateBodyTemplate} />
+                  <Column field="supplier_name" header="Supplier" sortable />
+                  <Column field="total_amount" header="Total Amount" sortable body={amountBodyTemplate} />
+                  <Column field="status" header="Status" sortable body={statusBodyTemplate} />
+                </DataTable>
+              </div>
+            </div>
           )}
         </div>
       </div>

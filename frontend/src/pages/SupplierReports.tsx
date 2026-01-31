@@ -275,31 +275,30 @@ function SupplierReports() {
               </div>
             </div>
 
-            <section className={styles.tableSection}>
-              <div className={styles.tableHead}>
-                <h3 className={styles.sectionTitle}>All suppliers – detail</h3>
-                <span className={styles.tableSubtitle}>PO count, invoice count, and total invoiced per supplier (amounts here are per-supplier only; grand total is in Financial Report)</span>
-              </div>
-              <div className={styles.tableWrap}>
-                <DataTable
-                  value={data.suppliers ?? []}
-                  paginator
-                  rows={10}
-                  rowsPerPageOptions={[5, 10, 25, 50]}
-                  size="small"
-                  stripedRows
-                  emptyMessage="No suppliers found."
-                  className={styles.dataTable}
-                  paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink CurrentPageReport RowsPerPageDropdown"
-                  currentPageReportTemplate="Showing {first} to {last} of {totalRecords} suppliers"
-                >
-                  <Column field="supplier_name" header="Supplier" sortable />
-                  <Column field="city" header="City" />
-                  <Column field="gst_number" header="GST No." />
-                  <Column field="po_count" header="POs" sortable />
-                  <Column field="invoice_count" header="Invoices" sortable />
-                  <Column field="total_invoice_amount" header="Total invoiced (₹)" body={amountBody} sortable sortField="total_invoice_amount" />
-                </DataTable>
+            <section className="dts-section dts-section-accent">
+              <h3 className="dts-sectionTitle">All suppliers – detail</h3>
+              <p className="dts-sectionSubtitle">PO count, invoice count, and total invoiced per supplier (amounts here are per-supplier only; grand total is in Financial Report)</p>
+              <div className="dts-tableWrapper">
+                <div className="dts-tableContainer">
+                  <DataTable
+                    value={data.suppliers ?? []}
+                    paginator
+                    rows={10}
+                    rowsPerPageOptions={[5, 10, 25, 50]}
+                    size="small"
+                    stripedRows
+                    emptyMessage="No suppliers found."
+                    paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink CurrentPageReport RowsPerPageDropdown"
+                    currentPageReportTemplate="Showing {first} to {last} of {totalRecords} suppliers"
+                  >
+                    <Column field="supplier_name" header="Supplier" sortable />
+                    <Column field="city" header="City" />
+                    <Column field="gst_number" header="GST No." />
+                    <Column field="po_count" header="POs" sortable />
+                    <Column field="invoice_count" header="Invoices" sortable />
+                    <Column field="total_invoice_amount" header="Total invoiced (₹)" body={amountBody} sortable sortField="total_invoice_amount" />
+                  </DataTable>
+                </div>
               </div>
             </section>
           </>

@@ -340,37 +340,42 @@ function ApprovePayments() {
           <PageNavigation />
         </div>
 
-        <div className={styles.tableContainer}>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">Pending approvals</h2>
+          <p className="dts-sectionSubtitle">
+            Review validated invoices with PO, supplier, GRN, ASN and banking details. Approve, modify banking and approve, or reject.
+          </p>
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />
               <p>Loading pending approvals...</p>
             </div>
           ) : list.length === 0 ? (
-            <div className={styles.emptyState}>
-              <h2>No pending approvals</h2>
-              <p>This page shows only invoices that are <strong>Ready for Payment</strong>. Invoices get that status after you validate them on Invoice Details (match with PO/GRN).</p>
-              <p>Go to <strong>Invoice Management → Invoice Details</strong>, open an invoice linked to a PO with GRN/ASN, and click <strong>Validate</strong>. Once the invoice status becomes &quot;Ready for Payment&quot;, it will appear here for manager approval.</p>
-              <Button label="Go to Invoice Details" icon="pi pi-arrow-right" onClick={() => navigate('/invoices/validate')} className={styles.emptyStateButton} />
+            <div className="dts-emptySection">
+              <p>No pending approvals. This page shows only invoices that are <strong>Ready for Payment</strong>. Invoices get that status after you validate them on Invoice Details (match with PO/GRN). Go to <strong>Invoice Management → Invoice Details</strong>, open an invoice linked to a PO with GRN/ASN, and click <strong>Validate</strong>.</p>
+              <Button label="Go to Invoice Details" icon="pi pi-arrow-right" onClick={() => navigate('/invoices/validate')} className={styles.emptyStateButton} style={{ marginTop: '0.75rem' }} />
             </div>
           ) : (
-            <DataTable
-              value={list}
-              dataKey="invoice_id"
-              expandedRows={expandedRows}
-              onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
-              rowExpansionTemplate={rowExpansionTemplate}
-              className={styles.dataTable}
-              stripedRows
-              size="small"
-            >
-              <Column expander style={{ width: '3rem' }} />
-              <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
-              <Column field="po_number_ref" header="PO Number" sortable body={(r) => r.po_number_ref || r.po_number || '-'} style={{ minWidth: '120px' }} />
-              <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
-              <Column header="Amount" body={amountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
-              <Column header="Due date" body={(r) => dateDisplay(r.payment_due_date)} sortable sortField="payment_due_date" style={{ minWidth: '110px' }} />
-            </DataTable>
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
+                <DataTable
+                  value={list}
+                  dataKey="invoice_id"
+                  expandedRows={expandedRows}
+                  onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
+                  rowExpansionTemplate={rowExpansionTemplate}
+                  stripedRows
+                  size="small"
+                >
+                  <Column expander style={{ width: '3rem' }} />
+                  <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
+                  <Column field="po_number_ref" header="PO Number" sortable body={(r) => r.po_number_ref || r.po_number || '-'} style={{ minWidth: '120px' }} />
+                  <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
+                  <Column header="Amount" body={amountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
+                  <Column header="Due date" body={(r) => dateDisplay(r.payment_due_date)} sortable sortField="payment_due_date" style={{ minWidth: '110px' }} />
+                </DataTable>
+              </div>
+            </div>
           )}
         </div>
       </div>

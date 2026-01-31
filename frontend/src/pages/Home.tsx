@@ -58,12 +58,13 @@ function Home() {
       }
 
       const data = await response.json()
+      const categories = Array.isArray(data) ? data : []
 
-      if (data.length === 0 && userRole === 'admin') {
+      if (categories.length === 0 && userRole === 'admin') {
         console.warn('Admin user has no menu items. Please ensure menu_items and role_menu_access tables are populated.')
       }
 
-      setMenuCategories(data)
+      setMenuCategories(categories)
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to load menu. Please try again.'
       toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })

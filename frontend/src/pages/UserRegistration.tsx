@@ -604,72 +604,62 @@ function UserRegistration() {
           </div>
         </div>
 
-        <div className={styles.tableContainer}>
-          <div className={styles.tableHeader}>
-            <div className={styles.tableSummary}>
-              <div className={styles.summaryItem}>
-                <span className={styles.summaryLabel}>Total Users:</span>
-                <span className={styles.summaryValue}>{metrics.totalUsers}</span>
-              </div>
-              <div className={styles.summaryDivider}></div>
-              <div className={styles.summaryItem}>
-                <span className={styles.summaryLabel}>Active:</span>
-                <span className={styles.summaryValue} style={{ color: '#059669' }}>{metrics.activeUsers}</span>
-              </div>
-              <div className={styles.summaryDivider}></div>
-              <div className={styles.summaryItem}>
-                <span className={styles.summaryLabel}>Inactive:</span>
-                <span className={styles.summaryValue} style={{ color: '#94a3b8' }}>{metrics.inactiveUsers}</span>
-              </div>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">Users</h2>
+          <p className="dts-sectionSubtitle">
+            Total: {metrics.totalUsers} · Active: {metrics.activeUsers} · Inactive: {metrics.inactiveUsers}
+          </p>
+          <div className="dts-tableWrapper">
+            <div className="dts-tableContainer">
+              <DataTable
+                value={users}
+                paginator
+                rows={10}
+                rowsPerPageOptions={[10, 25, 50]}
+                emptyMessage="No users found"
+                stripedRows
+              >
+                <Column field="username" header="Username" sortable style={{ minWidth: '150px' }} />
+                <Column field="email" header="Email" sortable style={{ minWidth: '200px' }} />
+                <Column field="full_name" header="Full Name" sortable style={{ minWidth: '180px' }} />
+                <Column 
+                  field="role" 
+                  header="Role" 
+                  body={roleTemplate}
+                  sortable 
+                  style={{ minWidth: '120px' }} 
+                />
+                <Column 
+                  field="is_active" 
+                  header="Status" 
+                  body={statusTemplate}
+                  sortable 
+                  style={{ minWidth: '100px' }} 
+                />
+                <Column 
+                  field="last_login" 
+                  header="Last Login" 
+                  body={(row) => dateTemplate(row, 'last_login')}
+                  sortable 
+                  style={{ minWidth: '120px' }} 
+                />
+                <Column 
+                  field="created_at" 
+                  header="Created" 
+                  body={(row) => dateTemplate(row, 'created_at')}
+                  sortable 
+                  style={{ minWidth: '120px' }} 
+                />
+                <Column 
+                  header="Actions" 
+                  body={actionsTemplate}
+                  style={{ minWidth: '180px' }}
+                  frozen
+                  alignFrozen="right"
+                />
+              </DataTable>
             </div>
           </div>
-          <DataTable
-            value={users}
-            paginator
-            rows={10}
-            rowsPerPageOptions={[10, 25, 50]}
-            emptyMessage="No users found"
-            className={styles.dataTable}
-          >
-            <Column field="username" header="Username" sortable style={{ minWidth: '150px' }} />
-            <Column field="email" header="Email" sortable style={{ minWidth: '200px' }} />
-            <Column field="full_name" header="Full Name" sortable style={{ minWidth: '180px' }} />
-            <Column 
-              field="role" 
-              header="Role" 
-              body={roleTemplate}
-              sortable 
-              style={{ minWidth: '120px' }} 
-            />
-            <Column 
-              field="is_active" 
-              header="Status" 
-              body={statusTemplate}
-              sortable 
-              style={{ minWidth: '100px' }} 
-            />
-            <Column 
-              field="last_login" 
-              header="Last Login" 
-              body={(row) => dateTemplate(row, 'last_login')}
-              sortable 
-              style={{ minWidth: '120px' }} 
-            />
-            <Column 
-              field="created_at" 
-              header="Created" 
-              body={(row) => dateTemplate(row, 'created_at')}
-              sortable 
-              style={{ minWidth: '120px' }} 
-            />
-            <Column 
-              header="Actions" 
-              body={actionsTemplate}
-              style={{ minWidth: '180px' }}
-              frozen
-              alignFrozen="right"
-            />
-          </DataTable>
         </div>
       </div>
 

@@ -183,7 +183,9 @@ function GRNDetails() {
           </div>
         </div>
 
-        <div className={styles.tableContainer}>
+        <div className="dts-section dts-section-accent">
+          <h2 className="dts-sectionTitle">GRN records</h2>
+          <p className="dts-sectionSubtitle">View all Goods Receipt Notes (loaded from Excel import). Expand a row for more details.</p>
           {!loading && (
             <div className={styles.toolbar}>
               <span className="p-input-icon-left">
@@ -203,30 +205,33 @@ function GRNDetails() {
               <p>Loading GRN...</p>
             </div>
           ) : (
-            <DataTable
-              value={filteredRecords}
-              paginator
-              rows={10}
-              rowsPerPageOptions={[10, 25, 50]}
-              emptyMessage={searchTerm ? 'No matching GRN records' : 'No GRN records found'}
-              className={styles.dataTable}
-              stripedRows
-              expandedRows={expandedRows}
-              onRowToggle={(e) => setExpandedRows(e.data)}
-              rowExpansionTemplate={rowExpansionTemplate}
-              dataKey="id"
-            >
-              <Column expander style={{ width: '3rem' }} />
-              <Column field="grn_no" header="GRN No" sortable style={{ minWidth: '140px' }} body={(r) => <strong>{r.grn_no ?? '-'}</strong>} />
-              <Column field="po_number" header="PO Number" sortable style={{ minWidth: '130px' }} body={(r) => r.po_number ?? r.po_no ?? '-'} />
-              <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '200px' }} body={(r) => r.supplier_name ?? r.supplier ?? '-'} />
-              <Column field="grn_date" header="GRN Date" sortable body={dateBodyTemplate} style={{ minWidth: '120px' }} />
-              <Column field="dc_no" header="DC No" sortable style={{ minWidth: '120px' }} body={(r) => r.dc_no ?? '-'} />
-              <Column field="dc_date" header="DC Date" body={dcDateBodyTemplate} style={{ minWidth: '120px' }} />
-              <Column field="item" header="Item" style={{ minWidth: '100px' }} body={(r) => r.item ?? '-'} />
-              <Column field="grn_qty" header="Qty" style={{ minWidth: '80px' }} body={(r) => r.grn_qty != null ? r.grn_qty : '-'} />
-              <Column field="header_status" header="Status" body={statusBodyTemplate} style={{ minWidth: '120px' }} />
-            </DataTable>
+            <div className="dts-tableWrapper">
+              <div className="dts-tableContainer">
+                <DataTable
+                  value={filteredRecords}
+                  paginator
+                  rows={10}
+                  rowsPerPageOptions={[10, 25, 50]}
+                  emptyMessage={searchTerm ? 'No matching GRN records' : 'No GRN records found'}
+                  stripedRows
+                  expandedRows={expandedRows}
+                  onRowToggle={(e) => setExpandedRows(e.data)}
+                  rowExpansionTemplate={rowExpansionTemplate}
+                  dataKey="id"
+                >
+                  <Column expander style={{ width: '3rem' }} />
+                  <Column field="grn_no" header="GRN No" sortable style={{ minWidth: '140px' }} body={(r) => <strong>{r.grn_no ?? '-'}</strong>} />
+                  <Column field="po_number" header="PO Number" sortable style={{ minWidth: '130px' }} body={(r) => r.po_number ?? r.po_no ?? '-'} />
+                  <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '200px' }} body={(r) => r.supplier_name ?? r.supplier ?? '-'} />
+                  <Column field="grn_date" header="GRN Date" sortable body={dateBodyTemplate} style={{ minWidth: '120px' }} />
+                  <Column field="dc_no" header="DC No" sortable style={{ minWidth: '120px' }} body={(r) => r.dc_no ?? '-'} />
+                  <Column field="dc_date" header="DC Date" body={dcDateBodyTemplate} style={{ minWidth: '120px' }} />
+                  <Column field="item" header="Item" style={{ minWidth: '100px' }} body={(r) => r.item ?? '-'} />
+                  <Column field="grn_qty" header="Qty" style={{ minWidth: '80px' }} body={(r) => r.grn_qty != null ? r.grn_qty : '-'} />
+                  <Column field="header_status" header="Status" body={statusBodyTemplate} style={{ minWidth: '120px' }} />
+                </DataTable>
+              </div>
+            </div>
           )}
         </div>
       </div>

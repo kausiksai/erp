@@ -329,16 +329,18 @@ function FinancialReports() {
             </div>
 
             {data?.byMonth?.length ? (
-              <section className={styles.detailSection}>
-                <h3 className={styles.sectionTitle}>Monthly financial summary (detail)</h3>
-                <p className={styles.sectionSubtitle}>Invoices, billed amount, and tax by month</p>
-                <div className={styles.tableWrap}>
-                  <DataTable value={data.byMonth} size="small" stripedRows className={styles.dataTable}>
-                    <Column field="month_label" header="Month" />
-                    <Column field="invoice_count" header="Invoices" />
-                    <Column field="amount" header="Billed (₹)" body={(row) => formatCurrency(row.amount)} />
-                    <Column field="tax_amount" header="Tax (₹)" body={(row) => formatCurrency(row.tax_amount)} />
-                  </DataTable>
+              <section className="dts-section dts-section-accent">
+                <h3 className="dts-sectionTitle">Monthly financial summary (detail)</h3>
+                <p className="dts-sectionSubtitle">Invoices, billed amount, and tax by month</p>
+                <div className="dts-tableWrapper">
+                  <div className="dts-tableContainer">
+                    <DataTable value={data.byMonth} size="small" stripedRows>
+                      <Column field="month_label" header="Month" />
+                      <Column field="invoice_count" header="Invoices" />
+                      <Column field="amount" header="Billed (₹)" body={(row) => formatCurrency(row.amount)} />
+                      <Column field="tax_amount" header="Tax (₹)" body={(row) => formatCurrency(row.tax_amount)} />
+                    </DataTable>
+                  </div>
                 </div>
               </section>
             ) : null}
