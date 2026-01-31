@@ -5,6 +5,7 @@ import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Divider } from 'primereact/divider'
 import { Dialog } from 'primereact/dialog'
+import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import Header from '../components/Header'
@@ -207,6 +208,17 @@ function InvoiceDetails() {
     }
   }
 
+  const confirmProceedToPayment = () => {
+    confirmDialog({
+      message: 'Are you sure you want to send this invoice to payments despite the quantity mismatch?',
+      header: 'Confirm send to payments',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleValidationResolution('proceed_to_payment'),
+      reject: () => {}
+    })
+  }
+
   const handleValidationResolution = async (resolution: 'proceed_to_payment' | 'send_to_debit_note') => {
     if (!invoice?.invoice_id || resolvingValidation || !validationMismatchData) return
     setResolvingValidation(true)
@@ -316,6 +328,7 @@ function InvoiceDetails() {
     <div className={styles.invoiceDetailsPage}>
       <Header />
       <Toast ref={toast} />
+      <ConfirmDialog />
       <Dialog
         visible={!!validationMismatchData}
         onHide={() => !resolvingValidation && setValidationMismatchData(null)}
@@ -331,7 +344,7 @@ function InvoiceDetails() {
               severity="success"
               loading={resolvingValidation}
               disabled={resolvingValidation}
-              onClick={() => handleValidationResolution('proceed_to_payment')}
+              onClick={confirmProceedToPayment}
               className={styles.validationDialogButton}
             />
             <Button

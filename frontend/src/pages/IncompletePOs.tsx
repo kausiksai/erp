@@ -8,6 +8,7 @@ import { Button } from 'primereact/button'
 import { Badge } from 'primereact/badge'
 import { InputNumber } from 'primereact/inputnumber'
 import { Toast } from 'primereact/toast'
+import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { apiUrl, apiFetch } from '../utils/api'
 import styles from './IncompletePOs.module.css'
@@ -115,6 +116,17 @@ function IncompletePOs() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const confirmDebitNoteApprove = (invoiceId: number) => {
+    confirmDialog({
+      message: 'Are you sure you want to approve this debit note and send to payments?',
+      header: 'Confirm send to payments',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleDebitNoteApprove(invoiceId),
+      reject: () => {}
+    })
   }
 
   const handleDebitNoteApprove = async (invoiceId: number) => {
@@ -254,6 +266,17 @@ function IncompletePOs() {
     }
   }
 
+  const confirmForceClose = (poId: number) => {
+    confirmDialog({
+      message: 'Are you sure you want to force close this PO? It will be marked as Fulfilled.',
+      header: 'Confirm force close',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleForceClose(poId),
+      reject: () => {}
+    })
+  }
+
   const handleForceClose = async (poId: number) => {
     try {
       setForceClosingId(poId)
@@ -284,7 +307,7 @@ function IncompletePOs() {
             severity="success"
             loading={forceClosingId === rowData.po_id}
             disabled={forceClosingId !== null}
-            onClick={() => handleForceClose(rowData.po_id)}
+            onClick={() => confirmForceClose(rowData.po_id)}
             title="Mark PO as Fulfilled"
             className={styles.actionButton}
           />
@@ -357,6 +380,7 @@ function IncompletePOs() {
   return (
     <div className={styles.page}>
       <Toast ref={toast} />
+      <ConfirmDialog />
       <Header />
       <div className={styles.container}>
         <div className={styles.header}>
@@ -488,7 +512,7 @@ function IncompletePOs() {
                         tooltipOptions={{ position: 'top' }}
                         loading={debitNoteApprovingId === row.invoice_id}
                         disabled={debitNoteApprovingId !== null}
-                        onClick={() => handleDebitNoteApprove(row.invoice_id)}
+                        onClick={() => confirmDebitNoteApprove(row.invoice_id)}
                         className={styles.iconBtn}
                       />
                     </div>

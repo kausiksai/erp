@@ -8,6 +8,7 @@ import { Button } from 'primereact/button'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Dialog } from 'primereact/dialog'
+import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { InputText } from 'primereact/inputtext'
 import { apiFetch, apiUrl, getErrorMessageFromResponse } from '../utils/api'
 import styles from './ApprovePayments.module.css'
@@ -108,6 +109,17 @@ function ApprovePayments() {
     fetchPending()
   }, [])
 
+  const confirmApprove = (item: PendingApproval) => {
+    confirmDialog({
+      message: 'Are you sure you want to send this invoice to payments?',
+      header: 'Confirm send to payments',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleApprove(item),
+      reject: () => {}
+    })
+  }
+
   const handleApprove = async (item: PendingApproval) => {
     setActionLoading(`approve-${item.invoice_id}`)
     try {
@@ -127,6 +139,17 @@ function ApprovePayments() {
     } finally {
       setActionLoading(null)
     }
+  }
+
+  const confirmApproveWithModify = () => {
+    confirmDialog({
+      message: 'Are you sure you want to send this invoice to payments with the modified banking details?',
+      header: 'Confirm send to payments',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleApproveWithModify(),
+      reject: () => {}
+    })
   }
 
   const handleApproveWithModify = async () => {
@@ -292,7 +315,7 @@ function ApprovePayments() {
       <div className={styles.actionButtons} style={{ marginTop: '1rem' }}>
         <Button label="Approve" icon="pi pi-check" severity="success" size="small" className={styles.actionButton}
           loading={actionLoading === `approve-${row.invoice_id}`} disabled={!!actionLoading}
-          onClick={() => handleApprove(row)} />
+          onClick={() => confirmApprove(row)} />
         <Button label="Modify & Approve" icon="pi pi-pencil" size="small" className={styles.actionButton}
           loading={actionLoading === `modify-${row.invoice_id}`} disabled={!!actionLoading}
           onClick={() => openModify(row)} />
@@ -307,6 +330,7 @@ function ApprovePayments() {
     <div className={styles.page}>
       <Header />
       <Toast ref={toast} />
+      <ConfirmDialog />
       <div className={styles.container}>
         <div className={styles.header}>
           <div>
@@ -370,7 +394,7 @@ function ApprovePayments() {
         style={{ width: '480px' }} footer={
           <div className={styles.dialogActions}>
             <Button label="Cancel" severity="secondary" onClick={() => setModifyDialog({ open: false, item: null })} />
-            <Button label="Approve with these details" severity="success" onClick={handleApproveWithModify} loading={!!actionLoading} />
+            <Button label="Approve with these details" severity="success" onClick={confirmApproveWithModify} loading={!!actionLoading} />
           </div>
         }>
         <div className={styles.dialogForm}>

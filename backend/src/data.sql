@@ -74,8 +74,8 @@ INSERT INTO menu_items (menu_id, title, description, icon, path, color, category
 ('invoice-upload', 'Invoice Upload', 'Upload invoices and extract data automatically', 'pi pi-file-pdf', '/invoices/upload', '#059669', 'invoices', 'Invoice Management', 'Manage invoices, validation, and details', 1, TRUE, FALSE),
 ('invoice-details', 'Invoice Details', 'View and manage invoice details and validation', 'pi pi-file-edit', '/invoices/validate', '#2563eb', 'invoices', 'Invoice Management', 'Manage invoices, validation, and details', 2, TRUE, FALSE),
 ('purchase-order', 'Purchase Order Details', 'View and manage purchase order details', 'pi pi-shopping-cart', '/purchase-orders/upload', '#7c3aed', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 1, TRUE, FALSE),
-('grn-details', 'GRN Details', 'Goods Receipt Note management and tracking', 'pi pi-box', '/grn/details', '#ea580c', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 2, TRUE, TRUE),
-('asn-details', 'ASN Details', 'Advanced Shipping Notice management', 'pi pi-truck', '/asn/details', '#0891b2', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 3, TRUE, TRUE),
+('grn-details', 'GRN Details', 'Goods Receipt Note management and tracking', 'pi pi-box', '/grn/details', '#ea580c', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 2, TRUE, FALSE),
+('asn-details', 'ASN Details', 'Advanced Shipping Notice management', 'pi pi-truck', '/asn/details', '#0891b2', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 3, TRUE, FALSE),
 ('user-registration', 'User Registration', 'Register and manage system users', 'pi pi-users', '/users/registration', '#dc2626', 'master-data', 'Master Data', 'Manage users, suppliers, and system configuration', 1, TRUE, FALSE),
 ('owner-details', 'Owner Details', 'View and edit company owner details', 'pi pi-id-card', '/owners/details', '#9333ea', 'master-data', 'Master Data', 'Manage users, suppliers, and system configuration', 2, TRUE, FALSE),
 ('supplier-registration', 'Supplier Registration', 'Register and manage supplier information', 'pi pi-building', '/suppliers/registration', '#ca8a04', 'master-data', 'Master Data', 'Manage users, suppliers, and system configuration', 3, TRUE, FALSE),
@@ -83,9 +83,9 @@ INSERT INTO menu_items (menu_id, title, description, icon, path, color, category
 ('ready-for-payment', 'Ready for Payments', 'Manage approved payments and mark as done', 'pi pi-money-bill', '/payments/ready', '#0284c7', 'finance', 'Finance & Payments', 'Payment approval and history', 2, TRUE, FALSE),
 ('payment-history', 'Payment History', 'View and track payment history and status', 'pi pi-history', '/payments/history', '#9333ea', 'finance', 'Finance & Payments', 'Payment approval and history', 3, TRUE, FALSE),
 ('finance-dashboard', 'Finance Dashboard', 'Comprehensive financial overview and analytics', 'pi pi-chart-line', '/finance/dashboard', '#16a34a', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 1, TRUE, FALSE),
-('invoice-reports', 'Invoice Reports', 'Generate comprehensive invoice reports', 'pi pi-file', '/reports/invoices', '#be123c', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 2, TRUE, TRUE),
-('financial-reports', 'Financial Reports', 'Generate financial statements and reports', 'pi pi-chart-bar', '/reports/financial', '#0d9488', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 3, TRUE, TRUE),
-('supplier-reports', 'Supplier Reports', 'Analyze supplier performance and reports', 'pi pi-chart-pie', '/reports/suppliers', '#c2410c', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 4, TRUE, TRUE)
+('invoice-reports', 'Invoice Reports', 'Generate comprehensive invoice reports', 'pi pi-file', '/reports/invoices', '#be123c', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 2, TRUE, FALSE),
+('financial-reports', 'Financial Reports', 'Generate financial statements and reports', 'pi pi-chart-bar', '/reports/financial', '#0d9488', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 3, TRUE, FALSE),
+('supplier-reports', 'Supplier Reports', 'Analyze supplier performance and reports', 'pi pi-chart-pie', '/reports/suppliers', '#c2410c', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 4, TRUE, FALSE)
 ON CONFLICT (menu_id) DO UPDATE SET
   title = EXCLUDED.title,
   description = EXCLUDED.description,

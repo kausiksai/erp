@@ -10,6 +10,7 @@ import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Divider } from 'primereact/divider'
 import { Dialog } from 'primereact/dialog'
+import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { FileUpload } from 'primereact/fileupload'
 import { apiUrl } from '../utils/api'
 import Header from '../components/Header'
@@ -1104,6 +1105,17 @@ export default function InvoiceUpload() {
     return totalAmount > 0 ? `₹${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'
   }
 
+  const confirmRemoveFile = () => {
+    confirmDialog({
+      message: 'Are you sure you want to remove this file? Extracted data will be cleared.',
+      header: 'Confirm remove file',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-danger',
+      accept: () => handleRemoveFile(),
+      reject: () => {}
+    })
+  }
+
   const handleRemoveFile = () => {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl)
     setPdfUrl(null)
@@ -1144,7 +1156,7 @@ export default function InvoiceUpload() {
     <div className={styles.invoiceUploadPage}>
       <Header />
       <Toast ref={toast} position="top-right" />
-      
+      <ConfirmDialog />
       <div className={styles.pageContainer}>
         {/* Header Section */}
         <div className={styles.pageHeader}>
@@ -1248,7 +1260,7 @@ export default function InvoiceUpload() {
                       <Button
                         icon="pi pi-times"
                         className={styles.removeButton}
-                        onClick={handleRemoveFile}
+                        onClick={confirmRemoveFile}
                         tooltip="Remove file"
                       />
                     </div>
@@ -1842,7 +1854,7 @@ export default function InvoiceUpload() {
               label="Cancel"
               icon="pi pi-times"
               className={styles.cancelButton}
-              onClick={handleRemoveFile}
+              onClick={confirmRemoveFile}
               disabled={!pdfFile}
             />
             <Button

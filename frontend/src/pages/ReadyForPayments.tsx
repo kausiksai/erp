@@ -4,6 +4,7 @@ import PageNavigation from '../components/PageNavigation'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { Button } from 'primereact/button'
+import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
@@ -92,6 +93,17 @@ function ReadyForPayments() {
   useEffect(() => {
     fetchReady()
   }, [])
+
+  const confirmMarkDone = (row: ReadyPayment) => {
+    confirmDialog({
+      message: 'Are you sure you want to send this payment to payments?',
+      header: 'Confirm send to payments',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleMarkDone(row.id),
+      reject: () => {}
+    })
+  }
 
   const handleMarkDone = async (approvalId: number) => {
     setMarkingId(approvalId)
@@ -206,7 +218,7 @@ function ReadyForPayments() {
       <div className={styles.actionButtons} style={{ marginTop: '1rem' }}>
         <Button label="Payment done" icon="pi pi-check-circle" severity="success" size="small" className={styles.actionButton}
           loading={markingId === row.id} disabled={markingId !== null}
-          onClick={() => handleMarkDone(row.id)} />
+          onClick={() => confirmMarkDone(row)} />
       </div>
     </div>
   )
@@ -215,6 +227,7 @@ function ReadyForPayments() {
     <div className={styles.page}>
       <Header />
       <Toast ref={toast} />
+      <ConfirmDialog />
       <div className={styles.container}>
         <div className={styles.header}>
           <div>
