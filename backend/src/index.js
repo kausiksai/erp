@@ -999,7 +999,7 @@ router.post('/invoices', async (req, res) => {
         scanningNumber || null,
         totalAmount ? parseFloat(totalAmount) : null,
         taxAmount ? parseFloat(taxAmount) : null,
-        status || 'pending',
+        status || 'waiting_for_validation',
         notes || null
       ]
     )
@@ -1460,8 +1460,8 @@ router.get('/purchase-orders/incomplete', async (req, res) => {
            CASE WHEN NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id) THEN 'GRN' END,
            CASE WHEN NOT EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id) THEN 'ASN' END
          ], NULL) AS missing_items,
-         (SELECT i.invoice_id FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_id,
-         (SELECT LOWER(TRIM(i.status)) FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_status
+         (SELECT i.invoice_id FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('waiting_for_re_validation','debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_id,
+         (SELECT LOWER(TRIM(i.status)) FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('waiting_for_re_validation','debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_status
        FROM purchase_orders po
        LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
        WHERE COALESCE(po.status, 'open') NOT IN ('partially_fulfilled', 'fulfilled')
@@ -1548,7 +1548,7 @@ router.post('/invoices/:id/validate-resolution', authenticateToken, async (req, 
     if (resolution === 'proceed_to_payment') {
       const applied = await proceedToPaymentFromMismatch(client, id)
       await client.query('COMMIT')
-      return res.json({ action: 'ready_for_payment', ...applied })
+      return res.json({ action: 'validated', ...applied })
     }
     await moveToDebitNoteApproval(client, id)
     await client.query('COMMIT')
@@ -2135,7 +2135,7 @@ router.get('/reports/dashboard', authenticateToken, async (req, res) => {
         pool.query(`
           SELECT COUNT(*)::int AS count FROM invoices i
           LEFT JOIN payment_approvals pa ON pa.invoice_id = i.invoice_id
-          WHERE LOWER(TRIM(i.status)) = 'ready_for_payment'
+          WHERE LOWER(TRIM(i.status)) = 'validated'
             AND (pa.id IS NULL OR LOWER(TRIM(pa.status)) = 'pending_approval')
         `),
         pool.query(`SELECT COUNT(*)::int AS count FROM payment_approvals WHERE LOWER(TRIM(status)) = 'approved'`),
@@ -2146,7 +2146,7 @@ router.get('/reports/dashboard', authenticateToken, async (req, res) => {
           SELECT COALESCE(SUM(CASE WHEN i.debit_note_value IS NOT NULL AND i.debit_note_value > 0 THEN i.debit_note_value ELSE i.total_amount END), 0)::numeric(18,2) AS amount
           FROM invoices i
           LEFT JOIN payment_approvals pa ON pa.invoice_id = i.invoice_id
-          WHERE LOWER(TRIM(i.status)) = 'ready_for_payment' AND (pa.id IS NULL OR LOWER(TRIM(pa.status)) = 'pending_approval')
+          WHERE LOWER(TRIM(i.status)) = 'validated' AND (pa.id IS NULL OR LOWER(TRIM(pa.status)) = 'pending_approval')
         `),
         pool.query(`
           SELECT COALESCE(SUM(COALESCE(debit_note_value, total_amount)), 0)::numeric(18,2) AS amount
@@ -2238,12 +2238,13 @@ router.get('/reports/dashboard', authenticateToken, async (req, res) => {
 
 // ========== Payment Approval & Ready for Payments ==========
 
-// List invoices ready_for_payment that are pending manager approval (no payment_approvals or status pending_approval)
+// List invoices with status validated that are pending manager approval (no payment_approvals or status pending_approval)
 router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
   try {
     const { rows: invoices } = await pool.query(
-      `SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.total_amount, i.tax_amount, i.status,
-              i.payment_due_date, i.debit_note_value, i.po_id, i.supplier_id, i.po_number,
+      `SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.scanning_number, i.po_number,
+              i.total_amount, i.tax_amount, i.status, i.payment_due_date, i.debit_note_value, i.notes,
+              i.po_id, i.supplier_id,
               s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan,
               s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
               s.bank_account_name, s.bank_account_number, s.bank_ifsc_code, s.bank_name, s.branch_name,
@@ -2253,16 +2254,19 @@ router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 
        LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
        LEFT JOIN purchase_orders po ON po.po_id = i.po_id
        LEFT JOIN payment_approvals pa ON pa.invoice_id = i.invoice_id
-       WHERE i.status = 'ready_for_payment'
+       WHERE i.status = 'validated'
          AND (pa.id IS NULL OR pa.status = 'pending_approval')
-       ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC`
+       ORDER BY i.payment_due_date ASC NULLS LAST, i.invoice_id ASC`
     )
     const result = []
     for (const inv of invoices) {
       let grnList = []
       let asnList = []
+      let poLinesList = []
+      let invoiceLinesList = []
+      const queries = []
       if (inv.po_id) {
-        const [grnRes, asnRes] = await Promise.all([
+        queries.push(
           pool.query(
             `SELECT g.id, g.grn_no, g.grn_date, g.dc_no, g.dc_date, g.grn_qty, g.accepted_qty, g.unit_cost
              FROM grn g WHERE g.po_id = $1 ORDER BY g.grn_date DESC NULLS LAST`,
@@ -2272,15 +2276,38 @@ router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 
             `SELECT a.id, a.asn_no, a.dc_no, a.dc_date, a.inv_no, a.inv_date, a.lr_no, a.transporter_name
              FROM asn a WHERE a.po_id = $1 ORDER BY a.dc_date DESC NULLS LAST`,
             [inv.po_id]
+          ),
+          pool.query(
+            `SELECT pol.po_line_id, pol.sequence_number, pol.item_id, pol.description1, pol.qty,
+                    pol.unit_cost, pol.disc_pct, pol.raw_material, pol.process_description, pol.norms, pol.process_cost
+             FROM purchase_order_lines pol WHERE pol.po_id = $1 ORDER BY pol.sequence_number ASC, pol.po_line_id ASC`,
+            [inv.po_id]
           )
-        ])
-        grnList = grnRes.rows
-        asnList = asnRes.rows
+        )
       }
+      queries.push(
+        pool.query(
+          `SELECT il.invoice_line_id, il.sequence_number, il.po_line_id, il.item_name, il.hsn_sac, il.uom,
+                  il.billed_qty, il.weight, il.count, il.rate, il.rate_per, il.line_total,
+                  il.taxable_value, il.cgst_rate, il.cgst_amount, il.sgst_rate, il.sgst_amount, il.total_tax_amount
+           FROM invoice_lines il WHERE il.invoice_id = $1 ORDER BY il.sequence_number ASC NULLS LAST, il.invoice_line_id ASC`,
+          [inv.invoice_id]
+        )
+      )
+      const resolved = await Promise.all(queries)
+      let idx = 0
+      if (inv.po_id) {
+        grnList = resolved[idx++].rows
+        asnList = resolved[idx++].rows
+        poLinesList = resolved[idx++].rows
+      }
+      invoiceLinesList = resolved[idx].rows
       result.push({
         ...inv,
         grn_list: grnList,
-        asn_list: asnList
+        asn_list: asnList,
+        po_lines: poLinesList,
+        invoice_lines: invoiceLinesList
       })
     }
     res.json(result)
@@ -2308,12 +2335,12 @@ router.post('/payments/approve', authenticateToken, authorize(['admin', 'manager
               s.bank_ifsc_code AS s_ifsc, s.bank_name AS s_bank, s.branch_name AS s_branch
        FROM invoices i
        LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
-       WHERE i.invoice_id = $1 AND i.status = 'ready_for_payment'`,
+       WHERE i.invoice_id = $1 AND i.status = 'validated'`,
       [invId]
     )
     if (inv.rows.length === 0) {
       await client.query('ROLLBACK')
-      return res.status(404).json({ error: 'invoice_not_found', message: 'Invoice not found or not ready for payment' })
+      return res.status(404).json({ error: 'invoice_not_found', message: 'Invoice not found or not validated' })
     }
     const row = inv.rows[0]
     const totalAmount = row.debit_note_value != null ? row.debit_note_value : row.total_amount
@@ -2346,6 +2373,10 @@ router.post('/payments/approve', authenticateToken, authorize(['admin', 'manager
          updated_at = NOW()`,
       [invId, row.po_id, row.supplier_id, totalAmount, row.debit_note_value,
         bankName, bankNo, ifsc, bank, branch, userId, notes || null]
+    )
+    await client.query(
+      "UPDATE invoices SET status = 'ready_for_payment', updated_at = NOW() WHERE invoice_id = $1",
+      [invId]
     )
     await client.query('COMMIT')
     res.json({ success: true, message: 'Payment approved' })
@@ -2387,6 +2418,10 @@ router.patch('/payments/reject', authenticateToken, authorize(['admin', 'manager
          updated_at = NOW()`,
       [invId, row.po_id, row.supplier_id, totalAmount, row.debit_note_value, userId, rejection_reason || null]
     )
+    await pool.query(
+      "UPDATE invoices SET status = 'rejected', updated_at = NOW() WHERE invoice_id = $1",
+      [invId]
+    )
     res.json({ success: true, message: 'Payment rejected' })
   } catch (err) {
     console.error('Reject payment error:', err)
@@ -2394,13 +2429,14 @@ router.patch('/payments/reject', authenticateToken, authorize(['admin', 'manager
   }
 })
 
-// List approved payments (ready for payment execution)
+// List approved and partially paid payments (ready for payment execution)
 router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT pa.id, pa.invoice_id, pa.po_id, pa.supplier_id, pa.status, pa.total_amount, pa.debit_note_value,
               pa.bank_account_name, pa.bank_account_number, pa.bank_ifsc_code, pa.bank_name, pa.branch_name,
               pa.approved_by, pa.approved_at, pa.notes,
+              (SELECT COALESCE(SUM(pt.amount), 0)::numeric(15,2) FROM payment_transactions pt WHERE pt.payment_approval_id = pa.id) AS paid_amount,
               i.invoice_number, i.invoice_date, i.payment_due_date,
               s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan, s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
               po.po_number, po.date AS po_date, po.terms AS po_terms
@@ -2408,8 +2444,8 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
        JOIN invoices i ON i.invoice_id = pa.invoice_id
        LEFT JOIN suppliers s ON s.supplier_id = pa.supplier_id
        LEFT JOIN purchase_orders po ON po.po_id = pa.po_id
-       WHERE pa.status = 'approved'
-       ORDER BY pa.approved_at DESC NULLS LAST, pa.id DESC`
+       WHERE pa.status IN ('approved', 'partially_paid')
+       ORDER BY i.payment_due_date ASC NULLS LAST, pa.id ASC`
     )
     const result = []
     for (const r of rows) {
@@ -2432,7 +2468,93 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
   }
 })
 
-// Payment history: all payment_approvals with status = payment_done
+// Record a partial or full payment
+router.post('/payments/record-payment', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const userId = req.user?.user_id
+    const { paymentApprovalId, amount, notes } = req.body || {}
+    const approvalId = paymentApprovalId != null ? parseInt(paymentApprovalId, 10) : NaN
+    if (Number.isNaN(approvalId) || amount == null) {
+      return res.status(400).json({ error: 'invalid_input', message: 'paymentApprovalId and amount are required' })
+    }
+    const payAmount = parseFloat(amount)
+    if (!Number.isFinite(payAmount) || payAmount <= 0) {
+      return res.status(400).json({ error: 'invalid_amount', message: 'Amount must be a positive number' })
+    }
+
+    await client.query('BEGIN')
+
+    const pa = await client.query(
+      `SELECT pa.id, pa.invoice_id, pa.total_amount, pa.debit_note_value, pa.status
+       FROM payment_approvals pa
+       WHERE pa.id = $1 AND pa.status IN ('approved', 'partially_paid')`,
+      [approvalId]
+    )
+    if (pa.rows.length === 0) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'not_found', message: 'Approval not found or not in approved/partially_paid status' })
+    }
+    const row = pa.rows[0]
+    const totalAmount = parseFloat(row.debit_note_value != null ? row.debit_note_value : row.total_amount) || 0
+
+    const sumResult = await client.query(
+      'SELECT COALESCE(SUM(amount), 0)::numeric(15,2) AS paid FROM payment_transactions WHERE payment_approval_id = $1',
+      [approvalId]
+    )
+    const paidSoFar = parseFloat(sumResult.rows[0]?.paid || 0)
+    const remaining = totalAmount - paidSoFar
+    if (payAmount > remaining) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'amount_exceeds_remaining', message: `Amount cannot exceed remaining balance (₹${remaining.toFixed(2)})` })
+    }
+
+    await client.query(
+      `INSERT INTO payment_transactions (payment_approval_id, amount, paid_by, notes) VALUES ($1, $2, $3, $4)`,
+      [approvalId, payAmount, userId, notes || null]
+    )
+
+    const newPaidTotal = paidSoFar + payAmount
+    const isFullyPaid = newPaidTotal >= totalAmount - 0.01
+
+    if (isFullyPaid) {
+      await client.query(
+        `UPDATE payment_approvals SET status = 'payment_done', payment_done_by = $1, payment_done_at = NOW(), updated_at = NOW() WHERE id = $2`,
+        [userId, approvalId]
+      )
+      await client.query(
+        "UPDATE invoices SET status = 'paid', updated_at = NOW() WHERE invoice_id = $1",
+        [row.invoice_id]
+      )
+    } else {
+      await client.query(
+        `UPDATE payment_approvals SET status = 'partially_paid', updated_at = NOW() WHERE id = $1`,
+        [approvalId]
+      )
+      await client.query(
+        "UPDATE invoices SET status = 'partially_paid', updated_at = NOW() WHERE invoice_id = $1",
+        [row.invoice_id]
+      )
+    }
+
+    await client.query('COMMIT')
+    res.json({
+      success: true,
+      message: isFullyPaid ? 'Payment completed' : 'Partial payment recorded',
+      paidSoFar: newPaidTotal,
+      remaining: totalAmount - newPaidTotal,
+      status: isFullyPaid ? 'payment_done' : 'partially_paid'
+    })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Record payment error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Payment history: payment_done and partially_paid, with part-payment transactions for each
 router.get('/payments/history', authenticateToken, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -2448,8 +2570,9 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
        LEFT JOIN suppliers s ON s.supplier_id = pa.supplier_id
        LEFT JOIN purchase_orders po ON po.po_id = pa.po_id
        LEFT JOIN users u_done ON u_done.user_id = pa.payment_done_by
-       WHERE pa.status = 'payment_done'
-       ORDER BY pa.payment_done_at DESC NULLS LAST, pa.id DESC`
+       WHERE pa.status IN ('payment_done', 'partially_paid')
+         AND (pa.status = 'partially_paid' OR pa.payment_done_at IS NOT NULL)
+       ORDER BY COALESCE(pa.payment_done_at, (SELECT MAX(pt.paid_at) FROM payment_transactions pt WHERE pt.payment_approval_id = pa.id)) DESC NULLS LAST, pa.id DESC`
     )
     const result = []
     for (const r of rows) {
@@ -2463,7 +2586,20 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
         grnList = grnRes.rows
         asnList = asnRes.rows
       }
-      result.push({ ...r, grn_list: grnList, asn_list: asnList })
+      let paymentTransactions = []
+      try {
+        const txRows = await pool.query(
+          `SELECT pt.id, pt.amount, pt.paid_at, pt.notes, u.username AS paid_by_username, u.full_name AS paid_by_name
+           FROM payment_transactions pt
+           LEFT JOIN users u ON u.user_id = pt.paid_by
+           WHERE pt.payment_approval_id = $1 ORDER BY pt.paid_at ASC`,
+          [r.id]
+        )
+        paymentTransactions = txRows.rows || []
+      } catch (txErr) {
+        console.warn('Payment transactions fetch failed for approval', r.id, txErr.message)
+      }
+      result.push({ ...r, grn_list: grnList, asn_list: asnList, payment_transactions: paymentTransactions })
     }
     res.json(result)
   } catch (err) {
@@ -2472,30 +2608,58 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
   }
 })
 
-// Mark payment as done
+// Mark payment as done (records full remaining amount as one transaction, then marks done)
 router.patch('/payments/:id/mark-done', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
   try {
     const id = parseInt(req.params.id, 10)
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_id' })
     const userId = req.user?.user_id
-    const { rows } = await pool.query(
-      'UPDATE payment_approvals SET status = $1, payment_done_by = $2, payment_done_at = NOW(), updated_at = NOW() WHERE id = $3 AND status = $4 RETURNING id, invoice_id',
-      ['payment_done', userId, id, 'approved']
+
+    await client.query('BEGIN')
+
+    const pa = await client.query(
+      `SELECT pa.id, pa.invoice_id, pa.total_amount, pa.debit_note_value, pa.status
+       FROM payment_approvals pa WHERE pa.id = $1 AND pa.status IN ('approved', 'partially_paid')`,
+      [id]
     )
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'not_found', message: 'Approval record not found or not in approved status' })
+    if (pa.rows.length === 0) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'not_found', message: 'Approval record not found or not in approved/partially_paid status' })
     }
-    const invoiceId = rows[0].invoice_id
-    if (invoiceId) {
-      await pool.query(
-        "UPDATE invoices SET status = 'completed', updated_at = NOW() WHERE invoice_id = $1",
-        [invoiceId]
+    const row = pa.rows[0]
+    const totalAmount = parseFloat(row.debit_note_value != null ? row.debit_note_value : row.total_amount) || 0
+    const sumResult = await client.query(
+      'SELECT COALESCE(SUM(amount), 0)::numeric(15,2) AS paid FROM payment_transactions WHERE payment_approval_id = $1',
+      [id]
+    )
+    const paidSoFar = parseFloat(sumResult.rows[0]?.paid || 0)
+    const remaining = Math.max(0, totalAmount - paidSoFar)
+
+    if (remaining > 0) {
+      await client.query(
+        `INSERT INTO payment_transactions (payment_approval_id, amount, paid_by) VALUES ($1, $2, $3)`,
+        [id, remaining, userId]
       )
     }
+
+    await client.query(
+      `UPDATE payment_approvals SET status = 'payment_done', payment_done_by = $1, payment_done_at = NOW(), updated_at = NOW() WHERE id = $2`,
+      [userId, id]
+    )
+    await client.query(
+      "UPDATE invoices SET status = 'paid', updated_at = NOW() WHERE invoice_id = $1",
+      [row.invoice_id]
+    )
+
+    await client.query('COMMIT')
     res.json({ success: true, message: 'Payment marked as done' })
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
     console.error('Mark done error:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
   }
 })
 

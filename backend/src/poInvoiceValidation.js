@@ -1,10 +1,13 @@
 /**
  * PO / Invoice / ASN / GRN Processing – Functional Requirements
- * 1. Standard PO Invoice Validation (match → ready_for_payment, PO fulfilled)
- * 2. Partial / Shortfall → debit_note_approval, incomplete POs; after debit note → ready_for_payment, PO partially_fulfilled
- * 3. Partially Fulfilled POs in Incomplete POs with Force Close → PO fulfilled
- * 4. Multiple Invoices/ASN/GRN per PO – cumulative tracking; when cumulative matches PO qty → fulfilled
- * 5. Invoice after PO fulfilled → exception_approval; after approval → ready_for_payment
+ * PO lifecycle: open → (on validation) either partially_fulfilled or fulfilled
+ * Invoice lifecycle: waiting_for_validation → validated | waiting_for_re_validation | debit_note_approval | exception_approval
+ *   → validated → (approve payment) ready_for_payment → partially_paid | paid
+ * 1. Standard validation (match) → invoice validated, PO fulfilled
+ * 2. Shortfall → waiting_for_re_validation; proceed to debit note → debit_note_approval; after debit note approve → validated
+ * 3. Exception (PO already fulfilled) → exception_approval; after approve → validated
+ * 4. Validated invoices appear in Approve Payments; approve → ready_for_payment
+ * 5. Payment: ready_for_payment → partially_paid → paid
  */
 
 import { pool } from './db.js'
@@ -25,13 +28,15 @@ function parsePaymentTermsDays(terms) {
 }
 
 const INVOICE_STATUS = {
-  PENDING: 'pending',
-  READY_FOR_PAYMENT: 'ready_for_payment',
+  WAITING_FOR_VALIDATION: 'waiting_for_validation',
+  VALIDATED: 'validated',
+  WAITING_FOR_RE_VALIDATION: 'waiting_for_re_validation',
   DEBIT_NOTE_APPROVAL: 'debit_note_approval',
   EXCEPTION_APPROVAL: 'exception_approval',
-  APPROVED: 'approved',
-  REJECTED: 'rejected',
-  COMPLETED: 'completed'
+  READY_FOR_PAYMENT: 'ready_for_payment',
+  PARTIALLY_PAID: 'partially_paid',
+  PAID: 'paid',
+  REJECTED: 'rejected'
 }
 
 /**
@@ -149,7 +154,7 @@ export async function validateInvoiceAgainstPoGrn(invoiceId) {
 
 /**
  * Apply status updates after validation (standard flow).
- * Sets invoice to ready_for_payment, payment_due_date, PO to fulfilled.
+ * Sets invoice to validated, payment_due_date, PO to fulfilled.
  */
 export async function applyStandardValidation(client, invoiceId) {
   const inv = await client.query(
@@ -168,17 +173,17 @@ export async function applyStandardValidation(client, invoiceId) {
   }
   await client.query(
     `UPDATE invoices SET status = $1, payment_due_date = $2, updated_at = NOW() WHERE invoice_id = $3`,
-    [INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate, invoiceId]
+    [INVOICE_STATUS.VALIDATED, paymentDueDate, invoiceId]
   )
   await client.query(
     `UPDATE purchase_orders SET status = $1 WHERE po_id = $2`,
     [PO_STATUS.FULFILLED, po_id]
   )
-  return { invoiceStatus: INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate, poStatus: PO_STATUS.FULFILLED }
+  return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate, poStatus: PO_STATUS.FULFILLED }
 }
 
 /**
- * Proceed to payment despite mismatch (per doc: PO = Partially Fulfilled, invoice = ready_for_payment, pay invoice amount).
+ * Proceed to payment despite mismatch (PO = Partially Fulfilled, invoice = validated).
  */
 export async function proceedToPaymentFromMismatch(client, invoiceId) {
   const inv = await client.query(
@@ -197,13 +202,13 @@ export async function proceedToPaymentFromMismatch(client, invoiceId) {
   }
   await client.query(
     `UPDATE invoices SET status = $1, payment_due_date = $2, updated_at = NOW() WHERE invoice_id = $3`,
-    [INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate, invoiceId]
+    [INVOICE_STATUS.VALIDATED, paymentDueDate, invoiceId]
   )
   await client.query(
     `UPDATE purchase_orders SET status = $1 WHERE po_id = $2`,
     [PO_STATUS.PARTIALLY_FULFILLED, po_id]
   )
-  return { invoiceStatus: INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate, poStatus: PO_STATUS.PARTIALLY_FULFILLED }
+  return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate, poStatus: PO_STATUS.PARTIALLY_FULFILLED }
 }
 
 /**
@@ -218,7 +223,7 @@ export async function moveToDebitNoteApproval(client, invoiceId) {
 }
 
 /**
- * After debit note uploaded and approved: ready_for_payment, payment amount = debit_note_value, PO = partially_fulfilled.
+ * After debit note uploaded and approved: invoice = validated, payment amount = debit_note_value, PO = partially_fulfilled.
  */
 export async function debitNoteApprove(client, invoiceId, debitNoteValue) {
   const inv = await client.query(`SELECT po_id, invoice_date FROM invoices WHERE invoice_id = $1`, [invoiceId])
@@ -234,17 +239,17 @@ export async function debitNoteApprove(client, invoiceId, debitNoteValue) {
   }
   await client.query(
     `UPDATE invoices SET status = $1, payment_due_date = $2, debit_note_value = $3, updated_at = NOW() WHERE invoice_id = $4`,
-    [INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate, debitNoteValue ?? null, invoiceId]
+    [INVOICE_STATUS.VALIDATED, paymentDueDate, debitNoteValue ?? null, invoiceId]
   )
   await client.query(
     `UPDATE purchase_orders SET status = $1 WHERE po_id = $2`,
     [PO_STATUS.PARTIALLY_FULFILLED, po_id]
   )
-  return { invoiceStatus: INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate, debitNoteValue, poStatus: PO_STATUS.PARTIALLY_FULFILLED }
+  return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate, debitNoteValue, poStatus: PO_STATUS.PARTIALLY_FULFILLED }
 }
 
 /**
- * Exception approval: invoice for already-fulfilled PO → after approval, ready_for_payment.
+ * Exception approval: invoice for already-fulfilled PO → after approval, validated.
  */
 export async function exceptionApprove(client, invoiceId) {
   const inv = await client.query(`SELECT po_id, invoice_date FROM invoices WHERE invoice_id = $1`, [invoiceId])
@@ -260,9 +265,9 @@ export async function exceptionApprove(client, invoiceId) {
   }
   await client.query(
     `UPDATE invoices SET status = $1, payment_due_date = $2, updated_at = NOW() WHERE invoice_id = $3`,
-    [INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate, invoiceId]
+    [INVOICE_STATUS.VALIDATED, paymentDueDate, invoiceId]
   )
-  return { invoiceStatus: INVOICE_STATUS.READY_FOR_PAYMENT, paymentDueDate }
+  return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate }
 }
 
 /**
@@ -294,9 +299,14 @@ export async function validateAndUpdateInvoiceStatus(invoiceId) {
       return { action: 'exception_approval', invoiceStatus: INVOICE_STATUS.EXCEPTION_APPROVAL }
     }
     if (result.isShortfall) {
-      await client.query('ROLLBACK')
+      await client.query(
+        `UPDATE invoices SET status = $1, updated_at = NOW() WHERE invoice_id = $2`,
+        [INVOICE_STATUS.WAITING_FOR_RE_VALIDATION, invoiceId]
+      )
+      await client.query('COMMIT')
       return {
         action: 'shortfall',
+        invoiceStatus: INVOICE_STATUS.WAITING_FOR_RE_VALIDATION,
         validationFailureReason: result.validationFailureReason || result.reason,
         thisInvQty: result.thisInvQty,
         poQty: result.poQty,
@@ -306,7 +316,7 @@ export async function validateAndUpdateInvoiceStatus(invoiceId) {
     if (result.valid) {
       const applied = await applyStandardValidation(client, invoiceId)
       await client.query('COMMIT')
-      return { action: 'ready_for_payment', ...applied }
+      return { action: 'validated', ...applied }
     }
     await client.query('ROLLBACK')
     return { action: 'none', reason: result.reason }

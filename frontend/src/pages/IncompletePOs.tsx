@@ -657,7 +657,7 @@ function IncompletePOs() {
                   const detail = expandedDetails[row.po_id]
                   const loading = loadingDetailId === row.po_id
                   const reason = detail?.validation?.reason || detail?.validation?.validationFailureReason
-                  const statusLabel = row.pending_invoice_status === 'debit_note_approval' ? 'Debit note approval' : row.pending_invoice_status === 'exception_approval' ? 'Exception approval' : row.po_status === 'partially_fulfilled' ? 'Partially fulfilled' : ''
+                  const statusLabel = row.pending_invoice_status === 'waiting_for_re_validation' ? 'Waiting for re-validation' : row.pending_invoice_status === 'debit_note_approval' ? 'Debit note approval' : row.pending_invoice_status === 'exception_approval' ? 'Exception approval' : row.po_status === 'partially_fulfilled' ? 'Partially fulfilled' : ''
                   return (
                     <div className={styles.expandedDetail}>
                       {loading ? (

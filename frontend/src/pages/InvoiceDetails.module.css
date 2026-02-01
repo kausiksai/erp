@@ -148,21 +148,40 @@
   text-transform: uppercase;
 }
 
+/* Invoice status badges */
+.statusBadge.waiting_for_validation,
 .statusBadge.pending {
   background: #fef3c7;
   color: #92400e;
 }
 
-.statusBadge.open {
-  background: #e0e7ff;
-  color: #3730a3;
-}
-
-.statusBadge.approved {
+.statusBadge.validated {
   background: #dbeafe;
   color: #1e40af;
 }
 
+.statusBadge.waiting_for_re_validation {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.statusBadge.debit_note_approval,
+.statusBadge.exception_approval {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.statusBadge.ready_for_payment {
+  background: #cffafe;
+  color: #0e7490;
+}
+
+.statusBadge.partially_paid {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.statusBadge.paid,
 .statusBadge.completed {
   background: #d1fae5;
   color: #065f46;
@@ -171,6 +190,27 @@
 .statusBadge.rejected {
   background: #fee2e2;
   color: #991b1b;
+}
+
+/* PO status badges */
+.statusBadge.open {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.statusBadge.partially_fulfilled {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.statusBadge.fulfilled {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.statusBadge.approved {
+  background: #dbeafe;
+  color: #1e40af;
 }
 
 .clickableLink {

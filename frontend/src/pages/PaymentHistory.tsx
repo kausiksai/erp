@@ -32,6 +32,15 @@ interface AsnItem {
   transporter_name: string | null
 }
 
+interface PaymentTransaction {
+  id: number
+  amount: number
+  paid_at: string
+  notes: string | null
+  paid_by_username: string | null
+  paid_by_name: string | null
+}
+
 interface PaymentHistoryItem {
   id: number
   invoice_id: number
@@ -66,6 +75,7 @@ interface PaymentHistoryItem {
   po_terms: string | null
   grn_list: GrnItem[]
   asn_list: AsnItem[]
+  payment_transactions?: PaymentTransaction[]
 }
 
 function PaymentHistory() {
@@ -98,9 +108,21 @@ function PaymentHistory() {
     fetchHistory()
   }, [])
 
-  const amountDisplay = (row: PaymentHistoryItem) => {
+  const totalAmountDisplay = (row: PaymentHistoryItem) => {
     const amt = row.debit_note_value != null ? row.debit_note_value : row.total_amount
     return amt != null ? `₹${Number(amt).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'
+  }
+
+  const paidSum = (row: PaymentHistoryItem) => {
+    if (!row.payment_transactions?.length) return 0
+    return row.payment_transactions.reduce((s, tx) => s + Number(tx.amount), 0)
+  }
+
+  const remainingAmountDisplay = (row: PaymentHistoryItem) => {
+    const payable = row.debit_note_value != null ? row.debit_note_value : row.total_amount
+    const paid = paidSum(row)
+    const remaining = Math.max(0, (payable ?? 0) - paid)
+    return `₹${Number(remaining).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
   const dateDisplay = (d: string | null) => {
@@ -114,99 +136,207 @@ function PaymentHistory() {
   }
 
   const doneByDisplay = (row: PaymentHistoryItem) => {
+    if (row.payment_transactions?.length) {
+      const latest = row.payment_transactions.reduce((best, tx) =>
+        !best || new Date(tx.paid_at) > new Date(best.paid_at) ? tx : best
+      )
+      return latest.paid_by_name || latest.paid_by_username || '-'
+    }
     return row.payment_done_by_name || row.payment_done_by_username || '-'
+  }
+
+  const statusDisplay = (row: PaymentHistoryItem) => {
+    return row.status === 'payment_done' ? 'Fully paid' : row.status === 'partially_paid' ? 'Partially paid' : row.status
+  }
+
+  const lastPaymentAtDisplay = (row: PaymentHistoryItem) => {
+    if (row.payment_done_at) return dateTimeDisplay(row.payment_done_at)
+    if (row.payment_transactions?.length) {
+      const latest = row.payment_transactions.reduce((best, tx) =>
+        !best || new Date(tx.paid_at) > new Date(best.paid_at) ? tx : best
+      )
+      return dateTimeDisplay(latest.paid_at)
+    }
+    return '-'
   }
 
   const rowExpansionTemplate = (row: PaymentHistoryItem) => (
     <div className={styles.expandedContent}>
-      <div className={styles.sectionTitle}>Supplier</div>
-      <div className={styles.detailGrid}>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Name</span><span className={styles.detailValue}>{row.supplier_name || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>GST</span><span className={styles.detailValue}>{row.supplier_gst || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>PAN</span><span className={styles.detailValue}>{row.supplier_pan || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Address</span><span className={styles.detailValue}>{row.supplier_address || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Email / Phone</span><span className={styles.detailValue}>{[row.supplier_email, row.supplier_phone].filter(Boolean).join(' / ') || '-'}</span></div>
-      </div>
-      <div className={styles.sectionTitle}>Banking details (paid to)</div>
-      <div className={styles.bankingBlock}>
-        <table className={styles.miniTable}>
-          <tbody>
-            <tr><th>Account name</th><td>{row.bank_account_name || '-'}</td></tr>
-            <tr><th>Account number</th><td>{row.bank_account_number || '-'}</td></tr>
-            <tr><th>IFSC</th><td>{row.bank_ifsc_code || '-'}</td></tr>
-            <tr><th>Bank</th><td>{row.bank_name || '-'}</td></tr>
-            <tr><th>Branch</th><td>{row.branch_name || '-'}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div className={styles.sectionTitle}>PO</div>
-      <div className={styles.detailGrid}>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>PO Number</span><span className={styles.detailValue}>{row.po_number || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>PO Date</span><span className={styles.detailValue}>{dateDisplay(row.po_date)}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Terms</span><span className={styles.detailValue}>{row.po_terms || '-'}</span></div>
-      </div>
-      {row.grn_list && row.grn_list.length > 0 && (
-        <>
-          <div className={styles.sectionTitle}>GRN</div>
-          <table className={styles.miniTable}>
-            <thead>
-              <tr>
-                <th>GRN No</th>
-                <th>Date</th>
-                <th>DC No</th>
-                <th>DC Date</th>
-                <th>Qty</th>
-              </tr>
-            </thead>
-            <tbody>
-              {row.grn_list.map((g) => (
-                <tr key={g.id}>
-                  <td>{g.grn_no ?? '-'}</td>
-                  <td>{dateDisplay(g.grn_date)}</td>
-                  <td>{g.dc_no ?? '-'}</td>
-                  <td>{dateDisplay(g.dc_date)}</td>
-                  <td>{g.grn_qty ?? g.accepted_qty ?? '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-      {row.asn_list && row.asn_list.length > 0 && (
-        <>
-          <div className={styles.sectionTitle}>ASN</div>
-          <table className={styles.miniTable}>
-            <thead>
-              <tr>
-                <th>ASN No</th>
-                <th>DC No</th>
-                <th>DC Date</th>
-                <th>LR No</th>
-                <th>Transporter</th>
-              </tr>
-            </thead>
-            <tbody>
-              {row.asn_list.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.asn_no ?? '-'}</td>
-                  <td>{a.dc_no ?? '-'}</td>
-                  <td>{dateDisplay(a.dc_date)}</td>
-                  <td>{a.lr_no ?? '-'}</td>
-                  <td>{a.transporter_name ?? '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-      <div style={{ marginTop: '1rem' }}>
-        <Button
-          label="View invoice"
-          icon="pi pi-external-link"
-          size="small"
-          outlined
-          onClick={() => navigate(`/invoices/validate/${row.invoice_id}`)}
-        />
+      <div className={styles.sectionCards}>
+        <div className={styles.sectionCard}>
+          <div className={styles.sectionCardHeader}>Invoice summary</div>
+          <div className={styles.sectionCardBody}>
+            <div className={styles.summaryGrid}>
+              <div className={styles.detailItem}>
+                <span className={styles.detailLabel}>Invoice number</span>
+                <span className={styles.detailValueHighlight}>{row.invoice_number}</span>
+              </div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Invoice date</span><span className={styles.detailValue}>{dateDisplay(row.invoice_date)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Payment due date</span><span className={styles.detailValue}>{dateDisplay(row.payment_due_date)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Total amount</span><span className={styles.detailValueHighlight}>{totalAmountDisplay(row)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Remaining</span><span className={styles.detailValue}>{remainingAmountDisplay(row)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Status</span><span className={styles.detailValue}>{statusDisplay(row)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Last payment at</span><span className={styles.detailValue}>{lastPaymentAtDisplay(row)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Done by</span><span className={styles.detailValue}>{doneByDisplay(row)}</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.twoColGrid}>
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>Supplier</div>
+            <div className={styles.sectionCardBody}>
+              <div className={styles.summaryGrid}>
+                <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}><span className={styles.detailLabel}>Name</span><span className={styles.detailValue}>{row.supplier_name || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>GST</span><span className={styles.detailValue}>{row.supplier_gst || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>PAN</span><span className={styles.detailValue}>{row.supplier_pan || '-'}</span></div>
+                <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}><span className={styles.detailLabel}>Address</span><span className={styles.detailValue}>{row.supplier_address || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>Email</span><span className={styles.detailValue}>{row.supplier_email || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>Phone</span><span className={styles.detailValue}>{row.supplier_phone || '-'}</span></div>
+              </div>
+            </div>
+          </div>
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>Banking details (paid to)</div>
+            <div className={styles.sectionCardBody}>
+              <div className={styles.bankingBlock}>
+                <table className={styles.miniTable}>
+                  <tbody>
+                    <tr><th>Account name</th><td>{row.bank_account_name || '-'}</td></tr>
+                    <tr><th>Account number</th><td>{row.bank_account_number || '-'}</td></tr>
+                    <tr><th>IFSC</th><td>{row.bank_ifsc_code || '-'}</td></tr>
+                    <tr><th>Bank</th><td>{row.bank_name || '-'}</td></tr>
+                    <tr><th>Branch</th><td>{row.branch_name || '-'}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.sectionCard}>
+          <div className={styles.sectionCardHeader}>Purchase order</div>
+          <div className={styles.sectionCardBody}>
+            <div className={styles.summaryGrid}>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>PO number</span><span className={styles.detailValue}>{row.po_number || '-'}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>PO date</span><span className={styles.detailValue}>{dateDisplay(row.po_date)}</span></div>
+              <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}><span className={styles.detailLabel}>Terms</span><span className={styles.detailValue}>{row.po_terms || '-'}</span></div>
+            </div>
+          </div>
+        </div>
+
+        {row.grn_list && row.grn_list.length > 0 && (
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>GRN ({row.grn_list.length})</div>
+            <div className={styles.sectionCardBody}>
+              <table className={styles.miniTable}>
+                <thead>
+                  <tr>
+                    <th>GRN No</th>
+                    <th>Date</th>
+                    <th>DC No</th>
+                    <th>DC Date</th>
+                    <th>Qty</th>
+                    <th>Unit cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.grn_list.map((g) => (
+                    <tr key={g.id}>
+                      <td>{g.grn_no ?? '-'}</td>
+                      <td>{dateDisplay(g.grn_date)}</td>
+                      <td>{g.dc_no ?? '-'}</td>
+                      <td>{dateDisplay(g.dc_date)}</td>
+                      <td>{g.grn_qty ?? g.accepted_qty ?? '-'}</td>
+                      <td>{g.unit_cost != null ? `₹${Number(g.unit_cost).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {row.asn_list && row.asn_list.length > 0 && (
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>ASN ({row.asn_list.length})</div>
+            <div className={styles.sectionCardBody}>
+              <table className={styles.miniTable}>
+                <thead>
+                  <tr>
+                    <th>ASN No</th>
+                    <th>DC No</th>
+                    <th>DC Date</th>
+                    <th>Inv No</th>
+                    <th>Inv Date</th>
+                    <th>LR No</th>
+                    <th>Transporter</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.asn_list.map((a) => (
+                    <tr key={a.id}>
+                      <td>{a.asn_no ?? '-'}</td>
+                      <td>{a.dc_no ?? '-'}</td>
+                      <td>{dateDisplay(a.dc_date)}</td>
+                      <td>{a.inv_no ?? '-'}</td>
+                      <td>{dateDisplay(a.inv_date)}</td>
+                      <td>{a.lr_no ?? '-'}</td>
+                      <td>{a.transporter_name ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div className={styles.sectionCard}>
+          <div className={styles.sectionCardHeader}>Part payments</div>
+          <div className={styles.sectionCardBody}>
+            {row.payment_transactions && row.payment_transactions.length > 0 ? (
+              <>
+                <table className={styles.miniTable}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Amount (₹)</th>
+                      <th>Paid by</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {row.payment_transactions.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{dateTimeDisplay(tx.paid_at)}</td>
+                        <td>{Number(tx.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>{tx.paid_by_name || tx.paid_by_username || '-'}</td>
+                        <td>{tx.notes || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className={styles.partPaymentsTotal}>
+                  Total paid: ₹{(row.payment_transactions.reduce((sum, tx) => sum + Number(tx.amount), 0)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </>
+            ) : (
+              <p className={styles.legacyPaymentNote}>
+                Full payment on {dateTimeDisplay(row.payment_done_at)} by {doneByDisplay(row)}.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className={styles.expandedActions}>
+          <Button
+            label="View invoice"
+            icon="pi pi-external-link"
+            size="small"
+            outlined
+            onClick={() => navigate(`/invoices/validate/${row.invoice_id}`)}
+          />
+        </div>
       </div>
     </div>
   )
@@ -262,8 +392,10 @@ function PaymentHistory() {
                   <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
                   <Column field="po_number" header="PO Number" sortable style={{ minWidth: '120px' }} />
                   <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
-                  <Column header="Amount" body={amountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
-                  <Column header="Payment done at" body={(r) => dateTimeDisplay(r.payment_done_at)} sortable sortField="payment_done_at" style={{ minWidth: '160px' }} />
+                  <Column header="Total amount" body={totalAmountDisplay} sortable sortField="total_amount" style={{ minWidth: '120px', textAlign: 'right' }} />
+                  <Column header="Remaining" body={remainingAmountDisplay} style={{ minWidth: '120px', textAlign: 'right' }} />
+                  <Column header="Status" body={statusDisplay} sortable sortField="status" style={{ minWidth: '110px' }} />
+                  <Column header="Last payment at" body={lastPaymentAtDisplay} sortable sortField="payment_done_at" style={{ minWidth: '160px' }} />
                   <Column header="Done by" body={doneByDisplay} style={{ minWidth: '140px' }} />
                 </DataTable>
               </div>

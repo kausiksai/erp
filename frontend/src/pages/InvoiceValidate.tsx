@@ -29,13 +29,15 @@ interface Invoice {
 }
 
 const statusOptions = [
-  { label: 'Open', value: 'open' },
-  { label: 'Ready for payment', value: 'ready_for_payment' },
+  { label: 'Waiting for validation', value: 'waiting_for_validation' },
+  { label: 'Validated', value: 'validated' },
+  { label: 'Waiting for re-validation', value: 'waiting_for_re_validation' },
   { label: 'Debit note approval', value: 'debit_note_approval' },
   { label: 'Exception approval', value: 'exception_approval' },
-  { label: 'Approved', value: 'approved' },
-  { label: 'Rejected', value: 'rejected' },
-  { label: 'Completed', value: 'completed' }
+  { label: 'Ready for payment', value: 'ready_for_payment' },
+  { label: 'Partially paid', value: 'partially_paid' },
+  { label: 'Paid', value: 'paid' },
+  { label: 'Rejected', value: 'rejected' }
 ]
 
 function InvoiceValidate() {
@@ -118,22 +120,28 @@ function InvoiceValidate() {
 
   const statusLabel = (status: string) => {
     const s = (status || '').toLowerCase().replace(/\s+/g, '_')
-    if (s === 'pending' || s === 'open') return 'Open'
-    if (s === 'debit_note_approval') return 'Debit note'
-    if (s === 'exception_approval') return 'Exception'
-    if (s === 'ready_for_payment') return 'Ready for payment'
-    if (s === 'approved') return 'Approved'
-    if (s === 'rejected') return 'Rejected'
-    if (s === 'completed') return 'Completed'
-    return (status || 'Open').toUpperCase()
+    const map: Record<string, string> = {
+      waiting_for_validation: 'Waiting for validation',
+      validated: 'Validated',
+      waiting_for_re_validation: 'Waiting for re-validation',
+      debit_note_approval: 'Debit note approval',
+      exception_approval: 'Exception approval',
+      ready_for_payment: 'Ready for payment',
+      partially_paid: 'Partially paid',
+      paid: 'Paid',
+      rejected: 'Rejected',
+      pending: 'Waiting for validation',
+      completed: 'Paid'
+    }
+    return map[s] || (status || 'Waiting for validation')
   }
 
   const statusBodyTemplate = (rowData: Invoice) => {
-    const status = rowData.status || 'pending'
-    const severity = status === 'completed' ? 'success' :
-                     status === 'approved' ? 'info' :
+    const status = rowData.status || 'waiting_for_validation'
+    const severity = status === 'paid' || status === 'completed' ? 'success' :
+                     status === 'validated' || status === 'partially_paid' ? 'info' :
                      status === 'rejected' ? 'danger' :
-                     /debit_note|exception|ready_for_payment/i.test(status) ? 'warning' : 'warning'
+                     /debit_note|exception|ready_for_payment|waiting_for_re_validation/i.test(status) ? 'warning' : 'warning'
     return <Tag value={statusLabel(status)} severity={severity} />
   }
 

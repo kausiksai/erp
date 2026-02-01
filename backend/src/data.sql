@@ -182,19 +182,19 @@ WHERE po.po_number LIKE 'PO-%'
   AND po.po_number NOT IN ('PO-PF-01','PO-PF-02');
 
 -- ============================================
--- 10. Invoices (all POs that have at least one doc; status = pending – Validate will change it)
+-- 10. Invoices (all POs that have at least one doc; status = waiting_for_validation – Validate will change it)
 -- PO-PF-01: no invoice (missing). PO-PF-02, PO-PF-03 and all others have invoice.
 -- ============================================
 INSERT INTO invoices (invoice_number, invoice_date, supplier_id, po_id, scanning_number, po_number, total_amount, tax_amount, status, payment_due_date, notes)
 SELECT 'INV-'||po.po_number, po.date + 5, po.supplier_id, po.po_id, 'SCN-'||po.po_number, po.po_number,
   1000.00, 180.00,
-  'pending',
+  'waiting_for_validation',
   po.date + 35,
   'Test invoice ' || po.po_number
 FROM purchase_orders po
 WHERE po.po_number LIKE 'PO-%' AND po.po_number != 'PO-PF-01'
 ON CONFLICT (invoice_number) DO UPDATE SET
-  status = 'pending',
+  status = 'waiting_for_validation',
   total_amount = EXCLUDED.total_amount,
   tax_amount = EXCLUDED.tax_amount,
   payment_due_date = EXCLUDED.payment_due_date,

@@ -326,7 +326,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   po_number          TEXT,
   total_amount       DECIMAL(15, 2),
   tax_amount         DECIMAL(15, 2),
-  status             TEXT        DEFAULT 'pending',
+  status             TEXT        DEFAULT 'waiting_for_validation',
   payment_due_date   DATE,
   debit_note_value   DECIMAL(15, 2),
   notes              TEXT,
@@ -460,6 +460,21 @@ CREATE INDEX IF NOT EXISTS idx_payment_approvals_po ON payment_approvals (po_id)
 CREATE INDEX IF NOT EXISTS idx_payment_approvals_status ON payment_approvals (status);
 
 -- ============================================
+-- Payment Transactions (partial payments)
+-- ============================================
+CREATE TABLE IF NOT EXISTS payment_transactions (
+  id                   BIGSERIAL PRIMARY KEY,
+  payment_approval_id  BIGINT      NOT NULL REFERENCES payment_approvals(id) ON DELETE CASCADE,
+  amount               DECIMAL(15, 2) NOT NULL,
+  paid_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  paid_by              BIGINT      REFERENCES users(user_id),
+  notes                TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_approval ON payment_transactions (payment_approval_id);
+
+-- ============================================
 -- Menu Items
 -- ============================================
 CREATE TABLE IF NOT EXISTS menu_items (
@@ -500,3 +515,10 @@ CREATE TABLE IF NOT EXISTS role_menu_access (
 CREATE INDEX IF NOT EXISTS idx_role_menu_access_role ON role_menu_access (role);
 CREATE INDEX IF NOT EXISTS idx_role_menu_access_menu ON role_menu_access (menu_item_id);
 CREATE INDEX IF NOT EXISTS idx_role_menu_access_active ON role_menu_access (has_access);
+
+-- ============================================
+-- Optional: migrate existing invoice statuses to new lifecycle (run if you have existing data)
+-- ============================================
+-- ALTER TABLE invoices ALTER COLUMN status SET DEFAULT 'waiting_for_validation';
+-- UPDATE invoices SET status = 'waiting_for_validation' WHERE LOWER(TRIM(status)) = 'pending';
+-- UPDATE invoices SET status = 'paid' WHERE LOWER(TRIM(status)) = 'completed';

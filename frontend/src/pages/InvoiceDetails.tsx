@@ -183,7 +183,7 @@ function InvoiceDetails() {
         setValidating(false)
         return
       }
-      if (action === 'ready_for_payment') {
+      if (action === 'validated' || action === 'ready_for_payment') {
         setSuccessDialogContent({
           summary: 'Validation successful',
           detail: 'Invoice validated successfully. It will appear on Approve Payments for manager approval.'
@@ -245,7 +245,7 @@ function InvoiceDetails() {
       if (resolution === 'proceed_to_payment') {
         toast.current?.show({
           severity: 'success',
-          summary: 'Ready for payment',
+          summary: 'Validated',
           detail: 'Invoice will appear on Approve Payments for manager approval.',
           life: 6000
         })
@@ -270,6 +270,38 @@ function InvoiceDetails() {
     if (invoice?.po_number) {
       navigate(`/purchase-orders/upload`)
     }
+  }
+
+  const invoiceStatusLabel = (status: string | null | undefined) => {
+    const s = (status || '').toLowerCase().replace(/\s+/g, '_')
+    const map: Record<string, string> = {
+      waiting_for_validation: 'Waiting for validation',
+      validated: 'Validated',
+      waiting_for_re_validation: 'Waiting for re-validation',
+      debit_note_approval: 'Debit note approval',
+      exception_approval: 'Exception approval',
+      ready_for_payment: 'Ready for payment',
+      partially_paid: 'Partially paid',
+      paid: 'Paid',
+      rejected: 'Rejected',
+      pending: 'Waiting for validation',
+      completed: 'Paid'
+    }
+    return map[s] || (status || 'Waiting for validation')
+  }
+
+  const invoiceStatusClass = (status: string | null | undefined) => {
+    const s = (status || '').toLowerCase().replace(/\s+/g, '_')
+    if (['waiting_for_validation', 'validated', 'waiting_for_re_validation', 'debit_note_approval', 'exception_approval', 'ready_for_payment', 'partially_paid', 'paid', 'rejected', 'pending', 'completed'].includes(s)) return s
+    return 'waiting_for_validation'
+  }
+
+  const poStatusLabel = (status: string | null | undefined) => {
+    const s = (status || '').toLowerCase()
+    if (s === 'open') return 'Open'
+    if (s === 'partially_fulfilled') return 'Partially fulfilled'
+    if (s === 'fulfilled') return 'Fulfilled'
+    return (status || 'Open').toUpperCase()
   }
 
   const dateBodyTemplate = (date: string | null) => {
@@ -399,10 +431,13 @@ function InvoiceDetails() {
               {(() => {
                 const statusNorm = (invoice.status || '').toLowerCase().replace(/\s+/g, '_').trim()
                 const alreadyValidatedOrInWorkflow = [
+                  'validated',
                   'ready_for_payment',
                   'approved',
                   'rejected',
+                  'paid',
                   'completed',
+                  'partially_paid',
                   'debit_note_approval',
                   'exception_approval'
                 ].includes(statusNorm)
@@ -447,8 +482,8 @@ function InvoiceDetails() {
               <div className={styles.detailItem}>
                 <span className={styles.detailLabel}>Status:</span>
                 <span className={styles.detailValue}>
-                  <span className={`${styles.statusBadge} ${styles[invoice.status] || styles.pending}`}>
-                    {invoice.status?.toUpperCase() || 'PENDING'}
+                  <span className={`${styles.statusBadge} ${styles[invoiceStatusClass(invoice.status)] || styles.waiting_for_validation}`}>
+                    {invoiceStatusLabel(invoice.status)}
                   </span>
                 </span>
               </div>
@@ -500,7 +535,7 @@ function InvoiceDetails() {
                   <span className={styles.detailLabel}>PO Status:</span>
                   <span className={styles.detailValue}>
                     <span className={`${styles.statusBadge} ${styles[invoice.po_status || 'open'] || styles.open}`}>
-                      {(invoice.po_status || 'OPEN').toUpperCase()}
+                      {poStatusLabel(invoice.po_status)}
                     </span>
                   </span>
                 </div>

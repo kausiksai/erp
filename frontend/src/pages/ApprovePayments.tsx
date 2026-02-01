@@ -35,15 +35,52 @@ interface AsnItem {
   transporter_name: string | null
 }
 
+interface PoLineItem {
+  po_line_id: number
+  sequence_number: number | null
+  item_id: string | null
+  description1: string | null
+  qty: number | null
+  unit_cost: number | null
+  disc_pct: number | null
+  raw_material: string | null
+  process_description: string | null
+  norms: string | null
+  process_cost: number | null
+}
+
+interface InvoiceLineItem {
+  invoice_line_id: number
+  sequence_number: number | null
+  po_line_id: number | null
+  item_name: string | null
+  hsn_sac: string | null
+  uom: string | null
+  billed_qty: number | null
+  weight: number | null
+  count: number | null
+  rate: number | null
+  rate_per: string | null
+  line_total: number | null
+  taxable_value: number | null
+  cgst_rate: number | null
+  cgst_amount: number | null
+  sgst_rate: number | null
+  sgst_amount: number | null
+  total_tax_amount: number | null
+}
+
 interface PendingApproval {
   invoice_id: number
   invoice_number: string
   invoice_date: string | null
+  scanning_number: string | null
   total_amount: number
   tax_amount: number
   status: string
   payment_due_date: string | null
   debit_note_value: number | null
+  notes: string | null
   po_id: number | null
   supplier_id: number | null
   po_number: string | null
@@ -66,6 +103,8 @@ interface PendingApproval {
   payment_approval_status: string | null
   grn_list: GrnItem[]
   asn_list: AsnItem[]
+  po_lines?: PoLineItem[]
+  invoice_lines?: InvoiceLineItem[]
 }
 
 function ApprovePayments() {
@@ -95,7 +134,12 @@ function ApprovePayments() {
         throw new Error(msg)
       }
       const data = await res.json()
-      setList(data)
+      const sorted = [...data].sort((a, b) => {
+        const da = a.payment_due_date ? new Date(a.payment_due_date).getTime() : Infinity
+        const db = b.payment_due_date ? new Date(b.payment_due_date).getTime() : Infinity
+        return da - db
+      })
+      setList(sorted)
       setExpandedRows({})
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load pending approvals'
@@ -232,96 +276,250 @@ function ApprovePayments() {
 
   const rowExpansionTemplate = (row: PendingApproval) => (
     <div className={styles.expandedContent}>
-      <div className={styles.sectionTitle}>Supplier</div>
-      <div className={styles.detailGrid}>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Name</span><span className={styles.detailValue}>{row.supplier_name || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>GST</span><span className={styles.detailValue}>{row.supplier_gst || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>PAN</span><span className={styles.detailValue}>{row.supplier_pan || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Address</span><span className={styles.detailValue}>{row.supplier_address || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Email / Phone</span><span className={styles.detailValue}>{[row.supplier_email, row.supplier_phone].filter(Boolean).join(' / ') || '-'}</span></div>
-      </div>
-      <div className={styles.sectionTitle}>Banking details</div>
-      <div className={styles.bankingBlock}>
-        <table className={styles.miniTable}>
-          <tbody>
-            <tr><th>Account name</th><td>{row.bank_account_name || '-'}</td></tr>
-            <tr><th>Account number</th><td>{row.bank_account_number || '-'}</td></tr>
-            <tr><th>IFSC</th><td>{row.bank_ifsc_code || '-'}</td></tr>
-            <tr><th>Bank / Branch</th><td>{[row.bank_name, row.branch_name].filter(Boolean).join(' — ') || '-'}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div className={styles.sectionTitle}>PO</div>
-      <div className={styles.detailGrid}>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>PO Number</span><span className={styles.detailValue}>{row.po_number_ref || row.po_number || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>PO Date</span><span className={styles.detailValue}>{dateDisplay(row.po_date)}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Terms</span><span className={styles.detailValue}>{row.po_terms || '-'}</span></div>
-        <div className={styles.detailItem}><span className={styles.detailLabel}>Status</span><span className={styles.detailValue}>{row.po_status || '-'}</span></div>
-      </div>
-      {row.grn_list && row.grn_list.length > 0 && (
-        <>
-          <div className={styles.sectionTitle}>GRN</div>
-          <table className={styles.miniTable}>
-            <thead>
-              <tr>
-                <th>GRN No</th>
-                <th>Date</th>
-                <th>DC No</th>
-                <th>DC Date</th>
-                <th>Qty</th>
-              </tr>
-            </thead>
-            <tbody>
-              {row.grn_list.map((g) => (
-                <tr key={g.id}>
-                  <td>{g.grn_no ?? '-'}</td>
-                  <td>{dateDisplay(g.grn_date)}</td>
-                  <td>{g.dc_no ?? '-'}</td>
-                  <td>{dateDisplay(g.dc_date)}</td>
-                  <td>{g.grn_qty ?? g.accepted_qty ?? '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-      {row.asn_list && row.asn_list.length > 0 && (
-        <>
-          <div className={styles.sectionTitle}>ASN</div>
-          <table className={styles.miniTable}>
-            <thead>
-              <tr>
-                <th>ASN No</th>
-                <th>DC No</th>
-                <th>DC Date</th>
-                <th>LR No</th>
-                <th>Transporter</th>
-              </tr>
-            </thead>
-            <tbody>
-              {row.asn_list.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.asn_no ?? '-'}</td>
-                  <td>{a.dc_no ?? '-'}</td>
-                  <td>{dateDisplay(a.dc_date)}</td>
-                  <td>{a.lr_no ?? '-'}</td>
-                  <td>{a.transporter_name ?? '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-      <div className={styles.actionButtons} style={{ marginTop: '1rem' }}>
-        <Button label="Approve" icon="pi pi-check" severity="success" size="small" className={styles.actionButton}
-          loading={actionLoading === `approve-${row.invoice_id}`} disabled={!!actionLoading}
-          onClick={() => confirmApprove(row)} />
-        <Button label="Modify & Approve" icon="pi pi-pencil" size="small" className={styles.actionButton}
-          loading={actionLoading === `modify-${row.invoice_id}`} disabled={!!actionLoading}
-          onClick={() => openModify(row)} />
-        <Button label="Reject" icon="pi pi-times" severity="danger" size="small" className={styles.actionButton}
-          loading={actionLoading === `reject-${row.invoice_id}`} disabled={!!actionLoading}
-          onClick={() => { setRejectionReason(''); setRejectDialog({ open: true, item: row }) }} />
+      <div className={styles.sectionCards}>
+        <div className={styles.sectionCard}>
+          <div className={styles.sectionCardHeader}>Invoice summary</div>
+          <div className={styles.sectionCardBody}>
+            <div className={styles.summaryGrid}>
+              <div className={styles.detailItem}>
+                <span className={styles.detailLabel}>Invoice number</span>
+                <span className={styles.detailValueHighlight}>{row.invoice_number}</span>
+              </div>
+              {row.scanning_number && (
+                <div className={styles.detailItem}><span className={styles.detailLabel}>Scanning number</span><span className={styles.detailValue}>{row.scanning_number}</span></div>
+              )}
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Invoice date</span><span className={styles.detailValue}>{dateDisplay(row.invoice_date)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Payment due date</span><span className={styles.detailValue}>{dateDisplay(row.payment_due_date)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Status</span><span className={styles.detailValue}>{row.status}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Total amount</span><span className={styles.detailValueHighlight}>{amountDisplay(row)}</span></div>
+              {row.debit_note_value != null && (
+                <div className={styles.detailItem}><span className={styles.detailLabel}>Debit note value</span><span className={styles.detailValue}>₹{Number(row.debit_note_value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+              )}
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Tax amount</span><span className={styles.detailValue}>₹{Number(row.tax_amount ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+              {row.notes && (
+                <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}><span className={styles.detailLabel}>Notes</span><span className={styles.detailValue}>{row.notes}</span></div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.twoColGrid}>
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>Supplier</div>
+            <div className={styles.sectionCardBody}>
+              <div className={styles.summaryGrid}>
+                <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}><span className={styles.detailLabel}>Name</span><span className={styles.detailValue}>{row.supplier_name || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>GST</span><span className={styles.detailValue}>{row.supplier_gst || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>PAN</span><span className={styles.detailValue}>{row.supplier_pan || '-'}</span></div>
+                <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}><span className={styles.detailLabel}>Address</span><span className={styles.detailValue}>{row.supplier_address || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>Email</span><span className={styles.detailValue}>{row.supplier_email || '-'}</span></div>
+                <div className={styles.detailItem}><span className={styles.detailLabel}>Phone</span><span className={styles.detailValue}>{row.supplier_phone || '-'}</span></div>
+              </div>
+            </div>
+          </div>
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>Banking details (pay to)</div>
+            <div className={styles.sectionCardBody}>
+              <div className={styles.bankingBlock}>
+                <table className={styles.miniTable}>
+                  <tbody>
+                    <tr><th>Account name</th><td>{row.bank_account_name || '-'}</td></tr>
+                    <tr><th>Account number</th><td>{row.bank_account_number || '-'}</td></tr>
+                    <tr><th>IFSC</th><td>{row.bank_ifsc_code || '-'}</td></tr>
+                    <tr><th>Bank</th><td>{row.bank_name || '-'}</td></tr>
+                    <tr><th>Branch</th><td>{row.branch_name || '-'}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.sectionCard}>
+          <div className={styles.sectionCardHeader}>Purchase order</div>
+          <div className={styles.sectionCardBody}>
+            <div className={styles.summaryGrid}>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>PO number</span><span className={styles.detailValue}>{row.po_number_ref || row.po_number || '-'}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>PO date</span><span className={styles.detailValue}>{dateDisplay(row.po_date)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>PO status</span><span className={styles.detailValue}>{row.po_status || '-'}</span></div>
+              <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}><span className={styles.detailLabel}>Terms</span><span className={styles.detailValue}>{row.po_terms || '-'}</span></div>
+            </div>
+          </div>
+        </div>
+
+        {row.po_lines && row.po_lines.length > 0 && (
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>PO lines ({row.po_lines.length})</div>
+            <div className={styles.sectionCardBody}>
+              <div className={styles.tableScroll}>
+                <table className={styles.miniTable}>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Item ID</th>
+                      <th>Description</th>
+                      <th>Qty</th>
+                      <th>Unit cost (₹)</th>
+                      <th>Disc %</th>
+                      <th>Raw material</th>
+                      <th>Process</th>
+                      <th>Norms</th>
+                      <th>Process cost (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {row.po_lines.map((pl) => (
+                      <tr key={pl.po_line_id}>
+                        <td>{pl.sequence_number ?? '-'}</td>
+                        <td>{pl.item_id ?? '-'}</td>
+                        <td>{pl.description1 ?? '-'}</td>
+                        <td>{pl.qty != null ? Number(pl.qty).toLocaleString('en-IN', { maximumFractionDigits: 3 }) : '-'}</td>
+                        <td>{pl.unit_cost != null ? `₹${Number(pl.unit_cost).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : '-'}</td>
+                        <td>{pl.disc_pct != null ? `${Number(pl.disc_pct).toFixed(2)}%` : '-'}</td>
+                        <td>{pl.raw_material ?? '-'}</td>
+                        <td>{pl.process_description ?? '-'}</td>
+                        <td>{pl.norms ?? '-'}</td>
+                        <td>{pl.process_cost != null ? `₹${Number(pl.process_cost).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {row.invoice_lines && row.invoice_lines.length > 0 && (
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>Invoice lines ({row.invoice_lines.length})</div>
+            <div className={styles.sectionCardBody}>
+              <div className={styles.tableScroll}>
+                <table className={styles.miniTable}>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Item name</th>
+                      <th>HSN/SAC</th>
+                      <th>UOM</th>
+                      <th>Billed qty</th>
+                      <th>Weight</th>
+                      <th>Count</th>
+                      <th>Rate (₹)</th>
+                      <th>Rate per</th>
+                      <th>Line total (₹)</th>
+                      <th>Taxable value (₹)</th>
+                      <th>CGST %</th>
+                      <th>CGST (₹)</th>
+                      <th>SGST %</th>
+                      <th>SGST (₹)</th>
+                      <th>Tax (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {row.invoice_lines.map((il) => (
+                      <tr key={il.invoice_line_id}>
+                        <td>{il.sequence_number ?? '-'}</td>
+                        <td>{il.item_name ?? '-'}</td>
+                        <td>{il.hsn_sac ?? '-'}</td>
+                        <td>{il.uom ?? '-'}</td>
+                        <td>{il.billed_qty != null ? Number(il.billed_qty).toLocaleString('en-IN', { maximumFractionDigits: 3 }) : '-'}</td>
+                        <td>{il.weight != null ? Number(il.weight).toLocaleString('en-IN', { maximumFractionDigits: 3 }) : '-'}</td>
+                        <td>{il.count ?? '-'}</td>
+                        <td>{il.rate != null ? `₹${Number(il.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                        <td>{il.rate_per ?? '-'}</td>
+                        <td>{il.line_total != null ? `₹${Number(il.line_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                        <td>{il.taxable_value != null ? `₹${Number(il.taxable_value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                        <td>{il.cgst_rate != null ? `${Number(il.cgst_rate)}%` : '-'}</td>
+                        <td>{il.cgst_amount != null ? `₹${Number(il.cgst_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                        <td>{il.sgst_rate != null ? `${Number(il.sgst_rate)}%` : '-'}</td>
+                        <td>{il.sgst_amount != null ? `₹${Number(il.sgst_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                        <td>{il.total_tax_amount != null ? `₹${Number(il.total_tax_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {row.grn_list && row.grn_list.length > 0 && (
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>GRN ({row.grn_list.length})</div>
+            <div className={styles.sectionCardBody}>
+              <table className={styles.miniTable}>
+                <thead>
+                  <tr>
+                    <th>GRN No</th>
+                    <th>Date</th>
+                    <th>DC No</th>
+                    <th>DC Date</th>
+                    <th>Qty</th>
+                    <th>Unit cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.grn_list.map((g) => (
+                    <tr key={g.id}>
+                      <td>{g.grn_no ?? '-'}</td>
+                      <td>{dateDisplay(g.grn_date)}</td>
+                      <td>{g.dc_no ?? '-'}</td>
+                      <td>{dateDisplay(g.dc_date)}</td>
+                      <td>{g.grn_qty ?? g.accepted_qty ?? '-'}</td>
+                      <td>{g.unit_cost != null ? `₹${Number(g.unit_cost).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {row.asn_list && row.asn_list.length > 0 && (
+          <div className={styles.sectionCard}>
+            <div className={styles.sectionCardHeader}>ASN ({row.asn_list.length})</div>
+            <div className={styles.sectionCardBody}>
+              <table className={styles.miniTable}>
+                <thead>
+                  <tr>
+                    <th>ASN No</th>
+                    <th>DC No</th>
+                    <th>DC Date</th>
+                    <th>Inv No</th>
+                    <th>Inv Date</th>
+                    <th>LR No</th>
+                    <th>Transporter</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.asn_list.map((a) => (
+                    <tr key={a.id}>
+                      <td>{a.asn_no ?? '-'}</td>
+                      <td>{a.dc_no ?? '-'}</td>
+                      <td>{dateDisplay(a.dc_date)}</td>
+                      <td>{a.inv_no ?? '-'}</td>
+                      <td>{dateDisplay(a.inv_date)}</td>
+                      <td>{a.lr_no ?? '-'}</td>
+                      <td>{a.transporter_name ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div className={styles.expandedActions}>
+          <Button label="Approve" icon="pi pi-check" severity="success" size="small" className={styles.actionButton}
+            loading={actionLoading === `approve-${row.invoice_id}`} disabled={!!actionLoading}
+            onClick={() => confirmApprove(row)} />
+          <Button label="Modify & Approve" icon="pi pi-pencil" size="small" className={styles.actionButton}
+            loading={actionLoading === `modify-${row.invoice_id}`} disabled={!!actionLoading}
+            onClick={() => openModify(row)} />
+          <Button label="Reject" icon="pi pi-times" severity="danger" size="small" className={styles.actionButton}
+            loading={actionLoading === `reject-${row.invoice_id}`} disabled={!!actionLoading}
+            onClick={() => { setRejectionReason(''); setRejectDialog({ open: true, item: row }) }} />
+        </div>
       </div>
     </div>
   )
@@ -352,7 +550,7 @@ function ApprovePayments() {
             </div>
           ) : list.length === 0 ? (
             <div className="dts-emptySection">
-              <p>No pending approvals. This page shows only invoices that are <strong>Ready for Payment</strong>. Invoices get that status after you validate them on Invoice Details (match with PO/GRN). Go to <strong>Invoice Management → Invoice Details</strong>, open an invoice linked to a PO with GRN/ASN, and click <strong>Validate</strong>.</p>
+              <p>No pending approvals. This page shows invoices with status <strong>Validated</strong> (ready to send to payment). Invoices get that status after you validate them on Invoice Details (match with PO/GRN). Go to <strong>Invoice Management → Invoice Details</strong>, open an invoice linked to a PO with GRN/ASN, and click <strong>Validate</strong>.</p>
               <Button label="Go to Invoice Details" icon="pi pi-arrow-right" onClick={() => navigate('/invoices/validate')} className={styles.emptyStateButton} style={{ marginTop: '0.75rem' }} />
             </div>
           ) : (
@@ -366,6 +564,8 @@ function ApprovePayments() {
                   rowExpansionTemplate={rowExpansionTemplate}
                   stripedRows
                   size="small"
+                  sortField="payment_due_date"
+                  sortOrder={1}
                 >
                   <Column expander style={{ width: '3rem' }} />
                   <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
