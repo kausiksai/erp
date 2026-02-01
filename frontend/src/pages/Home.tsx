@@ -99,106 +99,142 @@ function Home() {
     )
   }
 
+  const totalItems = menuCategories.reduce((sum, c) => sum + c.items.length, 0)
+
   return (
     <div className={styles.homePage}>
       <Header />
       <Toast ref={toast} position="top-right" />
       <div id="main-content" className={styles.container} tabIndex={-1}>
-        <div className={styles.pageHeader}>
+        <header className={styles.pageHeader}>
           <div className={styles.headerContent}>
-            <div>
+            <div className={styles.headerText}>
+              <p className={styles.welcomeLine}>
+                <span className={styles.welcomeRole}>Signed in as {getRoleDisplayName(userRole as UserRole)}</span>
+              </p>
               <h1 className={styles.pageTitle}>Billing System Dashboard</h1>
-              <p className={styles.pageSubtitle}>End-to-end billing and invoice management solution</p>
+              <p className={styles.pageSubtitle}>
+                End-to-end billing, invoice management, and payment workflows in one place.
+              </p>
+              {menuCategories.length > 0 && (
+                <p className={styles.menuSummary}>
+                  {menuCategories.length} categor{menuCategories.length === 1 ? 'y' : 'ies'} · {totalItems} module{totalItems !== 1 ? 's' : ''} available
+                </p>
+              )}
             </div>
             {menuCategories.length > 0 && (
-            <div className={styles.statsBar}>
-              {menuCategories.map((category) => (
-                <div
-                  key={category.id}
-                  className={styles.statItem}
-                  onClick={() => scrollToSection(category.id)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      scrollToSection(category.id)
-                    }
-                  }}
-                >
-                  <i
-                    className={category.items[0]?.icon ?? 'pi pi-folder'}
-                    style={{ color: category.items[0]?.color ?? '#2563eb' }}
-                  />
-                  <span>{category.title}</span>
-                </div>
-              ))}
-            </div>
+              <nav className={styles.statsBar} aria-label="Jump to section">
+                {menuCategories.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    className={styles.statItem}
+                    onClick={() => scrollToSection(category.id)}
+                    style={{ '--category-color': category.items[0]?.color ?? '#2563eb' } as React.CSSProperties}
+                  >
+                    <i className={category.items[0]?.icon ?? 'pi pi-folder'} />
+                    <span>{category.title}</span>
+                    <span className={styles.statCount}>{category.items.length}</span>
+                  </button>
+                ))}
+              </nav>
             )}
           </div>
-        </div>
+        </header>
 
         {menuCategories.length === 0 ? (
-          <div className={styles.emptyState}>
+          <section className={styles.emptyState} aria-label="No access">
             <div className={styles.emptyIcon}>
-              <i className="pi pi-lock"></i>
+              <i className="pi pi-lock" aria-hidden />
             </div>
-            <h2 className={styles.emptyTitle}>No Access Available</h2>
+            <h2 className={styles.emptyTitle}>No access yet</h2>
             <p className={styles.emptyDescription}>
-              Your current role ({getRoleDisplayName(userRole as UserRole)}) does not have access to any menu items.
-              Please contact your administrator for access.
+              Your role ({getRoleDisplayName(userRole as UserRole)}) does not have access to any modules.
+              Contact your administrator to get the right permissions.
             </p>
-          </div>
+          </section>
         ) : (
           <div className={styles.categoriesContainer}>
-            {menuCategories.map((category) => (
-            <div key={category.id} id={`section-${category.id}`} className={styles.categorySection}>
-              <div className={styles.categoryHeader}>
-                <h2 className={styles.categoryTitle}>{category.title}</h2>
-                <p className={styles.categoryDescription}>{category.description}</p>
-              </div>
-              <div className={styles.menuGrid}>
-                {category.items.map((item: any) => (
-                  <div
-                    key={item.id}
-                    className={`${styles.menuCard} ${item.comingSoon ? styles.comingSoon : ''}`}
-                    onClick={() => handleMenuClick(item)}
-                    style={{ '--card-color': item.color } as React.CSSProperties}
-                  >
-                    <div className={styles.cardHeader}>
-                      <div className={styles.cardIconWrapper} style={{ '--icon-color': item.color } as React.CSSProperties}>
-                        <div className={styles.cardIconBackground}></div>
-                        <i className={`${item.icon} ${styles.cardIcon}`}></i>
-                        <div className={styles.cardIconGlow}></div>
+            {menuCategories.map((category, catIndex) => (
+              <section
+                key={category.id}
+                id={`section-${category.id}`}
+                className={styles.categorySection}
+                aria-labelledby={`category-heading-${category.id}`}
+              >
+                <div
+                  className={styles.categoryHeader}
+                  style={{ '--category-color': category.items[0]?.color ?? '#2563eb' } as React.CSSProperties}
+                >
+                  <div className={styles.categoryHeaderInner}>
+                    <span className={styles.categoryIcon} aria-hidden>
+                      <i className={category.items[0]?.icon ?? 'pi pi-folder'} />
+                    </span>
+                    <div>
+                      <h2 id={`category-heading-${category.id}`} className={styles.categoryTitle}>
+                        {category.title}
+                      </h2>
+                      <p className={styles.categoryDescription}>{category.description}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.menuGrid}>
+                  {category.items.map((item: MenuItem) => (
+                    <article
+                      key={item.id}
+                      className={`${styles.menuCard} ${item.comingSoon ? styles.comingSoon : ''}`}
+                      onClick={() => handleMenuClick(item)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          handleMenuClick(item)
+                        }
+                      }}
+                      role="button"
+                      tabIndex={item.comingSoon ? -1 : 0}
+                      style={{ '--card-color': item.color } as React.CSSProperties}
+                      aria-label={item.comingSoon ? `${item.title} (coming soon)` : `Open ${item.title}`}
+                    >
+                      <div className={styles.cardHeader}>
+                        <div
+                          className={styles.cardIconWrapper}
+                          style={{ '--icon-color': item.color } as React.CSSProperties}
+                        >
+                          <div className={styles.cardIconBackground} aria-hidden />
+                          <i className={`${item.icon} ${styles.cardIcon}`} aria-hidden />
+                          <div className={styles.cardIconGlow} aria-hidden />
+                        </div>
+                        {!item.comingSoon && (
+                          <span className={styles.cardArrow} aria-hidden>
+                            <i className="pi pi-arrow-right" />
+                          </span>
+                        )}
                       </div>
-                      {!item.comingSoon && (
-                        <div className={styles.cardArrow}>
-                          <i className="pi pi-arrow-right"></i>
+                      <div className={styles.cardContent}>
+                        <h3 className={styles.cardTitle}>{item.title}</h3>
+                        <p className={styles.cardDescription}>{item.description}</p>
+                      </div>
+                      {!item.comingSoon ? (
+                        <div className={styles.cardFooter}>
+                          <span className={styles.cardAction}>Open module</span>
+                          <i className="pi pi-arrow-right" aria-hidden />
+                        </div>
+                      ) : (
+                        <div className={styles.comingSoonBadge}>
+                          <i className="pi pi-clock" aria-hidden />
+                          <span>Coming soon</span>
                         </div>
                       )}
-                    </div>
-                    <div className={styles.cardContent}>
-                      <h3 className={styles.cardTitle}>{item.title}</h3>
-                      <p className={styles.cardDescription}>{item.description}</p>
-                    </div>
-                    {!item.comingSoon && (
-                      <div className={styles.cardFooter}>
-                        <span className={styles.cardAction}>Access</span>
-                        <i className="pi pi-arrow-right"></i>
-                      </div>
-                    )}
-                    {item.comingSoon && (
-                      <div className={styles.comingSoonBadge}>
-                        <i className="pi pi-clock"></i>
-                        <span>Coming Soon</span>
-                      </div>
-                    )}
-                    <div className={styles.cardGradient} style={{ '--card-color': item.color } as React.CSSProperties}></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+                      <div
+                        className={styles.cardGradient}
+                        style={{ '--card-color': item.color } as React.CSSProperties}
+                        aria-hidden
+                      />
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </div>

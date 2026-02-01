@@ -21,6 +21,7 @@ interface Invoice {
   total_amount: number
   tax_amount: number
   status: string
+  payment_due_date: string | null
   supplier_name: string | null
   po_id: number | null
   po_number: string | null
@@ -278,6 +279,7 @@ function InvoiceValidate() {
                   <Column field="invoice_number" header="Invoice Number" sortable body={invoiceNumberBodyTemplate} />
                   <Column field="po_number" header="PO Number" sortable body={poNumberBodyTemplate} />
                   <Column field="invoice_date" header="Invoice Date" sortable body={dateBodyTemplate} />
+                  <Column field="payment_due_date" header="Due Date" sortable body={(r: Invoice) => r.payment_due_date ? new Date(r.payment_due_date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '-'} style={{ minWidth: '120px' }} />
                   <Column field="supplier_name" header="Supplier" sortable />
                   <Column field="total_amount" header="Total Amount" sortable body={amountBodyTemplate} />
                   <Column field="status" header="Status" sortable body={statusBodyTemplate} />

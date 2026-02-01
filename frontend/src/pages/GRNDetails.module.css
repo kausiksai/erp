@@ -122,6 +122,37 @@
   border-top: 2px solid #e2e8f0;
 }
 
+.expansionCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.expansionCard {
+  background: white;
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e2e8f0;
+}
+
+.expansionCardTitle {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.expansionCardGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .detailGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

@@ -29,6 +29,7 @@ function App() {
     return (
       <div className="appLoadingWrap">
         <i className="pi pi-spin pi-spinner" aria-hidden></i>
+        <span>Loading…</span>
       </div>
     )
   }

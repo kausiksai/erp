@@ -173,6 +173,10 @@ function PurchaseOrderDetails() {
         <div className={styles.poDetailsSection}>
           <div className={styles.detailRow}>
             <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Amendment No:</span>
+              <span className={styles.detailValue}>{rowData.amd_no != null ? rowData.amd_no : '0'}</span>
+            </div>
+            <div className={styles.detailItem}>
               <span className={styles.detailLabel}>Unit:</span>
               <span className={styles.detailValue}>{rowData.unit || '-'}</span>
             </div>

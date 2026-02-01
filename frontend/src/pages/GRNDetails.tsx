@@ -106,60 +106,119 @@ function GRNDetails() {
     return <Tag value={String(status).toUpperCase()} severity={severity} />
   }
 
+  const formatDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '-')
+  const formatAmount = (n: number | null) => (n != null ? Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-')
+
   const rowExpansionTemplate = (rowData: GRNRecord) => (
     <div className={styles.expansionContent}>
-      <div className={styles.detailGrid}>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>PO Number</span>
-          <span className={styles.detailValue}>{rowData.po_number ?? rowData.po_no ?? '-'}</span>
+      <div className={styles.expansionCards}>
+        <div className={styles.expansionCard}>
+          <h4 className={styles.expansionCardTitle}>Document & reference</h4>
+          <div className={styles.expansionCardGrid}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>PO Number</span>
+              <span className={styles.detailValue}>{rowData.po_number ?? rowData.po_no ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>PO PFX</span>
+              <span className={styles.detailValue}>{rowData.po_pfx ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>PO Line</span>
+              <span className={styles.detailValue}>{rowData.po_line != null ? rowData.po_line : '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>GRN Line</span>
+              <span className={styles.detailValue}>{rowData.grn_line != null ? rowData.grn_line : '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>DC No</span>
+              <span className={styles.detailValue}>{rowData.dc_no ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>DC Date</span>
+              <span className={styles.detailValue}>{formatDate(rowData.dc_date)}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Gate Entry No</span>
+              <span className={styles.detailValue}>{rowData.gate_entry_no ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Supplier Doc No</span>
+              <span className={styles.detailValue}>{rowData.supplier_doc_no ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Supplier Doc Date</span>
+              <span className={styles.detailValue}>{formatDate(rowData.supplier_doc_date)}</span>
+            </div>
+          </div>
         </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>DC No</span>
-          <span className={styles.detailValue}>{rowData.dc_no ?? '-'}</span>
+        <div className={styles.expansionCard}>
+          <h4 className={styles.expansionCardTitle}>Period & rates</h4>
+          <div className={styles.expansionCardGrid}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>GRN Year</span>
+              <span className={styles.detailValue}>{rowData.grn_year != null ? rowData.grn_year : '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>GRN Period</span>
+              <span className={styles.detailValue}>{rowData.grn_period != null ? rowData.grn_period : '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Exchange Rate</span>
+              <span className={styles.detailValue}>{formatAmount(rowData.exchange_rate)}</span>
+            </div>
+          </div>
         </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>DC Date</span>
-          <span className={styles.detailValue}>{rowData.dc_date ? new Date(rowData.dc_date).toLocaleDateString() : '-'}</span>
+        <div className={styles.expansionCard}>
+          <h4 className={styles.expansionCardTitle}>Supplier & item</h4>
+          <div className={styles.expansionCardGrid}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Supplier</span>
+              <span className={styles.detailValue}>{rowData.supplier ?? rowData.supplier_name ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Unit</span>
+              <span className={styles.detailValue}>{rowData.unit ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Item</span>
+              <span className={styles.detailValue}>{rowData.item ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Description</span>
+              <span className={styles.detailValue}>{rowData.description_1 ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>UOM</span>
+              <span className={styles.detailValue}>{rowData.uom ?? '-'}</span>
+            </div>
+          </div>
         </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Gate Entry No</span>
-          <span className={styles.detailValue}>{rowData.gate_entry_no ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Supplier Doc No</span>
-          <span className={styles.detailValue}>{rowData.supplier_doc_no ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Supplier</span>
-          <span className={styles.detailValue}>{rowData.supplier ?? rowData.supplier_name ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Item</span>
-          <span className={styles.detailValue}>{rowData.item ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Description</span>
-          <span className={styles.detailValue}>{rowData.description_1 ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>UOM</span>
-          <span className={styles.detailValue}>{rowData.uom ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>GRN Qty</span>
-          <span className={styles.detailValue}>{rowData.grn_qty != null ? rowData.grn_qty : '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Accepted Qty</span>
-          <span className={styles.detailValue}>{rowData.accepted_qty != null ? rowData.accepted_qty : '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Unit Cost</span>
-          <span className={styles.detailValue}>{rowData.unit_cost != null ? Number(rowData.unit_cost).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Line Status</span>
-          <span className={styles.detailValue}>{rowData.line_status ?? '-'}</span>
+        <div className={styles.expansionCard}>
+          <h4 className={styles.expansionCardTitle}>Quantities & cost</h4>
+          <div className={styles.expansionCardGrid}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>GRN Qty</span>
+              <span className={styles.detailValue}>{rowData.grn_qty != null ? rowData.grn_qty : '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Accepted Qty</span>
+              <span className={styles.detailValue}>{rowData.accepted_qty != null ? rowData.accepted_qty : '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Unit Cost</span>
+              <span className={styles.detailValue}>{rowData.unit_cost != null ? `₹${formatAmount(Number(rowData.unit_cost))}` : '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Header Status</span>
+              <span className={styles.detailValue}>{rowData.header_status ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Line Status</span>
+              <span className={styles.detailValue}>{rowData.line_status ?? '-'}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -6,13 +6,43 @@
 
 .appLoadingWrap {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  background: linear-gradient(160deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
+  gap: 1.25rem;
+}
+
+.appLoadingWrap::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(ellipse at 50% 30%, rgba(37, 99, 235, 0.06) 0%, transparent 60%);
+  pointer-events: none;
 }
 
 .appLoadingWrap i {
-  font-size: 2rem;
+  font-size: 2.25rem;
   color: #2563eb;
+  position: relative;
+  z-index: 1;
+  animation: appSpinnerPulse 1.2s ease-in-out infinite;
+}
+
+.appLoadingWrap span {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes appSpinnerPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.05); }
 }

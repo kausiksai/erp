@@ -19,7 +19,10 @@ interface InvoiceLineItem {
   hsn_sac: string | null
   uom: string | null
   billed_qty: number
+  weight: number | null
+  count: number | null
   rate: number
+  rate_per: string | null
   line_total: number
   taxable_value: number
   cgst_rate: number
@@ -54,6 +57,7 @@ interface InvoiceDetails {
   total_amount: number
   tax_amount: number
   status: string
+  payment_due_date: string | null
   debit_note_value?: number | null
   notes: string | null
   supplier_name: string | null
@@ -495,6 +499,24 @@ function InvoiceDetails() {
                 <span className={styles.detailLabel}>Tax Amount:</span>
                 <span className={styles.detailValue}>{amountBodyTemplate(invoice.tax_amount)}</span>
               </div>
+              {invoice.payment_due_date != null && (
+                <div className={styles.detailItem}>
+                  <span className={styles.detailLabel}>Payment Due Date:</span>
+                  <span className={styles.detailValue}>{dateBodyTemplate(invoice.payment_due_date)}</span>
+                </div>
+              )}
+              {(invoice.debit_note_value != null && invoice.debit_note_value !== 0) && (
+                <div className={styles.detailItem}>
+                  <span className={styles.detailLabel}>Debit Note Value:</span>
+                  <span className={styles.detailValue}>{amountBodyTemplate(invoice.debit_note_value)}</span>
+                </div>
+              )}
+              {invoice.notes && (
+                <div className={styles.detailItem}>
+                  <span className={styles.detailLabel}>Notes:</span>
+                  <span className={styles.detailValue}>{invoice.notes}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -531,6 +553,18 @@ function InvoiceDetails() {
                   <span className={styles.detailLabel}>Bill To:</span>
                   <span className={styles.detailValue}>{invoice.bill_to || '-'}</span>
                 </div>
+                {invoice.bill_to_address && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Bill To Address:</span>
+                    <span className={styles.detailValue}>{invoice.bill_to_address}</span>
+                  </div>
+                )}
+                {invoice.bill_to_gstin && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Bill To GSTIN:</span>
+                    <span className={styles.detailValue}>{invoice.bill_to_gstin}</span>
+                  </div>
+                )}
                 <div className={styles.detailItem}>
                   <span className={styles.detailLabel}>PO Status:</span>
                   <span className={styles.detailValue}>
@@ -617,6 +651,18 @@ function InvoiceDetails() {
                 body={(rowData: InvoiceLineItem) => quantityBodyTemplate(rowData.billed_qty)}
               />
               <Column
+                field="weight"
+                header="Weight"
+                style={{ minWidth: '100px', textAlign: 'right' }}
+                body={(rowData: InvoiceLineItem) => rowData.weight != null ? quantityBodyTemplate(rowData.weight) : '-'}
+              />
+              <Column
+                field="count"
+                header="Count"
+                style={{ minWidth: '80px', textAlign: 'right' }}
+                body={(rowData: InvoiceLineItem) => rowData.count != null ? rowData.count : '-'}
+              />
+              <Column
                 field="uom"
                 header="UOM"
                 style={{ minWidth: '80px', textAlign: 'center' }}
@@ -627,6 +673,12 @@ function InvoiceDetails() {
                 header="Rate"
                 style={{ minWidth: '120px', textAlign: 'right' }}
                 body={(rowData: InvoiceLineItem) => amountBodyTemplate(rowData.rate)}
+              />
+              <Column
+                field="rate_per"
+                header="Rate Per"
+                style={{ minWidth: '90px' }}
+                body={(rowData: InvoiceLineItem) => rowData.rate_per || '-'}
               />
               <Column
                 field="taxable_value"

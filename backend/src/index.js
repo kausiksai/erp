@@ -1269,6 +1269,7 @@ router.get('/invoices', async (req, res) => {
         i.total_amount,
         i.tax_amount,
         i.status,
+        i.payment_due_date,
         i.created_at,
         i.updated_at,
         s.supplier_name,

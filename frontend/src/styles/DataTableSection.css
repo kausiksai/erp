@@ -1,6 +1,6 @@
 /**
- * Shared section + table styles (same as Debit note / Exception invoices on Incomplete POs).
- * Use classes: dts-section, dts-sectionTitle, dts-sectionSubtitle, dts-tableWrapper,
+ * Shared section + table styles — professional, elegant
+ * Use: dts-section, dts-sectionTitle, dts-sectionSubtitle, dts-tableWrapper,
  * dts-tableContainer, dts-emptySection, dts-actionButtons, dts-iconBtn
  */
 
@@ -10,33 +10,42 @@
   margin-bottom: 2.5rem;
   width: 100%;
   min-height: 0;
-  background: #fff;
-  border-radius: 12px;
+  background: #ffffff;
+  border-radius: 16px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+  padding: 1.75rem;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-/* Amber left border for Debit note / Exception / Incomplete POs blocks */
+.dts-section:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.03);
+}
+
 .dts-section.dts-section-accent {
-  border-left: 4px solid #ca8a04;
+  border-left: 4px solid #2563eb;
+  padding-left: 1.75rem;
 }
 
 .dts-sectionTitle {
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 700;
   color: #0f172a;
-  margin: 0 0 0.35rem 0;
+  margin: 0 0 0.4rem 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
 }
 
 .dts-sectionSubtitle {
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   color: #64748b;
-  margin: 0 0 1rem 0;
-  line-height: 1.5;
+  margin: 0 0 1.25rem 0;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
 }
 
 .dts-tableWrapper {
@@ -50,16 +59,17 @@
   margin: 0;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  background: #fff;
+  background: #ffffff;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .dts-tableContainer {
   display: block;
   width: 100%;
   min-width: 0;
-  background: #fafafa;
-  border-radius: 8px;
-  padding: 1rem;
+  background: #fafbfc;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -78,20 +88,21 @@
 }
 
 .dts-tableContainer :global(.p-datatable-thead > tr > th) {
-  background-color: #f1f5f9;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   color: #1e293b;
   font-weight: 600;
-  padding: 0.65rem 0.75rem;
+  padding: 0.75rem 1rem;
   border-bottom: 2px solid #e2e8f0;
   font-size: 0.8125rem;
   white-space: nowrap;
   vertical-align: middle;
   box-sizing: border-box;
   text-align: left;
+  letter-spacing: 0.02em;
 }
 
 .dts-tableContainer :global(.p-datatable-tbody > tr > td) {
-  padding: 0.65rem 0.75rem;
+  padding: 0.75rem 1rem;
   font-size: 0.875rem;
   vertical-align: middle;
   box-sizing: border-box;
@@ -99,10 +110,15 @@
   text-overflow: ellipsis;
   word-wrap: break-word;
   border-bottom: 1px solid #f1f5f9;
+  color: #334155;
 }
 
 .dts-tableContainer :global(.p-datatable-tbody > tr:hover) {
   background-color: #f8fafc;
+}
+
+.dts-tableContainer :global(.p-datatable-tbody > tr:last-child > td) {
+  border-bottom: none;
 }
 
 .dts-tableContainer :global(.p-datatable) {
@@ -110,41 +126,64 @@
 }
 
 .dts-tableContainer :global(.p-paginator) {
-  padding: 0.75rem 1rem;
+  padding: 0.875rem 1.25rem;
   background: #f8fafc;
   border-top: 1px solid #e2e8f0;
-  border-bottom-left-radius: 8px;
-  border-bottom-right-radius: 8px;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
   flex-shrink: 0;
+  font-size: 0.875rem;
 }
 
 .dts-emptySection {
-  padding: 1.5rem 1.25rem;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  padding: 2rem 1.5rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   font-size: 0.9375rem;
-  color: #78716c;
+  color: #64748b;
   margin: 0;
-  line-height: 1.55;
+  line-height: 1.6;
+  text-align: center;
 }
 
 .dts-emptySection p {
   margin: 0;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.dts-emptySection .p-button {
+  margin-top: 1rem;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 0.625rem 1.25rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dts-emptySection .p-button:hover {
+  transform: translateY(-1px);
 }
 
 .dts-actionButtons {
   display: flex;
   flex-wrap: nowrap;
-  gap: 0.4rem;
+  gap: 0.5rem;
   align-items: center;
   justify-content: flex-start;
   min-width: 0;
 }
 
 .dts-iconBtn {
-  padding: 0.4rem;
-  min-width: 2rem;
+  padding: 0.5rem;
+  min-width: 2.25rem;
+  border-radius: 8px;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.dts-iconBtn:hover {
+  transform: translateY(-1px);
 }
 
 .dts-iconBtn :global(.p-button-icon) {
@@ -154,7 +193,7 @@
 .dts-reasonText {
   font-size: 0.8125rem;
   color: #475569;
-  line-height: 1.45;
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;

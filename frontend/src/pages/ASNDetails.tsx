@@ -95,52 +95,68 @@ function ASNDetails() {
     return <Tag value={String(status).toUpperCase()} severity={severity} />
   }
 
+  const formatDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '-')
+
   const rowExpansionTemplate = (rowData: ASNRecord) => (
     <div className={styles.expansionContent}>
-      <div className={styles.detailGrid}>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>PO Number</span>
-          <span className={styles.detailValue}>{rowData.po_number ?? '-'}</span>
+      <div className={styles.expansionCards}>
+        <div className={styles.expansionCard}>
+          <h4 className={styles.expansionCardTitle}>Document & reference</h4>
+          <div className={styles.expansionCardGrid}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>PO Number</span>
+              <span className={styles.detailValue}>{rowData.po_number ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>DC No</span>
+              <span className={styles.detailValue}>{rowData.dc_no ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>DC Date</span>
+              <span className={styles.detailValue}>{formatDate(rowData.dc_date)}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Invoice No</span>
+              <span className={styles.detailValue}>{rowData.inv_no ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Invoice Date</span>
+              <span className={styles.detailValue}>{formatDate(rowData.inv_date)}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>LR No</span>
+              <span className={styles.detailValue}>{rowData.lr_no ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>LR Date</span>
+              <span className={styles.detailValue}>{formatDate(rowData.lr_date)}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Doc No / Date</span>
+              <span className={styles.detailValue}>{rowData.doc_no_date ?? '-'}</span>
+            </div>
+          </div>
         </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Supplier</span>
-          <span className={styles.detailValue}>{rowData.supplier_name ?? rowData.supplier ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>DC No</span>
-          <span className={styles.detailValue}>{rowData.dc_no ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>DC Date</span>
-          <span className={styles.detailValue}>{rowData.dc_date ? new Date(rowData.dc_date).toLocaleDateString() : '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Invoice No</span>
-          <span className={styles.detailValue}>{rowData.inv_no ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Invoice Date</span>
-          <span className={styles.detailValue}>{rowData.inv_date ? new Date(rowData.inv_date).toLocaleDateString() : '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>LR No</span>
-          <span className={styles.detailValue}>{rowData.lr_no ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>LR Date</span>
-          <span className={styles.detailValue}>{rowData.lr_date ? new Date(rowData.lr_date).toLocaleDateString() : '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Unit</span>
-          <span className={styles.detailValue}>{rowData.unit ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Transporter</span>
-          <span className={styles.detailValue}>{rowData.transporter ?? rowData.transporter_name ?? '-'}</span>
-        </div>
-        <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Doc No / Date</span>
-          <span className={styles.detailValue}>{rowData.doc_no_date ?? '-'}</span>
+        <div className={styles.expansionCard}>
+          <h4 className={styles.expansionCardTitle}>Supplier & logistics</h4>
+          <div className={styles.expansionCardGrid}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Supplier</span>
+              <span className={styles.detailValue}>{rowData.supplier_name ?? rowData.supplier ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Unit</span>
+              <span className={styles.detailValue}>{rowData.unit ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Transporter</span>
+              <span className={styles.detailValue}>{rowData.transporter ?? rowData.transporter_name ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Status</span>
+              <span className={styles.detailValue}>{rowData.status ?? '-'}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
