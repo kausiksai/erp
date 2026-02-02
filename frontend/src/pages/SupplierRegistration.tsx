@@ -321,7 +321,7 @@ function SupplierRegistration() {
             </p>
           </div>
           <div className={styles.headerActions}>
-            <PageNavigation />
+            <PageNavigation onRefresh={fetchSuppliers} refreshLoading={loading} />
             <Button
               label="Add Supplier"
               icon="pi pi-plus"

@@ -33,9 +33,9 @@
 }
 
 .container {
-  max-width: 1600px;
+  max-width: var(--app-page-max-width, 1400px);
   margin: 0 auto;
-  padding: 2.5rem 2.5rem;
+  padding: var(--app-page-padding, 2rem);
   position: relative;
   z-index: 1;
 }

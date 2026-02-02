@@ -45,6 +45,38 @@
   --app-text: #0f172a;
   --app-text-muted: #64748b;
   --app-text-subtle: #94a3b8;
+  /* Page layout: single max-width and padding for all content pages */
+  --app-page-max-width: 1400px;
+  --app-page-padding: 2rem;
+  /* Spacing scale (0.25rem steps) */
+  --app-space-1: 0.25rem;
+  --app-space-2: 0.5rem;
+  --app-space-3: 0.75rem;
+  --app-space-4: 1rem;
+  --app-space-5: 1.25rem;
+  --app-space-6: 1.5rem;
+  --app-space-8: 2rem;
+  --app-space-10: 2.5rem;
+  --app-space-12: 3rem;
+  /* Typography scale */
+  --app-text-caption: 0.8125rem;
+  --app-text-body: 0.9375rem;
+  --app-text-body-lg: 1rem;
+  --app-text-subtitle: 1.125rem;
+  --app-text-section: 1.25rem;
+  --app-text-page-title: 1.75rem;
+  --app-text-display: 2.25rem;
+  /* Status colors: one palette for badges/tags */
+  --app-status-success: #059669;
+  --app-status-success-bg: rgba(5, 150, 105, 0.12);
+  --app-status-warning: #d97706;
+  --app-status-warning-bg: rgba(217, 119, 6, 0.12);
+  --app-status-danger: #dc2626;
+  --app-status-danger-bg: rgba(220, 38, 38, 0.12);
+  --app-status-info: #2563eb;
+  --app-status-info-bg: rgba(37, 99, 235, 0.12);
+  --app-status-neutral: #64748b;
+  --app-status-neutral-bg: rgba(100, 116, 139, 0.12);
 }
 
 html {
@@ -288,4 +320,161 @@ body {
   background-color: #f1f5f9 !important;
   cursor: not-allowed;
   opacity: 0.8;
+}
+
+/* ========== Page header actions: same position for Back, Home, Refresh ========== */
+.pageHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* ========== Unified page layout (use on main content wrapper) ========== */
+.appPage {
+  max-width: var(--app-page-max-width);
+  margin: 0 auto;
+  padding: var(--app-page-padding);
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .appPage {
+    padding: var(--app-space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .appPage {
+    padding: var(--app-space-3);
+  }
+}
+
+/* ========== Status badges: one palette, same pill style ========== */
+.p-tag {
+  font-size: var(--app-text-caption) !important;
+  font-weight: 600 !important;
+  padding: 0.25rem 0.625rem !important;
+  border-radius: 9999px !important;
+  letter-spacing: 0.02em;
+  border: none !important;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.p-tag.p-tag-success {
+  background: var(--app-status-success-bg) !important;
+  color: var(--app-status-success) !important;
+}
+
+.p-tag.p-tag-warning,
+.p-tag.p-tag-secondary {
+  background: var(--app-status-warning-bg) !important;
+  color: var(--app-status-warning) !important;
+}
+
+.p-tag.p-tag-danger {
+  background: var(--app-status-danger-bg) !important;
+  color: var(--app-status-danger) !important;
+}
+
+.p-tag.p-tag-info {
+  background: var(--app-status-info-bg) !important;
+  color: var(--app-status-info) !important;
+}
+
+.p-tag.p-tag-contrast {
+  background: var(--app-status-neutral-bg) !important;
+  color: var(--app-status-neutral) !important;
+}
+
+/* ========== Primary action button (Validate, Approve, Submit, Save) ========== */
+.btnPrimary {
+  background: linear-gradient(135deg, var(--app-primary) 0%, var(--app-primary-hover) 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  padding: 0.625rem 1.25rem !important;
+  border-radius: var(--app-radius-sm) !important;
+  box-shadow: var(--app-shadow-sm) !important;
+  transition: all 0.2s ease !important;
+}
+
+.btnPrimary:hover:not(:disabled):not(.p-disabled) {
+  background: linear-gradient(135deg, var(--app-primary-hover) 0%, #1e40af 100%) !important;
+  box-shadow: var(--app-shadow-md) !important;
+  transform: translateY(-1px);
+}
+
+.btnPrimary:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
+}
+
+/* ========== Toast: below fixed header ========== */
+.p-toast-top-right {
+  top: 5.5rem !important;
+  right: 1.5rem !important;
+}
+
+.p-toast .p-toast-message {
+  max-width: 22rem;
+}
+
+/* ========== Form field base (label + input spacing) ========== */
+.formFieldLabel {
+  display: block;
+  margin-bottom: var(--app-space-1);
+  font-size: var(--app-text-caption);
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.formFieldHint {
+  font-size: var(--app-text-caption);
+  color: var(--app-text-muted);
+  margin-top: var(--app-space-1);
+}
+
+/* ========== Micro-interactions: consistent transition ========== */
+.p-button,
+.p-tag,
+.p-card,
+.dts-section {
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+
+/* ========== Print: hide nav, simplify layout ========== */
+@media print {
+  header,
+  .header,
+  .skipLink,
+  .p-toast,
+  .p-dialog,
+  [class*="PageNavigation"],
+  [class*="navigationButtons"],
+  .p-paginator,
+  button.p-button {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .appPage,
+  .pageContainer,
+  .container {
+    max-width: none;
+    padding: 0;
+  }
+
+  .dts-section,
+  .dts-tableWrapper {
+    box-shadow: none;
+    border: 1px solid #e2e8f0;
+  }
 }

@@ -582,7 +582,7 @@ function UserRegistration() {
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <PageNavigation />
+            <PageNavigation onRefresh={() => { fetchUsers(); fetchAllMenuItems(); }} refreshLoading={loading} />
             <Button
               label="Create New User"
               icon="pi pi-plus"

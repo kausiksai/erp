@@ -543,12 +543,12 @@ function InvoiceDetails() {
                     onClick={handleValidate}
                     loading={validating}
                     disabled={validating}
-                    className={validationAttemptFailed ? styles.revalidateButton : styles.validateButton}
+                    className={validationAttemptFailed ? styles.revalidateButton : `btnPrimary ${styles.validateButton}`}
                     severity={validationAttemptFailed ? 'danger' : 'success'}
                   />
                 ) : null
               })()}
-              <PageNavigation backTo="/invoices/validate" />
+              <PageNavigation backTo="/invoices/validate" onRefresh={() => id && fetchInvoiceDetails(parseInt(id))} refreshLoading={loading} />
             </div>
           </div>
         </div>

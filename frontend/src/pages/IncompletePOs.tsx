@@ -406,20 +406,14 @@ function IncompletePOs() {
       <Header />
       <div className={styles.container}>
         <div className={styles.header}>
-          <div>
+          <div className={styles.headerTitleBlock}>
             <h1 className={styles.title}>Incomplete Purchase Orders</h1>
             <p className={styles.subtitle}>
               Debit note invoices (quantity mismatch), exception invoices (received after PO fulfilled), and open POs missing Invoice, GRN, or ASN. PO remains open until all invoices are in the system.
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <PageNavigation />
-            <Button
-              label="Refresh"
-              icon="pi pi-refresh"
-              onClick={fetchAll}
-              className={styles.refreshButton}
-            />
+          <div className={styles.headerActions}>
+            <PageNavigation onRefresh={fetchAll} refreshLoading={loading} />
           </div>
         </div>
 

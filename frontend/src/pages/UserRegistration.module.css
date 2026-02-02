@@ -6,9 +6,9 @@
 }
 
 .container {
-  max-width: 1400px;
+  max-width: var(--app-page-max-width, 1400px);
   margin: 0 auto;
-  padding: 2rem 2rem;
+  padding: var(--app-page-padding, 2rem);
   flex: 1;
 }
 

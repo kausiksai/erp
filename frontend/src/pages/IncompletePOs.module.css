@@ -7,10 +7,10 @@
 }
 
 .container {
-  max-width: 1400px;
+  max-width: var(--app-page-max-width, 1400px);
   width: 100%;
   margin: 0 auto;
-  padding: 2rem 2rem;
+  padding: var(--app-page-padding, 2rem);
   flex: 1;
   min-width: 0;
   display: block;
@@ -24,6 +24,20 @@
   margin-bottom: 2rem;
   gap: 2rem;
   flex-wrap: wrap;
+}
+
+/* Title block takes space so nav stays right; when wrap, nav row pushes right */
+.headerTitleBlock {
+  flex: 1;
+  min-width: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .title {

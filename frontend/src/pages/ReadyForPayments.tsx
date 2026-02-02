@@ -362,7 +362,7 @@ function ReadyForPayments() {
         <div className={styles.expandedActions}>
           <Button label="Record payment" icon="pi pi-wallet" size="small" className={styles.actionButton}
             onClick={() => openRecordDialog(row)} disabled={!!markingId} />
-          <Button label="Pay full & done" icon="pi pi-check-circle" severity="success" size="small" className={styles.actionButton}
+          <Button label="Pay full & done" icon="pi pi-check-circle" severity="success" size="small" className={`btnPrimary ${styles.actionButton}`}
             loading={markingId === row.id} disabled={markingId !== null}
             onClick={() => openMarkDoneDialog(row)} />
         </div>
@@ -399,7 +399,7 @@ function ReadyForPayments() {
               disabled={!list.length}
               outlined
             />
-            <PageNavigation />
+            <PageNavigation onRefresh={fetchReady} refreshLoading={loading} />
           </div>
         </div>
 
@@ -446,7 +446,7 @@ function ReadyForPayments() {
                       <div className={styles.actionButtons}>
                         <Button label="Record payment" icon="pi pi-wallet" size="small" className={styles.actionButton}
                           onClick={() => openRecordDialog(r)} disabled={!!markingId} />
-                        <Button label="Pay full" icon="pi pi-check" severity="success" size="small" className={styles.actionButton}
+                        <Button label="Pay full" icon="pi pi-check" severity="success" size="small" className={`btnPrimary ${styles.actionButton}`}
                           loading={markingId === r.id} disabled={markingId !== null}
                           onClick={() => openMarkDoneDialog(r)} />
                       </div>
@@ -528,6 +528,7 @@ function ReadyForPayments() {
               label="Mark payment done"
               icon="pi pi-check-circle"
               severity="success"
+              className="btnPrimary"
               onClick={() => markDoneDialog.row && handleMarkDone(markDoneDialog.row.id, markDoneDialog.paymentType, markDoneDialog.paymentReference)}
               loading={!!markingId}
               disabled={!!markingId || !markDoneDialog.row}

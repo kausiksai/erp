@@ -320,8 +320,7 @@ function PurchaseOrderDetails() {
                 style={{ display: 'none' }}
               />
               <Button label="Upload Excel" icon="pi pi-upload" className={styles.uploadExcelButton} onClick={openExcelUpload} loading={uploadingExcel} disabled={uploadingExcel} />
-              <Button label="Refresh" icon="pi pi-refresh" className={styles.refreshButton} onClick={() => fetchPurchaseOrders()} />
-              <PageNavigation />
+              <PageNavigation onRefresh={() => fetchPurchaseOrders()} refreshLoading={loading} />
             </div>
           </div>
         </div>

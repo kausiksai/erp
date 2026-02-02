@@ -67,11 +67,12 @@ app.use((req, res, next) => {
   next()
 })
 
-// General API rate limit (200 requests per 15 min per IP)
+// General API rate limit (200 requests per 15 min per IP) – skip login so only loginLimiter applies
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 200,
-  message: { error: 'too_many_requests', message: 'Too many requests, please try again later.' }
+  message: { error: 'too_many_requests', message: 'Too many requests, please try again later.' },
+  skip: (req) => req.method === 'POST' && req.path === '/auth/login'
 })
 
 const jsonLimit = process.env.JSON_LIMIT || '25mb'
@@ -2183,7 +2184,7 @@ router.get('/reports/suppliers-summary', authenticateToken, async (req, res) => 
         SELECT
           s.supplier_id,
           s.supplier_name,
-          ROUND(AVG(EXTRACT(DAY FROM (i.invoice_date - po.date))), 1)::numeric AS avg_days_po_to_invoice,
+          ROUND(AVG((i.invoice_date - po.date)), 1)::numeric AS avg_days_po_to_invoice,
           COUNT(DISTINCT po.po_id)::int AS po_count,
           COUNT(i.invoice_id)::int AS invoice_count
         FROM suppliers s

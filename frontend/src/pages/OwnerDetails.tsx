@@ -221,7 +221,7 @@ function OwnerDetails() {
               View and manage company owner information
             </p>
           </div>
-          <PageNavigation />
+          <PageNavigation onRefresh={fetchOwnerDetails} refreshLoading={loading} />
         </div>
 
         {!hasOwner ? (

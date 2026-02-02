@@ -144,7 +144,7 @@ function InvoiceReports() {
       <div className={styles.page}>
         <Header />
         <div className={styles.container}>
-          <PageNavigation />
+          <PageNavigation onRefresh={fetchReport} refreshLoading={loading} />
           <div className={styles.loadingWrap}>
             <ProgressSpinner strokeWidth="3" />
             <p className={styles.loadingText}>Loading report…</p>
@@ -175,10 +175,9 @@ function InvoiceReports() {
                 )}
               </p>
             </div>
-            <Button label="Refresh data" icon="pi pi-refresh" className={styles.refreshBtn} onClick={fetchReport} loading={loading} outlined />
+            <PageNavigation onRefresh={fetchReport} refreshLoading={loading} />
           </div>
         </div>
-        <PageNavigation />
 
         {data && (
           <>

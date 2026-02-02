@@ -382,8 +382,7 @@ function PaymentHistory() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Button label="Export CSV" icon="pi pi-download" className="exportCsvButton" onClick={handleExportCsv} disabled={!list.length} outlined />
-            <Button label="Refresh" icon="pi pi-refresh" onClick={fetchHistory} outlined />
-            <PageNavigation />
+            <PageNavigation onRefresh={fetchHistory} refreshLoading={loading} />
           </div>
         </div>
 

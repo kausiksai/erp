@@ -1,9 +1,17 @@
+/* Push Back, Home, Refresh to the right on all pages when inside a flex header */
+.navWrapper {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Back, Home, Refresh – same position on every page when used */
 .navigationButtons {
   display: flex;
   gap: 0.5rem;
   padding-top: 0.25rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .navButton {

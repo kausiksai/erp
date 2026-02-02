@@ -7,9 +7,13 @@ interface PageNavigationProps {
   showHome?: boolean
   /** When set, Back button navigates to this path instead of history (-1). Use on detail pages for reliable back target. */
   backTo?: string
+  /** When set, shows a Refresh button in the same row (same position on every page). */
+  onRefresh?: () => void
+  /** Pass when refresh is in progress so the Refresh button shows loading state. */
+  refreshLoading?: boolean
 }
 
-function PageNavigation({ showBack = true, showHome = true, backTo }: PageNavigationProps) {
+function PageNavigation({ showBack = true, showHome = true, backTo, onRefresh, refreshLoading }: PageNavigationProps) {
   const navigate = useNavigate()
 
   const handleBack = () => {
@@ -21,7 +25,8 @@ function PageNavigation({ showBack = true, showHome = true, backTo }: PageNaviga
   }
 
   return (
-    <div className={styles.navigationButtons}>
+    <div className={styles.navWrapper}>
+      <div className={styles.navigationButtons}>
       {showBack && (
         <Button
           icon="pi pi-arrow-left"
@@ -48,6 +53,21 @@ function PageNavigation({ showBack = true, showHome = true, backTo }: PageNaviga
           tooltipOptions={{ position: 'bottom' }}
         />
       )}
+      {onRefresh != null && (
+        <Button
+          icon="pi pi-refresh"
+          onClick={onRefresh}
+          loading={refreshLoading}
+          className={styles.navButton}
+          rounded
+          text
+          severity="secondary"
+          aria-label="Refresh"
+          tooltip="Refresh"
+          tooltipOptions={{ position: 'bottom' }}
+        />
+      )}
+      </div>
     </div>
   )
 }

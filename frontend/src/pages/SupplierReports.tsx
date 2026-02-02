@@ -162,7 +162,7 @@ function SupplierReports() {
       <div className={styles.page}>
         <Header />
         <div className={styles.container}>
-          <PageNavigation />
+          <PageNavigation onRefresh={fetchReport} refreshLoading={loading} />
           <div className={styles.loadingWrap}>
             <ProgressSpinner strokeWidth="3" />
             <p className={styles.loadingText}>Loading report…</p>
@@ -193,7 +193,7 @@ function SupplierReports() {
                 )}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Button
                 label="Export CSV"
                 icon="pi pi-download"
@@ -213,11 +213,10 @@ function SupplierReports() {
                 disabled={!data?.suppliers?.length}
                 outlined
               />
-              <Button label="Refresh data" icon="pi pi-refresh" className={styles.refreshBtn} onClick={fetchReport} loading={loading} outlined />
+              <PageNavigation onRefresh={fetchReport} refreshLoading={loading} />
             </div>
           </div>
         </div>
-        <PageNavigation />
 
         {data && (
           <>

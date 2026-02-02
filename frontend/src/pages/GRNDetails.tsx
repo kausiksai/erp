@@ -278,8 +278,7 @@ function GRNDetails() {
             <div className={styles.headerActions}>
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} style={{ display: 'none' }} />
               <Button label="Upload Excel" icon="pi pi-upload" className={styles.uploadExcelButton} onClick={openExcelUpload} loading={uploadingExcel} disabled={uploadingExcel} />
-              <Button label="Refresh" icon="pi pi-refresh" className={styles.refreshButton} onClick={() => fetchGRN()} />
-              <PageNavigation />
+              <PageNavigation onRefresh={() => fetchGRN()} refreshLoading={loading} />
             </div>
           </div>
         </div>

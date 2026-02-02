@@ -556,7 +556,7 @@ function ApprovePayments() {
         )}
 
         <div className={styles.expandedActions}>
-          <Button label="Approve" icon="pi pi-check" severity="success" size="small" className={styles.actionButton}
+          <Button label="Approve" icon="pi pi-check" severity="success" size="small" className={`btnPrimary ${styles.actionButton}`}
             loading={actionLoading === `approve-${row.invoice_id}`} disabled={!!actionLoading}
             onClick={() => confirmApprove(row)} />
           <Button label="Modify & Approve" icon="pi pi-pencil" size="small" className={styles.actionButton}
@@ -581,7 +581,7 @@ function ApprovePayments() {
             <h1 className={styles.title}>Approve Payments</h1>
             <p className={styles.subtitle}>Review validated invoices with PO, supplier, GRN, ASN and banking details. Approve, modify banking and approve, or reject.</p>
           </div>
-          <PageNavigation />
+          <PageNavigation onRefresh={fetchPending} refreshLoading={loading} />
         </div>
 
         <div className="dts-section dts-section-accent">
@@ -600,7 +600,7 @@ function ApprovePayments() {
                 loading={bulkActionLoading}
                 disabled={!!actionLoading || bulkActionLoading}
                 onClick={confirmBulkApprove}
-                className={styles.bulkButton}
+                className={`btnPrimary ${styles.bulkButton}`}
               />
               <Button
                 label={`Reject selected (${selected.length})`}
@@ -678,7 +678,7 @@ function ApprovePayments() {
         style={{ width: '480px' }} footer={
           <div className={styles.dialogActions}>
             <Button label="Cancel" severity="secondary" onClick={() => setModifyDialog({ open: false, item: null })} />
-            <Button label="Approve with these details" severity="success" onClick={confirmApproveWithModify} loading={!!actionLoading} />
+            <Button label="Approve with these details" severity="success" className="btnPrimary" onClick={confirmApproveWithModify} loading={!!actionLoading} />
           </div>
         }>
         <div className={styles.dialogForm}>

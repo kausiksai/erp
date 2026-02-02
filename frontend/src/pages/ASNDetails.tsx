@@ -216,8 +216,7 @@ function ASNDetails() {
             <div className={styles.headerActions}>
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} style={{ display: 'none' }} />
               <Button label="Upload Excel" icon="pi pi-upload" className={styles.uploadExcelButton} onClick={openExcelUpload} loading={uploadingExcel} disabled={uploadingExcel} />
-              <Button label="Refresh" icon="pi pi-refresh" className={styles.refreshButton} onClick={() => fetchASN()} />
-              <PageNavigation />
+              <PageNavigation onRefresh={() => fetchASN()} refreshLoading={loading} />
             </div>
           </div>
         </div>
