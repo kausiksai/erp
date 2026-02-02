@@ -576,10 +576,8 @@ function UserRegistration() {
       <div className={styles.container} id="main-content">
         <div className={styles.header}>
           <div>
-            <h1 className={styles.title}>User Registration & Management</h1>
-            <p className={styles.subtitle}>
-              Create, modify, and manage system users and their menu access permissions
-            </p>
+            <h1 className={styles.title}>Users</h1>
+            <p className={styles.subtitle}>Manage users and permissions</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <PageNavigation onRefresh={() => { fetchUsers(); fetchAllMenuItems(); }} refreshLoading={loading} />

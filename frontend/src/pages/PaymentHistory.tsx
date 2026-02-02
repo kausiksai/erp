@@ -376,9 +376,7 @@ function PaymentHistory() {
         <div className={styles.header}>
           <div>
             <h1 className={styles.title}>Payment History</h1>
-            <p className={styles.subtitle}>
-              All payments marked as done. Expand a row to see supplier, banking, PO, GRN, and ASN details.
-            </p>
+            <p className={styles.subtitle}>Completed payments and transaction details</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Button label="Export CSV" icon="pi pi-download" className="exportCsvButton" onClick={handleExportCsv} disabled={!list.length} outlined />

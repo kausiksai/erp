@@ -408,9 +408,7 @@ function IncompletePOs() {
         <div className={styles.header}>
           <div className={styles.headerTitleBlock}>
             <h1 className={styles.title}>Incomplete Purchase Orders</h1>
-            <p className={styles.subtitle}>
-              Debit note invoices (quantity mismatch), exception invoices (received after PO fulfilled), and open POs missing Invoice, GRN, or ASN. PO remains open until all invoices are in the system.
-            </p>
+            <p className={styles.subtitle}>Debit notes, exceptions, and open POs</p>
           </div>
           <div className={styles.headerActions}>
             <PageNavigation onRefresh={fetchAll} refreshLoading={loading} />

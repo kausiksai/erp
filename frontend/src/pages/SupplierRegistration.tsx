@@ -315,10 +315,8 @@ function SupplierRegistration() {
       <div className={styles.container}>
         <div className={styles.header}>
           <div>
-            <h1 className={styles.title}>Supplier Registration</h1>
-            <p className={styles.subtitle}>
-              View and manage supplier information. Add or edit supplier details (admin/manager).
-            </p>
+            <h1 className={styles.title}>Suppliers</h1>
+            <p className={styles.subtitle}>Manage supplier records</p>
           </div>
           <div className={styles.headerActions}>
             <PageNavigation onRefresh={fetchSuppliers} refreshLoading={loading} />

@@ -169,7 +169,7 @@ function InvoiceReports() {
             <div>
               <h1 className={styles.title}>Invoice Report</h1>
               <p className={styles.subtitle}>
-                Volume, status, and date distribution only. For amounts and tax see Financial Report.
+                Volume, status, and date distribution
                 {lastUpdated && (
                   <span className={styles.meta}> · Last updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                 )}

@@ -210,8 +210,8 @@ function ASNDetails() {
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <div className={styles.headerText}>
-              <h1 className={styles.pageTitle}>ASN Details</h1>
-              <p className={styles.pageSubtitle}>View all Advanced Shipping Notices (loaded from Excel import)</p>
+              <h1 className={styles.pageTitle}>ASN</h1>
+              <p className={styles.pageSubtitle}>Advanced Shipping Notices</p>
             </div>
             <div className={styles.headerActions}>
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} style={{ display: 'none' }} />

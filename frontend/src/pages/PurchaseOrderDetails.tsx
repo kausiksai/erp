@@ -308,8 +308,8 @@ function PurchaseOrderDetails() {
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <div className={styles.headerText}>
-              <h1 className={styles.pageTitle}>Purchase Order Details</h1>
-              <p className={styles.pageSubtitle}>View and manage all purchase orders</p>
+              <h1 className={styles.pageTitle}>Purchase Orders</h1>
+              <p className={styles.pageSubtitle}>POs and line items</p>
             </div>
             <div className={styles.headerActions}>
               <input

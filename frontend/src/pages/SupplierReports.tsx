@@ -187,7 +187,7 @@ function SupplierReports() {
             <div>
               <h1 className={styles.title}>Supplier Reports</h1>
               <p className={styles.subtitle}>
-                Supplier performance: fastest delivery, best suppliers by value, activity and engagement.
+                Performance and engagement
                 {lastUpdated && (
                   <span className={styles.meta}> · Last updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                 )}

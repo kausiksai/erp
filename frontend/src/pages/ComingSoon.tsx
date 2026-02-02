@@ -19,9 +19,7 @@ function ComingSoon() {
             <i className="pi pi-clock"></i>
           </div>
           <h1 className={styles.title}>Coming Soon</h1>
-          <p className={styles.description}>
-            This feature is currently under development and will be available soon.
-          </p>
+          <p className={styles.description}>This feature will be available soon.</p>
           <Button
             label="Go Back to Dashboard"
             icon="pi pi-arrow-left"

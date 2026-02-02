@@ -1249,9 +1249,7 @@ export default function InvoiceUpload() {
             </div>
             <div className={styles.headerText}>
               <h1 className={styles.pageTitle}>Invoice Processing</h1>
-              <p className={styles.pageSubtitle}>
-                Upload and process invoice documents
-              </p>
+              <p className={styles.pageSubtitle}>Upload PDF and extract data</p>
             </div>
             <PageNavigation />
           </div>

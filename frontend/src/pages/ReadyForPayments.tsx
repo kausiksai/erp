@@ -378,7 +378,7 @@ function ReadyForPayments() {
         <div className={styles.header}>
           <div>
             <h1 className={styles.title}>Ready for Payments</h1>
-            <p className={styles.subtitle}>Approved payments with full PO, supplier, invoice, GRN, ASN and banking details. Mark as done when payment is completed.</p>
+            <p className={styles.subtitle}>Mark approved invoices as paid</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Button

@@ -272,8 +272,8 @@ function GRNDetails() {
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <div className={styles.headerText}>
-              <h1 className={styles.pageTitle}>GRN Details</h1>
-              <p className={styles.pageSubtitle}>View all Goods Receipt Notes (loaded from Excel import)</p>
+              <h1 className={styles.pageTitle}>GRN</h1>
+              <p className={styles.pageSubtitle}>Goods Receipt Notes</p>
             </div>
             <div className={styles.headerActions}>
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} style={{ display: 'none' }} />

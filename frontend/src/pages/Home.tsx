@@ -112,10 +112,8 @@ function Home() {
               <p className={styles.welcomeLine}>
                 <span className={styles.welcomeRole}>Signed in as {getRoleDisplayName(userRole as UserRole)}</span>
               </p>
-              <h1 className={styles.pageTitle}>Billing System Dashboard</h1>
-              <p className={styles.pageSubtitle}>
-                End-to-end billing, invoice management, and payment workflows in one place.
-              </p>
+              <h1 className={styles.pageTitle}>Dashboard</h1>
+              <p className={styles.pageSubtitle}>Invoice management and payment workflows</p>
               {menuCategories.length > 0 && (
                 <p className={styles.menuSummary}>
                   {menuCategories.length} categor{menuCategories.length === 1 ? 'y' : 'ies'} · {totalItems} module{totalItems !== 1 ? 's' : ''} available

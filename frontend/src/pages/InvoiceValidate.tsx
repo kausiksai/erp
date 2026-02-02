@@ -198,7 +198,7 @@ function InvoiceValidate() {
           <div className={styles.headerContent}>
             <div className={styles.headerText}>
               <h1 className={styles.pageTitle}>Invoice Validate</h1>
-              <p className={styles.pageSubtitle}>View and validate all invoice records</p>
+              <p className={styles.pageSubtitle}>Search and validate invoices</p>
             </div>
             <PageNavigation onRefresh={fetchInvoices} refreshLoading={loading} />
           </div>

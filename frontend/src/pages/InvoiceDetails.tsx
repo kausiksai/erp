@@ -519,7 +519,7 @@ function InvoiceDetails() {
           <div className={styles.headerContent}>
             <div className={styles.headerText}>
               <h1 className={styles.pageTitle}>Invoice Details</h1>
-              <p className={styles.pageSubtitle}>Invoice Number: {invoice.invoice_number}</p>
+              <p className={styles.pageSubtitle}>{invoice.invoice_number}</p>
             </div>
             <div className={styles.headerActions}>
               {(() => {

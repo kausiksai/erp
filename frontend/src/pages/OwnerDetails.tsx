@@ -217,9 +217,7 @@ function OwnerDetails() {
         <div className={styles.header}>
           <div>
             <h1 className={styles.title}>Owner Details</h1>
-            <p className={styles.subtitle}>
-              View and manage company owner information
-            </p>
+            <p className={styles.subtitle}>Company owner information</p>
           </div>
           <PageNavigation onRefresh={fetchOwnerDetails} refreshLoading={loading} />
         </div>

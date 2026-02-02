@@ -579,7 +579,7 @@ function ApprovePayments() {
         <div className={styles.header}>
           <div>
             <h1 className={styles.title}>Approve Payments</h1>
-            <p className={styles.subtitle}>Review validated invoices with PO, supplier, GRN, ASN and banking details. Approve, modify banking and approve, or reject.</p>
+            <p className={styles.subtitle}>Review and approve validated invoices</p>
           </div>
           <PageNavigation onRefresh={fetchPending} refreshLoading={loading} />
         </div>

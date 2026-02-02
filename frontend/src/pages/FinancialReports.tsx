@@ -275,7 +275,7 @@ function FinancialReports() {
             <div>
               <h1 className={styles.title}>Financial Reports</h1>
               <p className={styles.subtitle}>
-                All financial reports: summary, payment pipeline, monthly trends, procurement, and payment actions.
+                Summary, pipeline, trends, and actions
                 {lastUpdated && (
                   <span className={styles.meta}> · Last updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                 )}
