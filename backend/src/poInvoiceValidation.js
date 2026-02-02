@@ -90,65 +90,251 @@ async function getPoForInvoice(poId, client) {
   }
 }
 
+const TOL_QTY = 0.001
+const TOL_AMOUNT = 0.01
+const TOL_RATE_PCT = 0.01
+
 /**
- * Validate invoice against PO/GRN (quantity; optional rate/tax later).
- * Returns: { valid: boolean, reason?: string, poAlreadyFulfilled?: boolean, isShortfall?: boolean }
+ * Full validation engine: header (supplier, PO link), line-level (qty, rate, line total), totals (Invoice vs PO vs GRN), ASN info.
+ * Returns structured result for UI and for derive valid/isShortfall.
  */
-export async function validateInvoiceAgainstPoGrn(invoiceId) {
-  const inv = await pool.query(
-    `SELECT invoice_id, po_id, status, invoice_date FROM invoices WHERE invoice_id = $1`,
-    [invoiceId]
-  )
-  if (!inv.rows[0]) return { valid: false, reason: 'Invoice not found' }
-  const invoice = inv.rows[0]
-  const poId = invoice.po_id
-  if (!poId) return { valid: false, reason: 'Invoice not linked to a PO' }
-
-  const po = await getPoForInvoice(poId)
-  if (!po) return { valid: false, reason: 'PO not found' }
-
-  // 5. Invoices received after PO Fulfillment → Exception Approval
-  if (po.status === PO_STATUS.FULFILLED) {
-    return { valid: false, poAlreadyFulfilled: true, reason: 'PO already fulfilled; route to exception approval' }
+export async function runFullValidation(invoiceId) {
+  const errors = []
+  const details = {
+    header: { invoice: null, po: null, supplierMatch: null, errors: [], warnings: [] },
+    lines: [],
+    totals: { thisInvQty: 0, poQty: 0, grnQty: 0, thisInvAmount: 0, errors: [], warnings: [] },
+    grn: { grnQty: 0, invLteGrn: null, errors: [] },
+    asn: { asnCount: 0, warnings: [] }
   }
 
-  const { poQty, invQty, grnQty } = await getCumulativeQuantities(poId)
-  // For this invoice only, sum billed_qty (we could compare full cumulative later)
-  const thisInv = await pool.query(
-    `SELECT COALESCE(SUM(billed_qty), 0)::numeric AS total FROM invoice_lines WHERE invoice_id = $1`,
+  const invRes = await pool.query(
+    `SELECT invoice_id, invoice_number, invoice_date, supplier_id, po_id, total_amount, po_number
+     FROM invoices WHERE invoice_id = $1`,
     [invoiceId]
   )
-  const thisInvQty = parseFloat(thisInv.rows[0]?.total ?? 0)
+  if (!invRes.rows[0]) {
+    return { valid: false, poAlreadyFulfilled: false, isShortfall: false, reason: 'Invoice not found', errors: ['Invoice not found'], warnings: [], details }
+  }
+  const invoice = invRes.rows[0]
+  details.header.invoice = invoice
+  const poId = invoice.po_id
 
-  // Allow small tolerance for decimal comparison
-  const tol = 0.001
-  const invMatchesPo = Math.abs(thisInvQty - poQty) <= tol
-  const invLteGrn = grnQty >= thisInvQty - tol
+  if (!poId) {
+    errors.push('Invoice is not linked to a PO')
+    return { valid: false, poAlreadyFulfilled: false, isShortfall: false, reason: errors[0], errors, warnings: [], details }
+  }
 
-  // 2. Partial / Shortfall: invoice or GRN qty < PO qty – return specific reason and quantities for UI
-  if (!invMatchesPo || thisInvQty < poQty - tol || (grnQty > 0 && !invLteGrn)) {
-    let validationFailureReason = 'Quantity shortfall or mismatch; route to debit note approval.'
-    if (!invMatchesPo && thisInvQty < poQty - tol) {
-      validationFailureReason = `Invoice total quantity (${thisInvQty}) is less than PO total (${poQty}). Route to debit note approval.`
-    } else if (!invMatchesPo && thisInvQty > poQty + tol) {
-      validationFailureReason = `Invoice total quantity (${thisInvQty}) exceeds PO total (${poQty}). Route to debit note approval.`
-    } else if (!invMatchesPo) {
-      validationFailureReason = `Invoice quantity (${thisInvQty}) does not match PO total (${poQty}). Route to debit note approval.`
-    } else if (grnQty > 0 && !invLteGrn) {
-      validationFailureReason = `GRN total quantity (${grnQty}) is less than invoice quantity (${thisInvQty}). Pay only for what was received; route to debit note approval.`
-    }
+  if (!invoice.invoice_number || String(invoice.invoice_number).trim() === '') {
+    errors.push('Invoice number is missing')
+  }
+  if (!invoice.invoice_date) {
+    details.header.warnings.push('Invoice date is missing')
+  }
+
+  const poRes = await pool.query(
+    `SELECT po_id, po_number, supplier_id, status, terms FROM purchase_orders WHERE po_id = $1`,
+    [poId]
+  )
+  if (!poRes.rows[0]) {
+    errors.push('PO not found')
+    return { valid: false, poAlreadyFulfilled: false, isShortfall: false, reason: errors[0], errors, warnings: [], details }
+  }
+  const po = poRes.rows[0]
+  details.header.po = po
+
+  if (po.status === PO_STATUS.FULFILLED) {
     return {
       valid: false,
-      isShortfall: true,
-      reason: validationFailureReason,
-      thisInvQty,
-      poQty,
-      grnQty,
-      validationFailureReason
+      poAlreadyFulfilled: true,
+      isShortfall: false,
+      reason: 'PO already fulfilled; route to exception approval',
+      errors: ['PO already fulfilled; route to exception approval'],
+      warnings: [],
+      details
     }
   }
 
-  // 1. Standard validation: quantities match
+  const supplierMatch = invoice.supplier_id != null && po.supplier_id != null && Number(invoice.supplier_id) === Number(po.supplier_id)
+  details.header.supplierMatch = supplierMatch
+  if (!supplierMatch) {
+    errors.push('Invoice supplier does not match PO supplier')
+  }
+  if (invoice.po_number && po.po_number && String(invoice.po_number).trim() !== String(po.po_number).trim()) {
+    details.header.warnings.push(`Invoice PO number (${invoice.po_number}) does not match PO (${po.po_number})`)
+  }
+
+  const [invLinesRes, poLinesRes, cumul, asnRes] = await Promise.all([
+    pool.query(
+      `SELECT invoice_line_id, po_line_id, sequence_number, billed_qty, weight, count, rate, line_total, item_name
+       FROM invoice_lines WHERE invoice_id = $1 ORDER BY sequence_number NULLS LAST, invoice_line_id`,
+      [invoiceId]
+    ),
+    pool.query(
+      `SELECT po_line_id, sequence_number, qty, unit_cost, item_id, description1 FROM purchase_order_lines WHERE po_id = $1 ORDER BY sequence_number`,
+      [poId]
+    ),
+    getCumulativeQuantities(poId),
+    pool.query(`SELECT COUNT(*) AS cnt FROM asn WHERE po_id = $1`, [poId])
+  ])
+
+  const invLines = invLinesRes.rows
+  const poLines = poLinesRes.rows
+  const { poQty, grnQty } = cumul
+  details.totals.poQty = parseFloat(poQty)
+  details.grn.grnQty = parseFloat(grnQty)
+  details.asn.asnCount = parseInt(asnRes.rows[0]?.cnt ?? 0, 10)
+
+  let thisInvQty = 0
+  let thisInvAmount = 0
+  const poLineByLineId = new Map(poLines.map(r => [r.po_line_id, r]))
+  const poLineBySeq = new Map(poLines.map(r => [r.sequence_number, r]))
+
+  for (let i = 0; i < invLines.length; i++) {
+    const il = invLines[i]
+    const invQty = il.billed_qty != null ? parseFloat(il.billed_qty) : (il.weight != null ? parseFloat(il.weight) : (il.count != null ? parseFloat(il.count) : null))
+    const invRate = il.rate != null ? parseFloat(il.rate) : null
+    const invTotal = il.line_total != null ? parseFloat(il.line_total) : null
+    thisInvQty += invQty ?? 0
+    thisInvAmount += invTotal ?? 0
+
+    const poLine = (il.po_line_id && poLineByLineId.get(il.po_line_id)) || (il.sequence_number != null && poLineBySeq.get(il.sequence_number)) || poLines[i] || null
+    const lineResult = {
+      index: i + 1,
+      invoiceLineId: il.invoice_line_id,
+      poLineId: poLine?.po_line_id ?? null,
+      itemName: il.item_name,
+      invQty,
+      poQty: poLine && poLine.qty != null ? parseFloat(poLine.qty) : null,
+      invRate,
+      poRate: poLine && poLine.unit_cost != null ? parseFloat(poLine.unit_cost) : null,
+      invLineTotal: invTotal,
+      quantityMatch: null,
+      rateMatch: null,
+      lineTotalMatch: null,
+      errors: [],
+      warnings: []
+    }
+
+    if (!poLine) {
+      lineResult.errors.push('No matching PO line (by po_line_id or sequence)')
+    } else {
+      const qtyMatch = invQty != null && lineResult.poQty != null && Math.abs(invQty - lineResult.poQty) <= TOL_QTY
+      lineResult.quantityMatch = qtyMatch
+      if (!qtyMatch && invQty != null && lineResult.poQty != null) {
+        if (invQty > lineResult.poQty + TOL_QTY) {
+          lineResult.errors.push(`Line quantity (${invQty}) exceeds PO line qty (${lineResult.poQty})`)
+        } else {
+          lineResult.warnings.push(`Line quantity (${invQty}) differs from PO line qty (${lineResult.poQty})`)
+        }
+      }
+      if (invRate != null && lineResult.poRate != null) {
+        const rateMatch = Math.abs(invRate - lineResult.poRate) <= TOL_AMOUNT || (lineResult.poRate !== 0 && Math.abs((invRate - lineResult.poRate) / lineResult.poRate) <= TOL_RATE_PCT)
+        lineResult.rateMatch = rateMatch
+        if (!rateMatch) {
+          lineResult.warnings.push(`Line rate (${invRate}) differs from PO unit cost (${lineResult.poRate})`)
+        }
+      }
+      if (invTotal != null && invQty != null && invRate != null) {
+        const expected = invQty * invRate
+        lineResult.lineTotalMatch = Math.abs(invTotal - expected) <= TOL_AMOUNT
+        if (!lineResult.lineTotalMatch) {
+          lineResult.warnings.push(`Line total (${invTotal}) does not match qty × rate (${expected.toFixed(2)})`)
+        }
+      }
+    }
+    details.lines.push(lineResult)
+  }
+
+  details.totals.thisInvQty = thisInvQty
+  details.totals.thisInvAmount = thisInvAmount
+
+  const invMatchesPo = Math.abs(thisInvQty - poQty) <= TOL_QTY
+  const invLteGrn = grnQty >= thisInvQty - TOL_QTY
+  details.grn.invLteGrn = invLteGrn
+
+  if (!invMatchesPo) {
+    if (thisInvQty < poQty - TOL_QTY) {
+      details.totals.errors.push(`Invoice total quantity (${thisInvQty}) is less than PO total (${poQty})`)
+    } else if (thisInvQty > poQty + TOL_QTY) {
+      details.totals.errors.push(`Invoice total quantity (${thisInvQty}) exceeds PO total (${poQty})`)
+    } else {
+      details.totals.errors.push(`Invoice quantity (${thisInvQty}) does not match PO total (${poQty})`)
+    }
+  }
+  if (grnQty > 0 && !invLteGrn) {
+    details.grn.errors.push(`GRN total (${grnQty}) is less than invoice quantity (${thisInvQty}). Pay only for what was received.`)
+  }
+  if (invoice.total_amount != null && Math.abs(thisInvAmount - parseFloat(invoice.total_amount)) > TOL_AMOUNT) {
+    details.totals.warnings.push(`Sum of line totals (${thisInvAmount.toFixed(2)}) differs from invoice total amount (${invoice.total_amount})`)
+  }
+  if (details.asn.asnCount === 0 && invLines.length > 0) {
+    details.asn.warnings.push('No ASN found for this PO (informational)')
+  }
+
+  const allLineErrors = details.lines.flatMap(l => l.errors)
+  const totalErrors = [...details.totals.errors, ...details.grn.errors, ...allLineErrors]
+  if (errors.length > 0) {
+    totalErrors.unshift(...errors)
+  }
+
+  const warnings = [...details.header.warnings, ...details.totals.warnings, ...details.asn.warnings, ...details.lines.flatMap(l => l.warnings)]
+
+  const isShortfall = totalErrors.some(e =>
+    e.includes('quantity') || e.includes('PO total') || e.includes('GRN') || e.includes('exceeds') || e.includes('less than')
+  ) || details.grn.errors.length > 0
+
+  let validationFailureReason = null
+  if (totalErrors.length > 0) {
+    validationFailureReason = isShortfall
+      ? (details.grn.errors[0] || details.totals.errors[0] || totalErrors[0])
+      : totalErrors[0]
+    if (isShortfall && validationFailureReason && !validationFailureReason.includes('Route to debit note')) {
+      validationFailureReason += ' Route to debit note approval.'
+    }
+  }
+
+  return {
+    valid: totalErrors.length === 0,
+    poAlreadyFulfilled: false,
+    isShortfall: totalErrors.length > 0 && isShortfall,
+    reason: validationFailureReason || (totalErrors.length ? totalErrors[0] : null),
+    errors: totalErrors,
+    warnings,
+    details: {
+      ...details,
+      thisInvQty,
+      poQty,
+      grnQty
+    }
+  }
+}
+
+/**
+ * Validate invoice against PO/GRN. Uses full validation engine; returns legacy shape for existing callers.
+ */
+export async function validateInvoiceAgainstPoGrn(invoiceId) {
+  const full = await runFullValidation(invoiceId)
+
+  if (full.poAlreadyFulfilled) {
+    return { valid: false, poAlreadyFulfilled: true, reason: full.reason }
+  }
+
+  if (!full.valid) {
+    return {
+      valid: false,
+      isShortfall: full.isShortfall,
+      reason: full.reason,
+      validationFailureReason: full.reason,
+      thisInvQty: full.details.thisInvQty,
+      poQty: full.details.poQty,
+      grnQty: full.details.grnQty,
+      errors: full.errors,
+      warnings: full.warnings,
+      details: full.details
+    }
+  }
+
   return { valid: true }
 }
 
@@ -310,7 +496,10 @@ export async function validateAndUpdateInvoiceStatus(invoiceId) {
         validationFailureReason: result.validationFailureReason || result.reason,
         thisInvQty: result.thisInvQty,
         poQty: result.poQty,
-        grnQty: result.grnQty
+        grnQty: result.grnQty,
+        errors: result.errors,
+        warnings: result.warnings,
+        details: result.details
       }
     }
     if (result.valid) {

@@ -82,7 +82,6 @@ INSERT INTO menu_items (menu_id, title, description, icon, path, color, category
 ('approve-payments', 'Approve Payments', 'Review and approve payments (PO, supplier, invoice, GRN, ASN, banking)', 'pi pi-check-square', '/payments/approve', '#0d9488', 'finance', 'Finance & Payments', 'Payment approval and history', 1, TRUE, FALSE),
 ('ready-for-payment', 'Ready for Payments', 'Manage approved payments and mark as done', 'pi pi-money-bill', '/payments/ready', '#0284c7', 'finance', 'Finance & Payments', 'Payment approval and history', 2, TRUE, FALSE),
 ('payment-history', 'Payment History', 'View and track payment history and status', 'pi pi-history', '/payments/history', '#9333ea', 'finance', 'Finance & Payments', 'Payment approval and history', 3, TRUE, FALSE),
-('finance-dashboard', 'Finance Dashboard', 'Comprehensive financial overview and analytics', 'pi pi-chart-line', '/finance/dashboard', '#16a34a', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 1, TRUE, FALSE),
 ('invoice-reports', 'Invoice Reports', 'Generate comprehensive invoice reports', 'pi pi-file', '/reports/invoices', '#be123c', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 2, TRUE, FALSE),
 ('financial-reports', 'Financial Reports', 'Generate financial statements and reports', 'pi pi-chart-bar', '/reports/financial', '#0d9488', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 3, TRUE, FALSE),
 ('supplier-reports', 'Supplier Reports', 'Analyze supplier performance and reports', 'pi pi-chart-pie', '/reports/suppliers', '#c2410c', 'reports', 'Reports & Analytics', 'Generate reports and view analytics', 4, TRUE, FALSE)
@@ -109,7 +108,7 @@ ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = N
 
 INSERT INTO role_menu_access (role, menu_item_id, has_access)
 SELECT 'manager', menu_item_id, TRUE FROM menu_items
-WHERE menu_id IN ('incomplete-pos','invoice-upload','invoice-details','purchase-order','grn-details','asn-details','user-registration','supplier-registration','finance-dashboard','approve-payments','ready-for-payment','payment-history','invoice-reports','financial-reports','supplier-reports')
+WHERE menu_id IN ('incomplete-pos','invoice-upload','invoice-details','purchase-order','grn-details','asn-details','user-registration','supplier-registration','approve-payments','ready-for-payment','payment-history','invoice-reports','financial-reports','supplier-reports')
 ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = NOW();
 
 INSERT INTO role_menu_access (role, menu_item_id, has_access)
@@ -119,7 +118,7 @@ ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = N
 
 INSERT INTO role_menu_access (role, menu_item_id, has_access)
 SELECT 'finance', menu_item_id, TRUE FROM menu_items
-WHERE menu_id IN ('invoice-details','finance-dashboard','approve-payments','ready-for-payment','payment-history','invoice-reports','financial-reports')
+WHERE menu_id IN ('invoice-details','approve-payments','ready-for-payment','payment-history','invoice-reports','financial-reports')
 ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = NOW();
 
 INSERT INTO role_menu_access (role, menu_item_id, has_access)

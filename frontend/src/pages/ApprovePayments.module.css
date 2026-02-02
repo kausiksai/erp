@@ -309,3 +309,26 @@
     font-size: 0.875rem;
   }
 }
+
+.bulkToolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+}
+
+.bulkLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #166534;
+  margin-right: 0.25rem;
+}
+
+.bulkButton {
+  flex-shrink: 0;
+}

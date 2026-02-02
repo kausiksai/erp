@@ -114,9 +114,11 @@ function ApprovePayments() {
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [rejectDialog, setRejectDialog] = useState<{ open: boolean; item: PendingApproval | null }>({ open: false, item: null })
+  const [selected, setSelected] = useState<PendingApproval[]>([])
+  const [rejectDialog, setRejectDialog] = useState<{ open: boolean; item: PendingApproval | null; bulk: PendingApproval[] }>({ open: false, item: null, bulk: [] })
   const [rejectionReason, setRejectionReason] = useState('')
   const [modifyDialog, setModifyDialog] = useState<{ open: boolean; item: PendingApproval | null }>({ open: false, item: null })
+  const [bulkActionLoading, setBulkActionLoading] = useState(false)
   const [modifyBank, setModifyBank] = useState({
     bank_account_name: '',
     bank_account_number: '',
@@ -185,6 +187,44 @@ function ApprovePayments() {
     }
   }
 
+  const handleBulkApprove = async () => {
+    if (selected.length === 0) return
+    setBulkActionLoading(true)
+    let ok = 0
+    let failed = 0
+    for (const item of selected) {
+      try {
+        const res = await apiFetch('payments/approve', {
+          method: 'POST',
+          body: JSON.stringify({ invoiceId: item.invoice_id })
+        })
+        if (res.ok) ok++
+        else failed++
+      } catch {
+        failed++
+      }
+    }
+    setBulkActionLoading(false)
+    setSelected([])
+    await fetchPending()
+    if (failed === 0) {
+      toast.current?.show({ severity: 'success', summary: 'Approved', detail: `${ok} payment(s) approved. They will appear in Ready for Payments.`, life: 4000 })
+    } else {
+      toast.current?.show({ severity: 'warn', summary: 'Partial', detail: `${ok} approved, ${failed} failed.`, life: 5000 })
+    }
+  }
+
+  const confirmBulkApprove = () => {
+    confirmDialog({
+      message: `Approve ${selected.length} selected payment(s)? They will move to Ready for Payments.`,
+      header: 'Confirm approve selected',
+      icon: 'pi pi-question-circle',
+      acceptClassName: 'p-button-success',
+      accept: () => handleBulkApprove(),
+      reject: () => {}
+    })
+  }
+
   const confirmApproveWithModify = () => {
     confirmDialog({
       message: 'Are you sure you want to send this invoice to payments with the modified banking details?',
@@ -240,27 +280,33 @@ function ApprovePayments() {
   }
 
   const handleReject = async () => {
-    const item = rejectDialog.item
-    if (!item) return
-    setActionLoading(`reject-${item.invoice_id}`)
-    try {
-      const res = await apiFetch('payments/reject', {
-        method: 'PATCH',
-        body: JSON.stringify({ invoiceId: item.invoice_id, rejection_reason: rejectionReason })
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.message || 'Reject failed')
+    const { item, bulk } = rejectDialog
+    const toReject = bulk.length > 0 ? bulk : (item ? [item] : [])
+    if (toReject.length === 0) return
+    setBulkActionLoading(true)
+    let ok = 0
+    let failed = 0
+    for (const row of toReject) {
+      try {
+        const res = await apiFetch('payments/reject', {
+          method: 'PATCH',
+          body: JSON.stringify({ invoiceId: row.invoice_id, rejection_reason: rejectionReason })
+        })
+        if (res.ok) ok++
+        else failed++
+      } catch {
+        failed++
       }
-      toast.current?.show({ severity: 'info', summary: 'Rejected', detail: 'Payment rejected.', life: 4000 })
-      setRejectDialog({ open: false, item: null })
-      setRejectionReason('')
-      await fetchPending()
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Reject failed'
-      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
-    } finally {
-      setActionLoading(null)
+    }
+    setBulkActionLoading(false)
+    setRejectDialog({ open: false, item: null, bulk: [] })
+    setRejectionReason('')
+    setSelected([])
+    await fetchPending()
+    if (failed === 0) {
+      toast.current?.show({ severity: 'info', summary: 'Rejected', detail: `${ok} payment(s) rejected.`, life: 4000 })
+    } else {
+      toast.current?.show({ severity: 'warn', summary: 'Partial', detail: `${ok} rejected, ${failed} failed.`, life: 5000 })
     }
   }
 
@@ -518,7 +564,7 @@ function ApprovePayments() {
             onClick={() => openModify(row)} />
           <Button label="Reject" icon="pi pi-times" severity="danger" size="small" className={styles.actionButton}
             loading={actionLoading === `reject-${row.invoice_id}`} disabled={!!actionLoading}
-            onClick={() => { setRejectionReason(''); setRejectDialog({ open: true, item: row }) }} />
+            onClick={() => { setRejectionReason(''); setRejectDialog({ open: true, item: row, bulk: [] }) }} />
         </div>
       </div>
     </div>
@@ -541,8 +587,33 @@ function ApprovePayments() {
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">Pending approvals</h2>
           <p className="dts-sectionSubtitle">
-            Review validated invoices with PO, supplier, GRN, ASN and banking details. Approve, modify banking and approve, or reject.
+            Review validated invoices with PO, supplier, GRN, ASN and banking details. Approve, modify banking and approve, or reject. Select multiple rows to approve or reject in bulk.
           </p>
+          {selected.length > 0 && (
+            <div className={styles.bulkToolbar}>
+              <span className={styles.bulkLabel}>{selected.length} selected</span>
+              <Button
+                label={`Approve selected (${selected.length})`}
+                icon="pi pi-check"
+                severity="success"
+                size="small"
+                loading={bulkActionLoading}
+                disabled={!!actionLoading || bulkActionLoading}
+                onClick={confirmBulkApprove}
+                className={styles.bulkButton}
+              />
+              <Button
+                label={`Reject selected (${selected.length})`}
+                icon="pi pi-times"
+                severity="danger"
+                size="small"
+                disabled={!!actionLoading || bulkActionLoading}
+                onClick={() => { setRejectionReason(''); setRejectDialog({ open: true, item: null, bulk: [...selected] }) }}
+                className={styles.bulkButton}
+              />
+              <Button label="Clear selection" icon="pi pi-times" severity="secondary" size="small" outlined onClick={() => setSelected([])} />
+            </div>
+          )}
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />
@@ -559,6 +630,8 @@ function ApprovePayments() {
                 <DataTable
                   value={list}
                   dataKey="invoice_id"
+                  selection={selected}
+                  onSelectionChange={(e) => setSelected(e.value ?? [])}
                   expandedRows={expandedRows}
                   onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
                   rowExpansionTemplate={rowExpansionTemplate}
@@ -567,6 +640,7 @@ function ApprovePayments() {
                   sortField="payment_due_date"
                   sortOrder={1}
                 >
+                  <Column selectionMode="multiple" headerStyle={{ width: '2.5rem' }} />
                   <Column expander style={{ width: '3rem' }} />
                   <Column field="invoice_number" header="Invoice" sortable style={{ minWidth: '140px' }} />
                   <Column field="po_number_ref" header="PO Number" sortable body={(r) => r.po_number_ref || r.po_number || '-'} style={{ minWidth: '120px' }} />
@@ -580,16 +654,21 @@ function ApprovePayments() {
         </div>
       </div>
 
-      <Dialog header="Reject payment" visible={rejectDialog.open} onHide={() => setRejectDialog({ open: false, item: null })}
-        style={{ width: '400px' }} footer={
+      <Dialog
+        header={rejectDialog.bulk.length > 0 ? `Reject ${rejectDialog.bulk.length} payment(s)` : 'Reject payment'}
+        visible={rejectDialog.open}
+        onHide={() => setRejectDialog({ open: false, item: null, bulk: [] })}
+        style={{ width: '400px' }}
+        footer={
           <div className={styles.dialogActions}>
-            <Button label="Cancel" severity="secondary" onClick={() => setRejectDialog({ open: false, item: null })} />
-            <Button label="Reject" severity="danger" onClick={handleReject} loading={!!actionLoading} />
+            <Button label="Cancel" severity="secondary" onClick={() => setRejectDialog({ open: false, item: null, bulk: [] })} />
+            <Button label={rejectDialog.bulk.length > 0 ? `Reject ${rejectDialog.bulk.length}` : 'Reject'} severity="danger" onClick={handleReject} loading={bulkActionLoading} />
           </div>
-        }>
+        }
+      >
         <div className={styles.dialogForm}>
           <div className={styles.dialogField}>
-            <label>Rejection reason (optional)</label>
+            <label>Rejection reason (optional, applies to all when rejecting multiple)</label>
             <InputText value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} placeholder="Reason for rejection" />
           </div>
         </div>

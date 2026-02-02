@@ -244,9 +244,9 @@
 }
 
 .panelHeader {
-  padding: 16px 20px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 18px 20px;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border-bottom: 1px solid #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -535,10 +535,11 @@
 
 .lineItemsPanel {
   background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
   overflow: hidden;
   display: flex;
+  border: 1px solid #e2e8f0;
   flex-direction: column;
   border: 1px solid #e5e7eb;
   min-height: 280px;
@@ -712,111 +713,535 @@
 }
 
 .addItemButton {
-  background: #1e40af !important;
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%) !important;
   border: none !important;
-  font-weight: 500 !important;
-  padding: 8px 16px !important;
-  border-radius: 6px !important;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
-  transition: all 0.15s ease !important;
-  font-size: 13px !important;
+  font-weight: 600 !important;
+  padding: 10px 20px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2) !important;
+  transition: all 0.2s ease !important;
+  font-size: 14px !important;
+  letter-spacing: 0.02em !important;
 }
 
 .addItemButton:hover:not(:disabled) {
-  background: #1e3a8a !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
 }
 
 .itemsTableWrapper {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  overflow-x: auto;
-  overflow-y: visible;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
   background: #ffffff;
-  flex: 0 1 auto;
-  min-height: 220px;
-  max-height: 600px;
+  flex: 1 1 auto;
+  min-height: 320px;
+  max-height: 70vh;
   display: flex;
   flex-direction: column;
   width: 100%;
   max-width: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.02);
 }
 
-.itemsTable {
-  font-size: 14px;
-  flex: 0 1 auto;
+/* Line items table - structured grid (header + body), fills wrapper for scroll */
+.lineItemsTable {
+  display: flex;
+  flex-direction: column;
   width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  font-size: 13px;
+}
+
+/* Single scroll container for header + body so both scroll left/right together; header sticks on vertical scroll */
+.lineItemsScroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Single-box inputs: hide PrimeReact wrapper border/background so only inner input shows */
+.lineItemsTable :global(.p-inputnumber) {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  display: block !important;
+}
+
+/* Single shared column template for header and rows - increased column widths where required */
+.lineItemsHead {
+  display: grid;
+  grid-template-columns: 40px minmax(240px, 2fr) 90px 170px 145px 105px 105px 125px 120px 74px 100px 74px 100px 108px 72px;
+  gap: 0;
+  background: linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%);
+  border-bottom: 2px solid #cbd5e1;
+  border-top: 3px solid #2563eb;
+  font-weight: 600;
+  color: #334155;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+  min-width: fit-content;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.lineItemsHeadCell {
+  padding: 10px 12px;
+  border-right: 1px solid #cbd5e1;
+  white-space: nowrap;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lineItemsHeadCell:last-child {
+  border-right: none;
+}
+
+.lineItemsHeadCellRight {
+  text-align: right;
+}
+
+.lineItemsHeadCellCenter {
+  text-align: center;
+}
+
+.lineItemsHeadCellWrap {
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.lineItemsBody {
+  display: block;
   min-width: fit-content;
 }
 
-.itemsTable :global(.p-datatable-wrapper) {
-  flex: 0 1 auto;
+.lineItemsRow {
+  display: grid;
+  grid-template-columns: 40px minmax(240px, 2fr) 90px 170px 145px 105px 105px 125px 120px 74px 100px 74px 100px 108px 72px;
+  gap: 0;
+  border-bottom: 1px solid #e2e8f0;
+  min-height: 56px;
+  align-items: center;
+  transition: background-color 0.15s ease;
+  min-width: fit-content;
+}
+
+.lineItemsRow:nth-child(even) {
+  background: #f8fafc;
+}
+
+.lineItemsRow:hover {
+  background: #eff6ff !important;
+}
+
+.lineItemsRow:nth-child(even):hover {
+  background: #dbeafe !important;
+}
+
+.lineItemsCell {
+  padding: 10px 12px;
+  border-right: 1px solid #e2e8f0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  overflow: hidden;
+}
+
+.lineItemsCell:last-child {
+  border-right: none;
+}
+
+.lineItemsCellRight {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.lineItemsCellCenter {
+  justify-content: center;
+  text-align: center;
+}
+
+.lineItemsCellBold {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* Item Name cell: allow word wrap, align content to top */
+.lineItemsCellItemName {
+  align-items: flex-start;
+  overflow: hidden;
+}
+
+.lineItemsCellItemName .tableInputItemName,
+.lineItemsCellItemName :global(.p-inputtextarea) {
+  width: 100% !important;
+  min-width: 0;
+  min-height: 56px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  resize: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  box-sizing: border-box;
+  line-height: 1.4;
+}
+
+.lineItemsCellItemName :global(.p-inputtextarea):focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.lineItemsEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 12px;
+  background: #fafbfc;
+  min-height: 200px;
+}
+
+.lineItemsEmpty .emptyIcon {
+  font-size: 48px;
+  color: #cbd5e1;
+}
+
+.lineItemsEmpty .emptyText {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+  margin: 0;
+}
+
+.lineItemsEmpty .emptyHint {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.countCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.countCell :global(.p-inputnumber),
+.countCell :global(.p-inputnumber-input) {
+  min-width: 64px !important;
+  width: 64px !important;
+}
+
+.countCheck {
+  font-size: 14px;
+  color: #059669;
+  font-weight: 600;
+}
+
+/* Scanned Weight cell: single horizontal row, same height as other cells */
+.qtyWeightCell {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
   width: 100%;
-  overflow-x: auto;
-  max-height: 600px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  flex-wrap: nowrap;
 }
 
-.itemsTable :global(.p-datatable-table) {
-  width: 100%;
-  min-width: 1400px;
-  table-layout: auto;
-}
-
-.itemsTable :global(.p-datatable-tbody) {
-  min-height: auto;
-}
-
-.itemsTable :global(.p-datatable-tbody > tr) {
-  height: auto;
-  min-height: 50px;
-}
-
-.itemsTable :global(.p-datatable-thead > tr > th) {
-  background: #f9fafb !important;
-  border-bottom: 1px solid #e5e7eb !important;
-  font-weight: 600 !important;
-  color: #374151 !important;
-  padding: 12px 14px !important;
-  text-transform: uppercase;
+.qtyWeightLabel {
   font-size: 11px;
-  letter-spacing: 0.5px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  min-width: 26px;
+  flex-shrink: 0;
 }
 
-.itemsTable :global(.p-datatable-tbody > tr > td) {
-  padding: 12px 14px !important;
-  border-bottom: 1px solid #f3f4f6 !important;
+.qtyWeightInputWrap {
+  flex: 0 0 56px;
+  width: 56px;
+  min-width: 56px;
 }
 
-.itemsTable :global(.p-datatable-tbody > tr:hover) {
-  background: #f9fafb !important;
+.qtyWeightInputWrap :global(.p-inputnumber) {
+  width: 100% !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
 }
 
-.tableInput {
-  width: 100%;
-  border: 1px solid #d1d5db !important;
-  background: #ffffff !important;
-  border-radius: 4px !important;
-  padding: 6px 10px !important;
+.qtyWeightInputWrap :global(.p-inputnumber-input) {
+  width: 100% !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 6px !important;
+  padding: 6px 8px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: #1e293b !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
+  box-sizing: border-box !important;
+}
+
+.qtyWeightInputWrap :global(.p-inputnumber-input):hover {
+  border-color: #cbd5e1 !important;
+}
+
+.qtyWeightInputWrap :global(.p-inputnumber-input):focus {
+  outline: none !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+}
+
+.qtyWeightUploadBtn {
+  flex-shrink: 0;
+  min-width: 36px !important;
+  width: 36px !important;
+  height: 36px !important;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
+  background: #2563eb !important;
+  border: none !important;
+  color: #fff !important;
   transition: all 0.15s ease !important;
+}
+
+.qtyWeightUploadBtn i {
+  font-size: 16px !important;
+  margin: 0 !important;
+  color: #fff !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.qtyWeightUploadBtn:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+}
+
+.qtyWeightUploadBtn:global(.p-button-success) {
+  background: #059669 !important;
+}
+
+.qtyWeightUploadBtn:global(.p-button-success):hover:not(:disabled) {
+  background: #047857 !important;
+}
+
+.qtyWeightUploadBtn :global(.p-button-icon),
+.qtyWeightUploadBtn :global(.p-button-label) {
+  display: none !important;
+}
+
+/* Extracted weight value – shown in a text box (read-only), not next to the icon */
+.qtyWeightValueInput {
+  flex: 1;
+  min-width: 72px;
+  max-width: 100%;
+  height: 36px !important;
+  min-height: 36px !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: #1e293b !important;
+  background: #ffffff !important;
+  box-sizing: border-box !important;
+}
+
+.qtyWeightCell .qtyWeightValueInput,
+.qtyWeightCell .qtyWeightValueInput:global(.p-inputtext) {
+  width: 100% !important;
+  min-width: 72px;
+  flex: 1;
+}
+
+.qtyWeightCell .qtyWeightValueInput:global(.p-inputtext) {
+  border: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+}
+
+.qtyWeightCell .qtyWeightValueInput:global(.p-inputtext):not(:placeholder-shown) {
+  color: #047857;
+  font-weight: 600;
+}
+
+.qtyWeightPlaceholder {
+  font-size: 11px;
+  color: #94a3b8;
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Consistent input height for all table inputs */
+.tableInput {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  box-sizing: border-box !important;
+  border: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: #1e293b !important;
+}
+
+.lineItemsTable :global(.p-inputnumber-input) {
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 6px 10px !important;
   font-size: 13px !important;
 }
 
+.lineItemsTable :global(.p-inputnumber),
+.lineItemsTable :global(.p-inputnumber-input),
+.lineItemsTable :global(.p-inputtext) {
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+}
+
 .tableInput:hover {
-  border-color: #9ca3af !important;
+  border-color: #cbd5e1 !important;
 }
 
 .tableInput:focus {
   outline: none !important;
-  border-color: #1e40af !important;
-  box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1) !important;
+  border-color: #2563eb !important;
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+}
+
+.lineItemsTable :global(.p-inputnumber-input):focus,
+.lineItemsTable :global(.p-inputtext):focus {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Narrow inputs for CGST/SGST % and Amt - 4 digits max; single visible box, no overlap */
+.tableInputNarrowPct {
+  width: 64px !important;
+  max-width: 64px !important;
+  min-width: 64px !important;
+  box-sizing: border-box !important;
+}
+
+.tableInputNarrowPct :global(.p-inputnumber) {
+  width: 64px !important;
+  max-width: 64px !important;
+  min-width: 64px !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+}
+
+.tableInputNarrowPct :global(.p-inputnumber-input) {
+  width: 64px !important;
+  max-width: 64px !important;
+  min-width: 64px !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+  box-sizing: border-box !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+}
+
+.tableInputNarrowPct :global(.p-inputnumber-button-group),
+.tableInputNarrowPct :global(.p-inputnumber-buttons-stacked),
+.tableInputNarrowPct :global(.p-inputnumber-buttons-horizontal) {
+  display: none !important;
+}
+
+.tableInputNarrowAmt {
+  width: 80px !important;
+  max-width: 80px !important;
+  min-width: 80px !important;
+  box-sizing: border-box !important;
+}
+
+.tableInputNarrowAmt :global(.p-inputnumber) {
+  width: 80px !important;
+  max-width: 80px !important;
+  min-width: 80px !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+}
+
+.tableInputNarrowAmt :global(.p-inputnumber-input) {
+  width: 80px !important;
+  max-width: 80px !important;
+  min-width: 80px !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+  box-sizing: border-box !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+}
+
+.tableInputNarrowAmt :global(.p-inputnumber-button-group),
+.tableInputNarrowAmt :global(.p-inputnumber-buttons-stacked),
+.tableInputNarrowAmt :global(.p-inputnumber-buttons-horizontal) {
+  display: none !important;
 }
 
 .deleteItemButton {
-  width: 32px;
-  height: 32px;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
   color: #dc2626 !important;
-  border-radius: 4px !important;
+  border-radius: 6px !important;
   transition: all 0.15s ease !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 .deleteItemButton:hover {
@@ -921,18 +1346,25 @@
 .countInput :global(.p-inputnumber) {
   width: 100% !important;
   display: block !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
 }
 
 .countInput :global(.p-inputnumber-input) {
   width: 100% !important;
-  border: 1px solid #d1d5db !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  border: 1px solid #e2e8f0 !important;
   background: #ffffff !important;
-  border-radius: 4px !important;
+  border-radius: 6px !important;
   padding: 6px 10px !important;
   transition: all 0.15s ease !important;
   font-size: 13px !important;
   position: relative !important;
   z-index: 1 !important;
+  box-sizing: border-box !important;
 }
 
 .countInput :global(.p-inputnumber-input):hover {
@@ -960,26 +1392,31 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px;
-  gap: 12px;
+  padding: 56px 48px;
+  gap: 14px;
+  background: linear-gradient(180deg, #fafbfc 0%, #f8fafc 100%);
+  border-radius: 8px;
+  margin: 12px;
 }
 
 .emptyIcon {
-  font-size: 48px;
+  font-size: 52px;
   color: #cbd5e1;
+  opacity: 0.9;
 }
 
 .emptyText {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
+  font-size: 15px;
+  font-weight: 600;
+  color: #475569;
   margin: 0;
 }
 
 .emptyHint {
-  font-size: 12px;
+  font-size: 13px;
   color: #94a3b8;
   margin: 0;
+  font-weight: 500;
 }
 
 .formActions {
@@ -1200,30 +1637,47 @@
 
 .comparisonHeader {
   display: grid;
-  grid-template-columns: 40px 2fr 1fr 80px 100px 100px 120px;
+  grid-template-columns: 44px minmax(160px, 2fr) minmax(80px, 1fr) minmax(100px, 120px) minmax(100px, 120px);
   background: #f9fafb;
   border-bottom: 2px solid #e5e7eb;
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   color: #374151;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  align-items: center;
+  min-width: 0;
 }
 
 .comparisonHeader .comparisonCol {
-  padding: 10px 8px;
+  padding: 12px 14px;
   border-right: 1px solid #e5e7eb;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.comparisonHeader .comparisonCol:first-child {
+  text-align: center;
+}
+
+.comparisonHeader .comparisonCol:nth-child(3),
+.comparisonHeader .comparisonCol:nth-child(4) {
+  text-align: right;
 }
 
 .comparisonHeader .comparisonCol:last-child {
   border-right: none;
+  text-align: center;
 }
 
 .comparisonRow {
   display: grid;
-  grid-template-columns: 40px 2fr 1fr 80px 100px 100px 120px;
+  grid-template-columns: 44px minmax(160px, 2fr) minmax(80px, 1fr) minmax(100px, 120px) minmax(100px, 120px);
   border-bottom: 1px solid #e5e7eb;
   transition: background-color 0.2s;
+  min-width: 0;
+  align-items: stretch;
 }
 
 .comparisonRow:last-child {
@@ -1232,6 +1686,8 @@
 
 .comparisonRow.matchRow {
   background: #f0fdf4;
+  border-left: 3px solid #10b981;
+  border-right: 1px solid #e5e7eb;
 }
 
 .comparisonRow.mismatchRow {
@@ -1242,13 +1698,32 @@
   background: #fffbeb;
 }
 
-.comparisonCol {
-  padding: 8px;
+.comparisonRow .comparisonCol {
+  padding: 10px 14px;
   border-right: 1px solid #e5e7eb;
-  font-size: 12px;
+  font-size: 13px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.comparisonRow .comparisonCol:first-child {
+  text-align: center;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.comparisonRow .comparisonCol:nth-child(3),
+.comparisonRow .comparisonCol:nth-child(4) {
+  text-align: right;
+}
+
+.comparisonRow .comparisonCol:last-child {
+  text-align: center;
+  justify-content: center;
 }
 
 .comparisonCol:last-child {

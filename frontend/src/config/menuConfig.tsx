@@ -161,14 +161,14 @@ const allMenuItems: MenuItem[] = [
     order: 4
   },
   
-  // Reports & Analytics
+  // Reports & Analytics – Financial Reports only (no Finance Dashboard); Invoice & Supplier reports
   {
-    id: 'finance-dashboard',
-    title: 'Finance Dashboard',
-    description: 'Comprehensive financial overview and analytics',
-    icon: 'pi pi-chart-line',
-    path: '/finance/dashboard',
-    color: '#16a34a',
+    id: 'financial-reports',
+    title: 'Financial Reports',
+    description: 'All financial reports: summary, payment pipeline, monthly trends, procurement',
+    icon: 'pi pi-chart-bar',
+    path: '/reports/financial',
+    color: '#0d9488',
     comingSoon: false,
     allowedRoles: ['admin', 'manager', 'finance', 'viewer'],
     order: 1
@@ -185,26 +185,15 @@ const allMenuItems: MenuItem[] = [
     order: 2
   },
   {
-    id: 'financial-reports',
-    title: 'Financial Reports',
-    description: 'Generate financial statements and reports',
-    icon: 'pi pi-chart-bar',
-    path: '/reports/financial',
-    color: '#0d9488',
-    comingSoon: true,
-    allowedRoles: ['admin', 'manager', 'finance'],
-    order: 3
-  },
-  {
     id: 'supplier-reports',
     title: 'Supplier Reports',
-    description: 'Analyze supplier performance and reports',
+    description: 'Supplier performance: fastest delivery, best suppliers, activity',
     icon: 'pi pi-chart-pie',
     path: '/reports/suppliers',
     color: '#c2410c',
-    comingSoon: true,
-    allowedRoles: ['admin', 'manager'],
-    order: 4
+    comingSoon: false,
+    allowedRoles: ['admin', 'manager', 'finance', 'viewer'],
+    order: 3
   }
 ]
 
@@ -256,7 +245,7 @@ export const getMenuCategories = (userRole: UserRole): MenuCategory[] => {
       id: 'reports',
       title: 'Reports & Analytics',
       description: 'Generate reports and view analytics',
-      items: filterItemsByRole(getMenuItemsByIds('finance-dashboard', 'invoice-reports', 'financial-reports', 'supplier-reports'))
+      items: filterItemsByRole(getMenuItemsByIds('financial-reports', 'invoice-reports', 'supplier-reports'))
     }
   ].filter(category => category.items.length > 0) // Only show categories with items
 }

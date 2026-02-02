@@ -85,6 +85,8 @@ STRICT RULES:
 - Use empty string if missing
 - Extract PO Number (Purchase Order Number) if present on the invoice
 - PO Number may appear as "PO No.", "P.O. No.", "Purchase Order", "PO Number", "Order No.", "Order Number", "Buyer Order No.", "Buyer Order Number", "Buyer's Order no", can start number with PO or PO- or similar
+- Return ONLY the PO identifier (e.g. PO9251598). Strip any year or financial-year suffix (e.g. "/ 2025-26", "2025-26", "- 2025-26"). poNumber must be just the PO code like PO9251598 with no slash, no year, no extra text.
+- unitPrice: Extract the RATE or PRICE PER UNIT from the line item table (the column often labelled "Rate", "Price", "Unit Price", "Rate/Unit"). This is the per-unit amount (e.g. 3130 or 3,130.00), NOT the quantity. Return the full numeric value; Indian format uses comma as thousand separator (3,130.00 means 3130). Do NOT confuse quantity (e.g. 20) with unit price (e.g. 3130).
 - Do NOT swap IFSC and account number
 - Do NOT combine branch and IFSC
 - Do NOT add explanation

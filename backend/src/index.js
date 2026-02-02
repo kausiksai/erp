@@ -28,6 +28,7 @@ import {
 import {
   getCumulativeQuantities,
   validateInvoiceAgainstPoGrn,
+  runFullValidation,
   validateAndUpdateInvoiceStatus,
   applyStandardValidation,
   proceedToPaymentFromMismatch,
@@ -37,6 +38,7 @@ import {
   debitNoteApprove,
   updatePoStatusFromCumulative
 } from './poInvoiceValidation.js'
+import { importPoExcel, importGrnExcel, importAsnExcel } from './excelImport.js'
 
 const app = express()
 
@@ -54,6 +56,23 @@ const upload = multer({
       cb(null, true)
     } else {
       cb(new Error('Only PDF files are allowed'), false)
+    }
+  }
+})
+
+// Multer for Excel uploads (PO, GRN, ASN)
+const excelMimeTypes = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel'
+]
+const uploadExcel = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  fileFilter: (req, file, cb) => {
+    if (excelMimeTypes.includes(file.mimetype) || file.originalname?.match(/\.(xlsx|xls)$/i)) {
+      cb(null, true)
+    } else {
+      cb(new Error('Only Excel files (.xlsx, .xls) are allowed'), false)
     }
   }
 })
@@ -153,7 +172,9 @@ function parseInvoiceData(extractedData) {
         // Header Fields
         data.invoiceNumber = jsonData.invoiceNumber || ''
         data.invoiceDate = parseDate(jsonData.invoiceDate)
-        data.poNumber = jsonData.poNumber || ''
+        // PO number: keep only the PO identifier (e.g. PO9251598), strip year/financial-year suffix like "/ 2025-26"
+        const rawPo = (jsonData.poNumber || '').trim()
+        data.poNumber = rawPo.replace(/\s*[\/\-]\s*(20\d{2}[-\s]?\d{2}|FY\s*\d{2}[-\s]?\d{2}).*$/i, '').trim() || rawPo
         data.supplierName = jsonData.supplierName || ''
         data.billTo = jsonData.billTo || ''
         
@@ -162,10 +183,9 @@ function parseInvoiceData(extractedData) {
           if (!value || value === '') return null
           if (typeof value === 'number') return value
           const str = String(value).trim()
-          // Remove currency symbols and commas first
-          let cleaned = str.replace(/[₹$,€₹]/g, '')
-          // Extract the first number found (handles cases like "240.700 Kgs" or "55,361.00")
-          // Match number with optional decimal part
+          // Remove currency symbols and commas so "3,130.00" and "₹55,361.00" parse correctly
+          const cleaned = str.replace(/[₹$,€]/g, '').replace(/,/g, '')
+          // Extract the full number (handles "240.700 Kgs", "3130.00", "55361.00")
           const numberMatch = cleaned.match(/(\d+\.?\d*)/)
           if (numberMatch) {
             const parsed = parseFloat(numberMatch[1])
@@ -1052,10 +1072,10 @@ router.post('/invoices', async (req, res) => {
         
         await client.query(
           `INSERT INTO invoice_lines 
-           (invoice_id, po_id, po_line_id, item_name, hsn_sac, uom, billed_qty, rate, rate_per,
+           (invoice_id, po_id, po_line_id, item_name, hsn_sac, uom, billed_qty, weight, count, rate, rate_per,
             line_total, taxable_value, cgst_rate, cgst_amount, sgst_rate, sgst_amount,
             total_tax_amount, sequence_number)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
           [
             invoiceId,
             poId || null,
@@ -1064,6 +1084,8 @@ router.post('/invoices', async (req, res) => {
             item.hsnSac || item.itemCode || null,
             item.uom || null,
             item.billedQty ? parseFloat(item.billedQty) : null,
+            item.weight != null ? parseFloat(item.weight) : null,
+            item.count != null ? parseInt(item.count, 10) : null,
             item.rate || item.unitPrice ? parseFloat(item.rate || item.unitPrice) : null,
             item.ratePer || null,
             item.lineTotal ? parseFloat(item.lineTotal) : null,
@@ -1212,10 +1234,10 @@ router.put('/invoices/:id', async (req, res) => {
         
         await client.query(
           `INSERT INTO invoice_lines 
-           (invoice_id, po_id, po_line_id, item_name, hsn_sac, uom, billed_qty, rate, rate_per,
+           (invoice_id, po_id, po_line_id, item_name, hsn_sac, uom, billed_qty, weight, count, rate, rate_per,
             line_total, taxable_value, cgst_rate, cgst_amount, sgst_rate, sgst_amount,
             total_tax_amount, sequence_number)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
           [
             id,
             finalPoId,
@@ -1224,6 +1246,8 @@ router.put('/invoices/:id', async (req, res) => {
             item.hsnSac || item.itemCode || null,
             item.uom || null,
             item.billedQty ? parseFloat(item.billedQty) : null,
+            item.weight != null ? parseFloat(item.weight) : null,
+            item.count != null ? parseInt(item.count, 10) : null,
             item.rate || item.unitPrice ? parseFloat(item.rate || item.unitPrice) : null,
             item.ratePer || null,
             item.lineTotal ? parseFloat(item.lineTotal) : null,
@@ -1405,6 +1429,78 @@ router.get('/asn', async (req, res) => {
   }
 })
 
+// Upload Excel: PO matched -> purchase_orders + purchase_order_lines
+router.post('/purchase-orders/upload-excel', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), uploadExcel.single('file'), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'Excel file is required' })
+    }
+    await client.query('BEGIN')
+    const result = await importPoExcel(req.file.buffer, client)
+    await client.query('COMMIT')
+    res.json({
+      success: true,
+      message: `Imported ${result.purchaseOrdersInserted} PO(s) and ${result.linesInserted} line(s)`,
+      ...result
+    })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('PO Excel import error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
+  } finally {
+    client.release()
+  }
+})
+
+// Upload Excel: GRN matched -> grn
+router.post('/grn/upload-excel', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), uploadExcel.single('file'), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'Excel file is required' })
+    }
+    await client.query('BEGIN')
+    const result = await importGrnExcel(req.file.buffer, client)
+    await client.query('COMMIT')
+    res.json({
+      success: true,
+      message: `Imported ${result.grnInserted} GRN record(s)`,
+      ...result
+    })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('GRN Excel import error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
+  } finally {
+    client.release()
+  }
+})
+
+// Upload Excel: Pending ASN -> asn
+router.post('/asn/upload-excel', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), uploadExcel.single('file'), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'Excel file is required' })
+    }
+    await client.query('BEGIN')
+    const result = await importAsnExcel(req.file.buffer, client)
+    await client.query('COMMIT')
+    res.json({
+      success: true,
+      message: `Imported ${result.asnInserted} ASN record(s)`,
+      ...result
+    })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('ASN Excel import error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
+  } finally {
+    client.release()
+  }
+})
+
 // Get all purchase orders (columns match current schema: date, terms, status; alias po_date for frontend)
 router.get('/purchase-orders', async (req, res) => {
   try {
@@ -1511,12 +1607,24 @@ router.patch('/purchase-orders/:poId/force-close', authenticateToken, authorize(
   }
 })
 
-// Validation summary (read-only): reason and quantities for debit note / validation – for UI to show why invoice is in debit_note_approval
+// Validation summary (read-only): reason and quantities; includes full details (errors, warnings, header, lines, totals, GRN, ASN) when invalid
 router.get('/invoices/:id/validation-summary', authenticateToken, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10)
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
     const result = await validateInvoiceAgainstPoGrn(id)
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Full validation report (all checks: header, line-level, totals, GRN, ASN) for UI to show breakdown
+router.get('/invoices/:id/validation-report', authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    const result = await runFullValidation(id)
     res.json(result)
   } catch (err) {
     res.status(500).json({ error: 'server_error', message: err.message })
@@ -2007,10 +2115,10 @@ router.get('/reports/invoices-summary', authenticateToken, async (req, res) => {
   }
 })
 
-// Supplier Report only: supplier counts, POs, activity (no total invoiced – see Financial)
+// Supplier Report: counts, activity, fastest delivering (avg days PO → invoice), best suppliers (top by value)
 router.get('/reports/suppliers-summary', authenticateToken, async (req, res) => {
   try {
-    const [summary, suppliers] = await Promise.all([
+    const [summary, suppliers, fastestDelivering, bestSuppliers] = await Promise.all([
       pool.query(`
         SELECT
           (SELECT COUNT(*) FROM suppliers)::int AS total_suppliers,
@@ -2029,11 +2137,40 @@ router.get('/reports/suppliers-summary', authenticateToken, async (req, res) => 
           COALESCE((SELECT SUM(i.total_amount) FROM invoices i WHERE i.supplier_id = s.supplier_id), 0)::numeric(18,2) AS total_invoice_amount
         FROM suppliers s
         ORDER BY total_invoice_amount DESC NULLS LAST
+      `),
+      pool.query(`
+        SELECT
+          s.supplier_id,
+          s.supplier_name,
+          ROUND(AVG(EXTRACT(DAY FROM (i.invoice_date - po.date))), 1)::numeric AS avg_days_po_to_invoice,
+          COUNT(DISTINCT po.po_id)::int AS po_count,
+          COUNT(i.invoice_id)::int AS invoice_count
+        FROM suppliers s
+        JOIN purchase_orders po ON po.supplier_id = s.supplier_id
+        JOIN invoices i ON i.po_id = po.po_id AND i.invoice_date IS NOT NULL AND po.date IS NOT NULL
+        GROUP BY s.supplier_id, s.supplier_name
+        HAVING COUNT(i.invoice_id) > 0
+        ORDER BY avg_days_po_to_invoice ASC NULLS LAST
+        LIMIT 15
+      `),
+      pool.query(`
+        SELECT
+          s.supplier_id,
+          s.supplier_name,
+          COUNT(i.invoice_id)::int AS invoice_count,
+          COALESCE(SUM(i.total_amount), 0)::numeric(18,2) AS total_invoice_amount
+        FROM suppliers s
+        JOIN invoices i ON i.supplier_id = s.supplier_id
+        GROUP BY s.supplier_id, s.supplier_name
+        ORDER BY total_invoice_amount DESC NULLS LAST
+        LIMIT 10
       `)
     ])
     res.json({
       summary: summary.rows[0],
-      suppliers: suppliers.rows
+      suppliers: suppliers.rows,
+      fastest_delivering: fastestDelivering.rows,
+      best_suppliers: bestSuppliers.rows
     })
   } catch (err) {
     console.error('Supplier report error:', err)
@@ -2474,7 +2611,7 @@ router.post('/payments/record-payment', authenticateToken, authorize(['admin', '
   const client = await pool.connect()
   try {
     const userId = req.user?.user_id
-    const { paymentApprovalId, amount, notes } = req.body || {}
+    const { paymentApprovalId, amount, notes, paymentType, paymentReference } = req.body || {}
     const approvalId = paymentApprovalId != null ? parseInt(paymentApprovalId, 10) : NaN
     if (Number.isNaN(approvalId) || amount == null) {
       return res.status(400).json({ error: 'invalid_input', message: 'paymentApprovalId and amount are required' })
@@ -2511,8 +2648,8 @@ router.post('/payments/record-payment', authenticateToken, authorize(['admin', '
     }
 
     await client.query(
-      `INSERT INTO payment_transactions (payment_approval_id, amount, paid_by, notes) VALUES ($1, $2, $3, $4)`,
-      [approvalId, payAmount, userId, notes || null]
+      `INSERT INTO payment_transactions (payment_approval_id, amount, paid_by, notes, payment_type, payment_reference) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [approvalId, payAmount, userId, notes || null, paymentType || null, paymentReference || null]
     )
 
     const newPaidTotal = paidSoFar + payAmount
@@ -2520,8 +2657,8 @@ router.post('/payments/record-payment', authenticateToken, authorize(['admin', '
 
     if (isFullyPaid) {
       await client.query(
-        `UPDATE payment_approvals SET status = 'payment_done', payment_done_by = $1, payment_done_at = NOW(), updated_at = NOW() WHERE id = $2`,
-        [userId, approvalId]
+        `UPDATE payment_approvals SET status = 'payment_done', payment_done_by = $1, payment_done_at = NOW(), payment_type = $2, payment_reference = $3, updated_at = NOW() WHERE id = $4`,
+        [userId, paymentType || null, paymentReference || null, approvalId]
       )
       await client.query(
         "UPDATE invoices SET status = 'paid', updated_at = NOW() WHERE invoice_id = $1",
@@ -2561,7 +2698,7 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT pa.id, pa.invoice_id, pa.po_id, pa.supplier_id, pa.status, pa.total_amount, pa.debit_note_value,
               pa.bank_account_name, pa.bank_account_number, pa.bank_ifsc_code, pa.bank_name, pa.branch_name,
-              pa.approved_by, pa.approved_at, pa.payment_done_by, pa.payment_done_at, pa.notes,
+              pa.approved_by, pa.approved_at, pa.payment_done_by, pa.payment_done_at, pa.payment_type, pa.payment_reference, pa.notes,
               i.invoice_number, i.invoice_date, i.payment_due_date,
               s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan, s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
               po.po_number, po.date AS po_date, po.terms AS po_terms,
@@ -2590,7 +2727,7 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
       let paymentTransactions = []
       try {
         const txRows = await pool.query(
-          `SELECT pt.id, pt.amount, pt.paid_at, pt.notes, u.username AS paid_by_username, u.full_name AS paid_by_name
+          `SELECT pt.id, pt.amount, pt.paid_at, pt.notes, pt.payment_type, pt.payment_reference, u.username AS paid_by_username, u.full_name AS paid_by_name
            FROM payment_transactions pt
            LEFT JOIN users u ON u.user_id = pt.paid_by
            WHERE pt.payment_approval_id = $1 ORDER BY pt.paid_at ASC`,
@@ -2616,6 +2753,7 @@ router.patch('/payments/:id/mark-done', authenticateToken, authorize(['admin', '
     const id = parseInt(req.params.id, 10)
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_id' })
     const userId = req.user?.user_id
+    const { paymentType, paymentReference } = req.body || {}
 
     await client.query('BEGIN')
 
@@ -2639,14 +2777,14 @@ router.patch('/payments/:id/mark-done', authenticateToken, authorize(['admin', '
 
     if (remaining > 0) {
       await client.query(
-        `INSERT INTO payment_transactions (payment_approval_id, amount, paid_by) VALUES ($1, $2, $3)`,
-        [id, remaining, userId]
+        `INSERT INTO payment_transactions (payment_approval_id, amount, paid_by, payment_type, payment_reference) VALUES ($1, $2, $3, $4, $5)`,
+        [id, remaining, userId, paymentType || null, paymentReference || null]
       )
     }
 
     await client.query(
-      `UPDATE payment_approvals SET status = 'payment_done', payment_done_by = $1, payment_done_at = NOW(), updated_at = NOW() WHERE id = $2`,
-      [userId, id]
+      `UPDATE payment_approvals SET status = 'payment_done', payment_done_by = $1, payment_done_at = NOW(), payment_type = $2, payment_reference = $3, updated_at = NOW() WHERE id = $4`,
+      [userId, paymentType || null, paymentReference || null, id]
     )
     await client.query(
       "UPDATE invoices SET status = 'paid', updated_at = NOW() WHERE invoice_id = $1",

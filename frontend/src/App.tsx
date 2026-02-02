@@ -19,7 +19,6 @@ import FinancialReports from './pages/FinancialReports'
 import ApprovePayments from './pages/ApprovePayments'
 import ReadyForPayments from './pages/ReadyForPayments'
 import PaymentHistory from './pages/PaymentHistory'
-import FinanceDashboard from './pages/FinanceDashboard'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
@@ -126,14 +125,6 @@ function App() {
           element={
             <ProtectedRoute requiredRole={['admin', 'manager']}>
               <SupplierRegistration />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/finance/dashboard" 
-          element={
-            <ProtectedRoute requiredRole={['admin', 'manager', 'finance', 'viewer']}>
-              <FinanceDashboard />
             </ProtectedRoute>
           } 
         />

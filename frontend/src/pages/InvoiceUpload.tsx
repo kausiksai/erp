@@ -1,10 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import { InputText } from 'primereact/inputtext'
+import { InputTextarea } from 'primereact/inputtextarea'
 import { Calendar } from 'primereact/calendar'
 import { InputNumber } from 'primereact/inputnumber'
-import { DataTable } from 'primereact/datatable'
-import { Column } from 'primereact/column'
 import { Toast } from 'primereact/toast'
 import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
@@ -34,6 +33,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4
 interface InvoiceItem {
   itemName: string
   quantity: number | null
+  /** Quantity/weight from invoice OCR (read-only display in "Invoice weight/Quantity" column) */
+  invoiceQuantity: number | null
   weight: number | null
   count: number | null
   unitPrice: number | null
@@ -52,6 +53,7 @@ interface PurchaseOrder {
   po_id: number
   po_number: string
   po_date: string
+  supplier_id?: number
   supplier_name: string
   bill_to: string
   subtotal: number | null
@@ -65,7 +67,9 @@ interface PurchaseOrder {
     item_code?: string
     item_name: string
     hsn_sac: string
-    quantity: number | null
+    /** PO line quantity from purchase_order_lines.qty */
+    qty?: number | null
+    quantity?: number | null
     unit_price: number | null
     line_total: number | null
     taxable_value: number | null
@@ -241,6 +245,7 @@ export default function InvoiceUpload() {
             itemCode: item?.item_code || '',
             hsnSac: item?.hsn_sac || '',
             quantity: item?.quantity || null,
+            invoiceQuantity: null, // From invoice OCR only; PO load has no OCR
             unitPrice: null, // PO items don't have unit price
             lineTotal: null, // PO items don't have line total
             taxableValue: null, // PO items don't have taxable value
@@ -278,6 +283,21 @@ export default function InvoiceUpload() {
       return false
     } finally {
       setLoadingPO(false)
+    }
+  }, [api])
+
+  // Fetch PO by number and return data only (does not update invoiceData). Use when resolving PO for edited poNumber.
+  const fetchPOByNumber = useCallback(async (poNum: string): Promise<PurchaseOrder | null> => {
+    const trimmed = poNum?.trim()
+    if (!trimmed) return null
+    try {
+      const response = await fetch(api(`purchase-orders/${encodeURIComponent(trimmed)}`))
+      if (!response.ok) return null
+      const poData = await response.json()
+      if (!poData?.po_id) return null
+      return poData as PurchaseOrder
+    } catch {
+      return null
     }
   }, [api])
 
@@ -442,16 +462,20 @@ export default function InvoiceUpload() {
           receiverSignature: extracted.receiverSignature || '',
           
           // Line Items with tax details
-          items: (extracted.items || []).map((item: any) => ({
+          items: (extracted.items || []).map((item: any) => {
+            const ocrQty = parseNumeric(item.quantity || item.billed_qty || item.billedQty)
+            return {
             itemName: item.itemName || item.item_name || '',
-            quantity: parseNumeric(item.quantity || item.billed_qty || item.billedQty),
-            weight: null, // Will be filled by weight slip scanning
-            count: null, // Will be filled manually
+            // Scanned Weight column (Qty + weight) must not be populated from invoice extraction
+            quantity: null,
+            invoiceQuantity: ocrQty, // From OCR – shown in "Inv. Qty" column only
+            weight: null, // Only from weight slip PDF upload + extract
+            count: null,
             unitPrice: parseNumeric(item.unitPrice || item.unit_price),
             // Map 'amount' to 'lineTotal' if lineTotal is not present (Qwen may return 'amount')
             lineTotal: parseNumeric(item.lineTotal || item.line_total || item.amount),
-            itemCode: item.itemCode || item.item_code || '',
-            hsnSac: item.hsnSac || item.itemCode || item.item_code || '',
+            itemCode: item.itemCode || item.item_code || item.hsnSac || (item as { hsn_sac?: string }).hsn_sac || '',
+            hsnSac: item.hsnSac || (item as { hsn_sac?: string }).hsn_sac || item.itemCode || item.item_code || '',
             taxableValue: parseNumeric(item.taxableValue),
             // Handle both cgstRate (number) and cgstPercent (string with %) - backend should convert, but handle both
             cgstRate: parseNumeric(item.cgstRate || (item.cgstPercent ? item.cgstPercent.replace(/%/g, '') : null)),
@@ -460,7 +484,8 @@ export default function InvoiceUpload() {
             sgstRate: parseNumeric(item.sgstRate || (item.sgstPercent ? item.sgstPercent.replace(/%/g, '') : null)),
             sgstAmount: parseNumeric(item.sgstAmount),
             totalTaxAmount: parseNumeric(item.totalTaxAmount)
-          }))
+          }
+          })
         }
 
         // Update state
@@ -595,42 +620,58 @@ export default function InvoiceUpload() {
         overall: { valid: false }
       }
 
+      // Resolve PO from edited invoiceData.poNumber so validation uses the current value
+      const editedPoNumber = invoiceData.poNumber?.trim() || ''
+      let poToValidate: PurchaseOrder | null = purchaseOrder
+      if (editedPoNumber) {
+        if (purchaseOrder?.po_number === editedPoNumber) {
+          poToValidate = purchaseOrder
+        } else {
+          poToValidate = await fetchPOByNumber(editedPoNumber)
+          if (poToValidate) setPurchaseOrder(poToValidate)
+        }
+      }
+
       // 1. Validate PO Details
-      if (purchaseOrder) {
-        if (purchaseOrder.po_id && purchaseOrder.po_number && purchaseOrder.po_date) {
+      if (poToValidate) {
+        if (poToValidate.po_id && poToValidate.po_number && poToValidate.po_date) {
           results.poDetails.valid = true
           results.poDetails.data = {
-            poNumber: purchaseOrder.po_number,
-            poDate: purchaseOrder.po_date,
-            supplierName: purchaseOrder.supplier_name,
-            billTo: purchaseOrder.bill_to
+            poNumber: poToValidate.po_number,
+            poDate: poToValidate.po_date,
+            supplierName: poToValidate.supplier_name,
+            billTo: (poToValidate as { bill_to?: string }).bill_to ?? invoiceData.billTo ?? ''
           }
         } else {
           results.poDetails.errors.push('PO details are incomplete')
         }
       } else {
-        results.poDetails.errors.push('Purchase Order not validated')
+        if (editedPoNumber) results.poDetails.errors.push(`Purchase order "${editedPoNumber}" not found`)
+        else results.poDetails.errors.push('Purchase Order not validated')
       }
 
-      // 2. Validate PO Line Details
-      if (purchaseOrder && purchaseOrder.items && purchaseOrder.items.length > 0) {
-        const missingFields = purchaseOrder.items.some(item => 
-          !item.item_name || !item.hsn_sac || item.quantity === null
+      // 2. Validate PO Line Details (backend returns description1, qty from purchase_order_lines)
+      if (poToValidate && poToValidate.items && poToValidate.items.length > 0) {
+        const getItemName = (item: PurchaseOrder['items'][0]) => (item as { item_name?: string; description1?: string }).item_name ?? (item as { item_name?: string; description1?: string }).description1
+        const getPoLineQty = (item: PurchaseOrder['items'][0]) => item.qty ?? item.quantity ?? null
+        const missingFields = poToValidate.items.some(item =>
+          !getItemName(item) || getPoLineQty(item) == null
         )
         if (!missingFields) {
           results.poLineDetails.valid = true
           results.poLineDetails.data = {
-            totalItems: purchaseOrder.items.length,
-            items: purchaseOrder.items.map(item => ({
-              itemName: item.item_name,
-              hsnSac: item.hsn_sac,
-              quantity: item.quantity,
-              uom: item.uom,
+            totalItems: poToValidate.items.length,
+            items: poToValidate.items.map(item => ({
+              itemName: getItemName(item),
+              hsnSac: (item as { hsn_sac?: string }).hsn_sac,
+              quantity: getPoLineQty(item),
+              unitPrice: item.unit_price ?? (item as { unit_cost?: number }).unit_cost ?? null,
+              uom: (item as { uom?: string }).uom,
               sequenceNumber: item.sequence_number
             }))
           }
         } else {
-          results.poLineDetails.errors.push('Some PO line items have missing fields')
+          results.poLineDetails.errors.push('Some PO line items have missing fields (item name or qty)')
         }
       } else {
         results.poLineDetails.errors.push('No PO line items found')
@@ -647,8 +688,30 @@ export default function InvoiceUpload() {
       
       // Validate that each item has either weight or count
       invoiceData.items.forEach((item, index) => {
-        if (item.weight === null && item.count === null) {
-          invoiceErrors.push(`Item ${index + 1} (${item.itemName || 'Unnamed'}) must have either weight or count`)
+        if (item.weight === null && (item.count === null || item.count === 0)) {
+          invoiceErrors.push(`Item ${index + 1} (${item.itemName || 'Unnamed'}) must have either weight slip uploaded or count entered`)
+        }
+      })
+
+      // When weight slip is uploaded: weight must match INV. QTY
+      // When no weight slip but count entered: count must match INV. QTY
+      const qtyTolerance = 0.01
+      invoiceData.items.forEach((item, index) => {
+        const invQty = item.invoiceQuantity != null ? Number(item.invoiceQuantity) : null
+        const itemLabel = `Item ${index + 1} (${item.itemName || 'Unnamed'})`
+
+        if (item.weight != null) {
+          if (invQty == null) {
+            invoiceErrors.push(`${itemLabel}: Inv. Qty is missing – cannot verify scanned weight`)
+          } else if (Math.abs(Number(item.weight) - invQty) > qtyTolerance) {
+            invoiceErrors.push(`${itemLabel}: Scanned weight (${Number(item.weight)}) does not match Inv. Qty (${invQty})`)
+          }
+        } else if (item.count != null && item.count > 0) {
+          if (invQty == null) {
+            invoiceErrors.push(`${itemLabel}: Inv. Qty is missing – cannot verify count`)
+          } else if (Math.abs(Number(item.count) - invQty) > qtyTolerance) {
+            invoiceErrors.push(`${itemLabel}: Count (${item.count}) does not match Inv. Qty (${invQty})`)
+          }
         }
       })
 
@@ -664,7 +727,7 @@ export default function InvoiceUpload() {
           items: invoiceData.items.map((item, index) => ({
             itemName: item.itemName,
             hsnSac: item.hsnSac || item.itemCode,
-            quantity: item.quantity,
+            quantity: item.quantity ?? item.invoiceQuantity ?? null,
             unitPrice: item.unitPrice,
             lineTotal: item.lineTotal,
             taxableValue: item.taxableValue,
@@ -849,20 +912,30 @@ export default function InvoiceUpload() {
       }, 0)
 
       // Calculate tax amount if not set
-      const calculatedTaxAmount = invoiceData.taxAmount || 
+      const calculatedTaxAmount = invoiceData.taxAmount ||
         ((invoiceData.cgst || 0) + (invoiceData.sgst || 0))
-      
-      // Get supplier ID from validation results or purchase order
-      const supplierId = supplierDetails?.supplier_id || purchaseOrder?.supplier_id || null
-      
+
+      // Resolve PO from edited invoiceData.poNumber so save uses the current value
+      const editedPoNumber = invoiceData.poNumber?.trim() || ''
+      let poForSave: PurchaseOrder | null = purchaseOrder
+      if (editedPoNumber) {
+        if (purchaseOrder?.po_number !== editedPoNumber) {
+          poForSave = await fetchPOByNumber(editedPoNumber)
+          if (poForSave) setPurchaseOrder(poForSave)
+        }
+      }
+
+      // Get supplier ID from validation results or resolved purchase order
+      const supplierId = supplierDetails?.supplier_id || poForSave?.supplier_id || null
+
       // Generate scanning number if not set
       const scanningNumber = invoiceData.scanningNumber || generateScanningNumber()
-      
+
       const payload = {
         invoiceNumber: invoiceData.invoiceNumber,
         invoiceDate: invoiceData.invoiceDate ? invoiceData.invoiceDate.toISOString().split('T')[0] : null,
         supplierId: supplierId,
-        poId: purchaseOrder?.po_id || null,
+        poId: poForSave?.po_id || null,
         scanningNumber: scanningNumber,
         totalAmount: invoiceData.totalAmount || calculatedSubtotal + calculatedTaxAmount,
         taxAmount: calculatedTaxAmount,
@@ -874,6 +947,9 @@ export default function InvoiceUpload() {
           itemCode: item.itemCode,
           hsnSac: item.hsnSac || item.itemCode,
           billedQty: item.quantity,
+          weight: item.weight,
+          count: item.count,
+          uom: (poForSave?.items?.[index] as { uom?: string } | undefined)?.uom ?? (item as { uom?: string }).uom ?? null,
           rate: item.unitPrice,
           unitPrice: item.unitPrice,
           lineTotal: item.lineTotal,
@@ -883,7 +959,7 @@ export default function InvoiceUpload() {
           sgstRate: item.sgstRate,
           sgstAmount: item.sgstAmount,
           totalTaxAmount: item.totalTaxAmount,
-          poLineId: purchaseOrder?.items?.[index]?.po_line_id || null
+          poLineId: poForSave?.items?.[index]?.po_line_id || null
         }))
       }
 
@@ -980,6 +1056,7 @@ export default function InvoiceUpload() {
       items: [...prev.items, { 
         itemName: '', 
         quantity: null,
+        invoiceQuantity: null,
         weight: null,
         count: null,
         unitPrice: null, 
@@ -1006,16 +1083,22 @@ export default function InvoiceUpload() {
   const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
     setInvoiceData(prev => {
       const newItems = [...prev.items]
-      newItems[index] = { ...newItems[index], [field]: value }
-      
-      if (field === 'quantity' || field === 'unitPrice') {
-        const qty = field === 'quantity' ? value : newItems[index].quantity
-        const price = field === 'unitPrice' ? value : newItems[index].unitPrice
-        if (qty && price) {
+      const item = newItems[index]
+      newItems[index] = { ...item, [field]: value }
+
+      // When count is entered, also set quantity so line totals use it (Scanned Weight has only weight input)
+      if (field === 'count') {
+        newItems[index].quantity = value
+      }
+
+      if (field === 'quantity' || field === 'unitPrice' || field === 'count') {
+        const qty = newItems[index].quantity
+        const price = newItems[index].unitPrice
+        if (qty != null && price) {
           newItems[index].lineTotal = qty * price
         }
       }
-      
+
       return { ...prev, items: newItems }
     })
   }
@@ -1052,9 +1135,9 @@ export default function InvoiceUpload() {
       }
 
       const result = await response.json()
-      const extractedWeight = result.weight || null
+      const extractedWeight = result.weight != null ? Number(result.weight) : null
 
-      if (extractedWeight !== null) {
+      if (extractedWeight !== null && !Number.isNaN(extractedWeight)) {
         updateItem(currentItemIndex, 'weight', extractedWeight)
         toast.current?.show({
           severity: 'success',
@@ -1068,8 +1151,8 @@ export default function InvoiceUpload() {
         toast.current?.show({
           severity: 'warn',
           summary: 'Weight Not Found',
-          detail: 'Could not extract weight from the slip. Please enter manually.',
-          life: 3000
+          detail: 'Could not extract weight from this slip. Try another document or use Count for this line.',
+          life: 4000
         })
       }
     } catch (error: any) {
@@ -1545,116 +1628,91 @@ export default function InvoiceUpload() {
                 />
               </div>
               <div className={styles.itemsTableWrapper}>
-                <DataTable
-                  value={invoiceData.items}
-                  emptyMessage={
-                    <div className={styles.emptyState}>
-                      <i className={`pi pi-inbox ${styles.emptyIcon}`}></i>
-                      <p className={styles.emptyText}>No items added yet</p>
-                      <p className={styles.emptyHint}>Click "Add Item" to add invoice line items</p>
+                <div className={styles.lineItemsTable}>
+                  <div className={styles.lineItemsScroll}>
+                    <div className={styles.lineItemsHead}>
+                      <div className={styles.lineItemsHeadCell}>#</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellWrap}>Item Name</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellRight}>Inv. Qty</div>
+                      <div className={styles.lineItemsHeadCell}>Scanned Weight</div>
+                      <div className={styles.lineItemsHeadCell}>Count</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellRight}>Unit Price</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellRight}>Amount</div>
+                      <div className={styles.lineItemsHeadCell}>HSN/SAC</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellRight}>Taxable Value</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellCenter}>CGST %</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellRight}>CGST Amt</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellCenter}>SGST %</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellRight}>SGST Amt</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellRight}>Total</div>
+                      <div className={styles.lineItemsHeadCell + ' ' + styles.lineItemsHeadCellCenter}>Action</div>
                     </div>
-                  }
-                  className={styles.itemsTable}
-                  scrollable={invoiceData.items.length > 3}
-                  scrollHeight={
-                    invoiceData.items.length <= 3 
-                      ? undefined 
-                      : `${Math.min(50 + invoiceData.items.length * 55, 600)}px`
-                  }
-                >
-                      <Column
-                        field="itemName"
-                        header="Item Name"
-                        body={(rowData, { rowIndex }) => (
-                          <InputText
-                            value={rowData.itemName}
-                            onChange={(e) => updateItem(rowIndex, 'itemName', e.target.value)}
-                            className={styles.tableInput}
-                            placeholder="Enter item name"
-                          />
-                        )}
-                        style={{ minWidth: '200px', width: 'auto' }}
-                      />
-                      <Column
-                        field="weight"
-                        header="Weight"
-                        body={(rowData, { rowIndex }) => (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'nowrap', width: '100%' }}>
-                            <Button
-                              className={styles.weightButton}
-                              onClick={() => handleOpenWeightSlipDialog(rowIndex)}
-                              tooltip="Scan weight slip PDF"
-                              tooltipOptions={{ position: 'top' }}
-                              severity={rowData.weight !== null ? 'success' : 'secondary'}
-                              outlined={rowData.weight === null}
-                              size="small"
-                              text={false}
-                            >
-                              <i className="pi pi-balance-scale" style={{ fontSize: '18px', color: '#2563eb' }}></i>
-                            </Button>
-                            {rowData.weight !== null ? (
-                              <span style={{ 
-                                minWidth: '70px', 
-                                fontWeight: '600',
-                                color: '#059669',
-                                fontSize: '13px',
-                                padding: '4px 8px',
-                                background: '#d1fae5',
-                                borderRadius: '4px',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                whiteSpace: 'nowrap',
-                                flexShrink: 0
-                              }}>
-                                <i className="pi pi-check-circle" style={{ fontSize: '12px' }}></i>
-                                {rowData.weight.toFixed(2)} kg
-                              </span>
-                            ) : (
-                              <span style={{ 
-                                fontSize: '12px',
-                                color: '#9ca3af',
-                                fontStyle: 'italic',
-                                flexShrink: 0
-                              }}>
-                                Not set
-                              </span>
-                            )}
+                    <div className={styles.lineItemsBody}>
+                    {invoiceData.items.length === 0 ? (
+                      <div className={styles.lineItemsEmpty}>
+                        <i className={`pi pi-inbox ${styles.emptyIcon}`}></i>
+                        <p className={styles.emptyText}>No items added yet</p>
+                        <p className={styles.emptyHint}>Click &quot;Add Item&quot; to add invoice line items</p>
+                      </div>
+                    ) : (
+                      invoiceData.items.map((rowData, rowIndex) => (
+                        <div key={rowIndex} className={styles.lineItemsRow}>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellCenter}>{rowIndex + 1}</div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellItemName}>
+                            <InputTextarea
+                              value={rowData.itemName}
+                              onChange={(e) => updateItem(rowIndex, 'itemName', e.target.value ?? '')}
+                              className={styles.tableInputItemName}
+                              placeholder="Item name"
+                              rows={3}
+                            />
                           </div>
-                        )}
-                        style={{ minWidth: '180px', width: '200px' }}
-                      />
-                      <Column
-                        field="count"
-                        header="Count"
-                        body={(rowData, { rowIndex }) => (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'nowrap', width: '100%' }}>
-                            <Button
-                              className={styles.countButton}
-                              onClick={() => {
-                                // Focus on count input
-                                setTimeout(() => {
-                                  const input = document.querySelector(`input[data-count-index="${rowIndex}"]`) as HTMLInputElement
-                                  input?.focus()
-                                }, 100)
-                              }}
-                              tooltip="Enter count manually"
-                              tooltipOptions={{ position: 'top' }}
-                              severity={rowData.count !== null && rowData.count > 0 ? 'success' : 'secondary'}
-                              outlined={rowData.count === null || rowData.count === 0}
-                              size="small"
-                              text={false}
-                            >
-                              <i className="pi pi-list" style={{ fontSize: '18px' }}></i>
-                            </Button>
-                            <div style={{ 
-                              position: 'relative', 
-                              width: '90px', 
-                              flexShrink: 0,
-                              display: 'flex',
-                              alignItems: 'center',
-                              zIndex: 1
-                            }}>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellRight}>
+                            {rowData.invoiceQuantity != null
+                              ? Number(rowData.invoiceQuantity).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+                              : '-'}
+                          </div>
+                          <div className={styles.lineItemsCell}>
+                            <div className={styles.qtyWeightCell}>
+                              <Button
+                                className={styles.qtyWeightUploadBtn}
+                                onClick={() => handleOpenWeightSlipDialog(rowIndex)}
+                                tooltip="Upload weight slip PDF – value is filled only from extracted document"
+                                tooltipOptions={{ position: 'top' }}
+                                severity={rowData.weight !== null ? 'success' : 'secondary'}
+                                outlined={rowData.weight === null}
+                                size="small"
+                                text={false}
+                              >
+                                <i className="pi pi-upload"></i>
+                              </Button>
+                              <InputText
+                                value={rowData.weight != null ? String(Number(rowData.weight)) : ''}
+                                readOnly
+                                className={styles.qtyWeightValueInput}
+                                placeholder="Upload slip"
+                              />
+                            </div>
+                          </div>
+                          <div className={styles.lineItemsCell}>
+                            <div className={styles.countCell}>
+                              <Button
+                                className={styles.countButton}
+                                onClick={() => {
+                                  setTimeout(() => {
+                                    const input = document.querySelector(`input[data-count-index="${rowIndex}"]`) as HTMLInputElement
+                                    input?.focus()
+                                  }, 100)
+                                }}
+                                tooltip="Enter count"
+                                tooltipOptions={{ position: 'top' }}
+                                severity={rowData.count !== null && rowData.count > 0 ? 'success' : 'secondary'}
+                                outlined={rowData.count === null || rowData.count === 0}
+                                size="small"
+                                text={false}
+                              >
+                                <i className="pi pi-list"></i>
+                              </Button>
                               <InputNumber
                                 value={rowData.count}
                                 onValueChange={(e) => updateItem(rowIndex, 'count', e.value)}
@@ -1663,186 +1721,122 @@ export default function InvoiceUpload() {
                                 maxFractionDigits={0}
                                 className={styles.countInput}
                                 placeholder="0"
-                                style={{ width: '100%', position: 'relative', zIndex: 1 }}
                                 min={0}
                                 data-count-index={rowIndex}
                                 showButtons={false}
                               />
+                              {rowData.count != null && rowData.count > 0 && <span className={styles.countCheck}>✓</span>}
                             </div>
-                            {rowData.count !== null && rowData.count > 0 && (
-                              <span style={{ 
-                                fontSize: '12px',
-                                color: '#059669',
-                                fontWeight: '500',
-                                marginLeft: '4px',
-                                flexShrink: 0
-                              }}>
-                                ✓
-                              </span>
-                            )}
                           </div>
-                        )}
-                        style={{ minWidth: '200px', width: '220px' }}
-                      />
-                      <Column
-                        field="quantity"
-                        header="Quantity"
-                        body={(rowData, { rowIndex }) => (
-                          <InputNumber
-                            value={rowData.quantity}
-                            onValueChange={(e) => updateItem(rowIndex, 'quantity', e.value)}
-                            mode="decimal"
-                            minFractionDigits={0}
-                            maxFractionDigits={3}
-                            className={styles.tableInput}
-                            placeholder="0"
-                          />
-                        )}
-                        style={{ minWidth: '100px', width: '120px' }}
-                      />
-                      <Column
-                        field="unitPrice"
-                        header="Unit Price"
-                        body={(rowData, { rowIndex }) => (
-                          <InputNumber
-                            value={rowData.unitPrice}
-                            onValueChange={(e) => updateItem(rowIndex, 'unitPrice', e.value)}
-                            mode="decimal"
-                            minFractionDigits={2}
-                            maxFractionDigits={2}
-                            className={styles.tableInput}
-                            placeholder="0.00"
-                            prefix="₹ "
-                          />
-                        )}
-                        style={{ minWidth: '130px', width: '150px' }}
-                      />
-                      <Column
-                        field="lineTotal"
-                        header="Amount"
-                        body={itemTotalBodyTemplate}
-                        style={{ minWidth: '110px', width: '130px', textAlign: 'right' }}
-                      />
-                      <Column
-                        field="itemCode"
-                        header="HSN/SAC"
-                        body={(rowData, { rowIndex }) => (
-                          <InputText
-                            value={rowData.itemCode || rowData.hsnSac || ''}
-                            onChange={(e) => {
-                              updateItem(rowIndex, 'itemCode', e.target.value)
-                              updateItem(rowIndex, 'hsnSac', e.target.value)
-                            }}
-                            className={styles.tableInput}
-                            placeholder="HSN/SAC"
-                          />
-                        )}
-                        style={{ minWidth: '110px', width: '130px' }}
-                      />
-                      <Column
-                        field="taxableValue"
-                        header="Taxable Value"
-                        body={(rowData, { rowIndex }) => (
-                          <InputNumber
-                            value={rowData.taxableValue}
-                            onValueChange={(e) => updateItem(rowIndex, 'taxableValue', e.value)}
-                            mode="decimal"
-                            minFractionDigits={2}
-                            maxFractionDigits={2}
-                            className={styles.tableInput}
-                            placeholder="0.00"
-                            prefix="₹ "
-                          />
-                        )}
-                        style={{ minWidth: '130px', width: '150px' }}
-                      />
-                      <Column
-                        field="cgstRate"
-                        header="CGST %"
-                        body={(rowData, { rowIndex }) => (
-                          <InputNumber
-                            value={rowData.cgstRate}
-                            onValueChange={(e) => updateItem(rowIndex, 'cgstRate', e.value)}
-                            mode="decimal"
-                            minFractionDigits={0}
-                            maxFractionDigits={2}
-                            className={styles.tableInput}
-                            placeholder="0"
-                            suffix="%"
-                          />
-                        )}
-                        style={{ minWidth: '90px', width: '110px' }}
-                      />
-                      <Column
-                        field="cgstAmount"
-                        header="CGST Amt"
-                        body={(rowData, { rowIndex }) => (
-                          <InputNumber
-                            value={rowData.cgstAmount}
-                            onValueChange={(e) => updateItem(rowIndex, 'cgstAmount', e.value)}
-                            mode="decimal"
-                            minFractionDigits={2}
-                            maxFractionDigits={2}
-                            className={styles.tableInput}
-                            placeholder="0.00"
-                            prefix="₹ "
-                          />
-                        )}
-                        style={{ minWidth: '110px', width: '130px' }}
-                      />
-                      <Column
-                        field="sgstRate"
-                        header="SGST %"
-                        body={(rowData, { rowIndex }) => (
-                          <InputNumber
-                            value={rowData.sgstRate}
-                            onValueChange={(e) => updateItem(rowIndex, 'sgstRate', e.value)}
-                            mode="decimal"
-                            minFractionDigits={0}
-                            maxFractionDigits={2}
-                            className={styles.tableInput}
-                            placeholder="0"
-                            suffix="%"
-                          />
-                        )}
-                        style={{ minWidth: '90px', width: '110px' }}
-                      />
-                      <Column
-                        field="sgstAmount"
-                        header="SGST Amt"
-                        body={(rowData, { rowIndex }) => (
-                          <InputNumber
-                            value={rowData.sgstAmount}
-                            onValueChange={(e) => updateItem(rowIndex, 'sgstAmount', e.value)}
-                            mode="decimal"
-                            minFractionDigits={2}
-                            maxFractionDigits={2}
-                            className={styles.tableInput}
-                            placeholder="0.00"
-                            prefix="₹ "
-                          />
-                        )}
-                        style={{ minWidth: '110px', width: '130px' }}
-                      />
-                      <Column
-                        field="totalAmount"
-                        header="Total Amount"
-                        body={itemTotalAmountBodyTemplate}
-                        style={{ minWidth: '130px', width: '150px', textAlign: 'right', fontWeight: 'bold' }}
-                      />
-                      <Column
-                        body={(_rowData, { rowIndex }) => (
-                          <Button
-                            icon="pi pi-trash"
-                            className={styles.deleteItemButton}
-                            onClick={() => removeItem(rowIndex)}
-                            tooltip="Remove item"
-                          />
-                        )}
-                        style={{ minWidth: '60px', width: '70px' }}
-                      />
-                    </DataTable>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellRight}>
+                            <InputNumber
+                              value={rowData.unitPrice}
+                              onValueChange={(e) => updateItem(rowIndex, 'unitPrice', e.value)}
+                              mode="decimal"
+                              minFractionDigits={2}
+                              maxFractionDigits={2}
+                              className={styles.tableInput}
+                              placeholder="0.00"
+                              prefix="₹ "
+                            />
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellRight}>
+                            {itemTotalBodyTemplate(rowData)}
+                          </div>
+                          <div className={styles.lineItemsCell}>
+                            <InputText
+                              value={rowData.hsnSac ?? rowData.itemCode ?? ''}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                setInvoiceData(prev => ({
+                                  ...prev,
+                                  items: prev.items.map((it, i) =>
+                                    i === rowIndex ? { ...it, itemCode: v, hsnSac: v } : it
+                                  )
+                                }))
+                              }}
+                              className={styles.tableInput}
+                              placeholder="HSN/SAC"
+                            />
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellRight}>
+                            <InputNumber
+                              value={rowData.taxableValue}
+                              onValueChange={(e) => updateItem(rowIndex, 'taxableValue', e.value)}
+                              mode="decimal"
+                              minFractionDigits={2}
+                              maxFractionDigits={2}
+                              className={styles.tableInput}
+                              placeholder="0.00"
+                              prefix="₹ "
+                            />
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellCenter}>
+                            <InputNumber
+                              value={rowData.cgstRate}
+                              onValueChange={(e) => updateItem(rowIndex, 'cgstRate', e.value)}
+                              mode="decimal"
+                              minFractionDigits={0}
+                              maxFractionDigits={2}
+                              className={`${styles.tableInput} ${styles.tableInputNarrowPct}`}
+                              placeholder="0"
+                              suffix="%"
+                            />
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellRight}>
+                            <InputNumber
+                              value={rowData.cgstAmount}
+                              onValueChange={(e) => updateItem(rowIndex, 'cgstAmount', e.value)}
+                              mode="decimal"
+                              minFractionDigits={2}
+                              maxFractionDigits={2}
+                              className={`${styles.tableInput} ${styles.tableInputNarrowAmt}`}
+                              placeholder="0.00"
+                              prefix="₹ "
+                            />
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellCenter}>
+                            <InputNumber
+                              value={rowData.sgstRate}
+                              onValueChange={(e) => updateItem(rowIndex, 'sgstRate', e.value)}
+                              mode="decimal"
+                              minFractionDigits={0}
+                              maxFractionDigits={2}
+                              className={`${styles.tableInput} ${styles.tableInputNarrowPct}`}
+                              placeholder="0"
+                              suffix="%"
+                            />
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellRight}>
+                            <InputNumber
+                              value={rowData.sgstAmount}
+                              onValueChange={(e) => updateItem(rowIndex, 'sgstAmount', e.value)}
+                              mode="decimal"
+                              minFractionDigits={2}
+                              maxFractionDigits={2}
+                              className={`${styles.tableInput} ${styles.tableInputNarrowAmt}`}
+                              placeholder="0.00"
+                              prefix="₹ "
+                            />
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellRight + ' ' + styles.lineItemsCellBold}>
+                            {itemTotalAmountBodyTemplate(rowData)}
+                          </div>
+                          <div className={styles.lineItemsCell + ' ' + styles.lineItemsCellCenter}>
+                            <Button
+                              icon="pi pi-trash"
+                              className={styles.deleteItemButton}
+                              onClick={() => removeItem(rowIndex)}
+                              tooltip="Remove item"
+                            />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    </div>
                   </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1975,25 +1969,28 @@ export default function InvoiceUpload() {
                       <div className={styles.comparisonHeader}>
                         <div className={styles.comparisonCol}>#</div>
                         <div className={styles.comparisonCol}>Item Name</div>
-                        <div className={styles.comparisonCol}>HSN/SAC</div>
                         <div className={styles.comparisonCol}>Quantity</div>
                         <div className={styles.comparisonCol}>Rate/Price</div>
-                        <div className={styles.comparisonCol}>Amount</div>
                         <div className={styles.comparisonCol}>Status</div>
                       </div>
                       {Array.from({ length: Math.max(validationResults.poLineDetails.data.items.length, validationResults.invoiceDetails.data.items.length) }, (_, index) => {
                         const poItem = validationResults.poLineDetails.data.items[index] || null
                         const invItem = validationResults.invoiceDetails.data.items[index] || null
-                        
-                        // Compare items
-                        const itemNameMatch = poItem && invItem ? 
-                          poItem.itemName?.toLowerCase().trim() === invItem.itemName?.toLowerCase().trim() : false
-                        const hsnMatch = poItem && invItem ? 
-                          poItem.hsnSac?.toLowerCase().trim() === invItem.hsnSac?.toLowerCase().trim() : false
-                        const quantityMatch = poItem && invItem ? 
-                          Math.abs((poItem.quantity || 0) - (invItem.quantity || 0)) < 0.01 : false
-                        
-                        const isMatch = itemNameMatch && hsnMatch && quantityMatch
+                        const poQty = poItem?.quantity ?? null
+                        const invQty = invItem?.quantity ?? null
+                        const poRate = (poItem as { unitPrice?: number | null })?.unitPrice ?? null
+                        const invRate = invItem?.unitPrice ?? null
+
+                        // Compare quantity and rate/price (use invoice quantity so INV. QTY from OCR is used when user didn't enter COUNT)
+                        const quantityMatch = poItem && invItem
+                          ? Math.abs((poQty ?? 0) - (invQty ?? 0)) < 0.01
+                          : false
+                        // Rate: match when both missing, or both present and equal. If PO has no rate, don't fail (accept invoice rate).
+                        const rateMatch = poItem && invItem
+                          ? (poRate == null && invRate == null) || (poRate != null && invRate != null && Math.abs(poRate - invRate) < 0.01)
+                          : false
+
+                        const isMatch = quantityMatch && rateMatch
                         const hasMismatch = poItem && invItem && !isMatch
                         const isMissing = !poItem || !invItem
                         
@@ -2005,20 +2002,18 @@ export default function InvoiceUpload() {
                               <div className={styles.invValue}>{invItem?.itemName || '-'}</div>
                             </div>
                             <div className={styles.comparisonCol}>
-                              <div className={styles.poValue}>{poItem?.hsnSac || '-'}</div>
-                              <div className={styles.invValue}>{invItem?.hsnSac || '-'}</div>
+                              <div className={styles.poValue}>{poItem?.quantity != null ? poItem.quantity : '-'}</div>
+                              <div className={styles.invValue}>{invItem?.quantity != null ? invItem.quantity : '-'}</div>
                             </div>
                             <div className={styles.comparisonCol}>
-                              <div className={styles.poValue}>{poItem?.quantity || '-'}</div>
-                              <div className={styles.invValue}>{invItem?.quantity || '-'}</div>
-                            </div>
-                            <div className={styles.comparisonCol}>
-                              <div className={styles.poValue}>-</div>
-                              <div className={styles.invValue}>{invItem?.unitPrice ? `₹${invItem.unitPrice.toFixed(2)}` : '-'}</div>
-                            </div>
-                            <div className={styles.comparisonCol}>
-                              <div className={styles.poValue}>-</div>
-                              <div className={styles.invValue}>{invItem?.lineTotal ? `₹${invItem.lineTotal.toFixed(2)}` : '-'}</div>
+                              <div className={styles.poValue}>
+                                {(poItem as { unitPrice?: number | null })?.unitPrice != null
+                                  ? `₹${Number((poItem as { unitPrice?: number }).unitPrice).toFixed(2)}`
+                                  : '-'}
+                              </div>
+                              <div className={styles.invValue}>
+                                {invItem?.unitPrice != null ? `₹${Number(invItem.unitPrice).toFixed(2)}` : '-'}
+                              </div>
                             </div>
                             <div className={styles.comparisonCol}>
                               {isMatch && <span className={styles.matchBadge}><i className="pi pi-check"></i> Match</span>}
@@ -2032,11 +2027,11 @@ export default function InvoiceUpload() {
                     <div className={styles.comparisonLegend}>
                       <div className={styles.legendItem}>
                         <span className={styles.matchBadge}><i className="pi pi-check"></i> Match</span>
-                        <span>Items match between PO and Invoice</span>
+                        <span>Quantity and Rate/Price match between PO and Invoice</span>
                       </div>
                       <div className={styles.legendItem}>
                         <span className={styles.mismatchBadge}><i className="pi pi-exclamation-triangle"></i> Mismatch</span>
-                        <span>Items differ between PO and Invoice</span>
+                        <span>Quantity or Rate/Price differs between PO and Invoice</span>
                       </div>
                       <div className={styles.legendItem}>
                         <span className={styles.missingBadge}><i className="pi pi-minus"></i> Missing</span>
@@ -2152,7 +2147,7 @@ export default function InvoiceUpload() {
         >
           <div style={{ padding: '1rem' }}>
             <p style={{ marginBottom: '1rem', color: '#64748b' }}>
-              Upload a weight slip PDF to automatically extract the weight value.
+              Scanned Weight is filled only from the uploaded document. Upload a weight slip PDF to extract and fill the weight value for this line.
             </p>
             
             {extractingWeight ? (

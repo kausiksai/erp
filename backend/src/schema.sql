@@ -449,6 +449,8 @@ CREATE TABLE IF NOT EXISTS payment_approvals (
   rejected_at        TIMESTAMPTZ,
   payment_done_by    BIGINT      REFERENCES users(user_id),
   payment_done_at    TIMESTAMPTZ,
+  payment_type       TEXT,
+  payment_reference  TEXT,
   notes              TEXT,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -468,6 +470,8 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
   amount               DECIMAL(15, 2) NOT NULL,
   paid_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   paid_by              BIGINT      REFERENCES users(user_id),
+  payment_type         TEXT,
+  payment_reference    TEXT,
   notes                TEXT,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

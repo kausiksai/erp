@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { Button } from 'primereact/button'
@@ -51,6 +51,8 @@ function PurchaseOrderDetails() {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({})
   const [loadingLineItems, setLoadingLineItems] = useState<Set<number>>(new Set())
+  const [uploadingExcel, setUploadingExcel] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const searchLower = searchTerm.trim().toLowerCase()
   const filteredPOs = searchLower
@@ -90,6 +92,40 @@ function PurchaseOrderDetails() {
   useEffect(() => {
     fetchPurchaseOrders()
   }, [])
+
+  const handleExcelUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      toast.current?.show({ severity: 'warn', summary: 'Invalid file', detail: 'Please select an Excel file (.xlsx or .xls)', life: 5000 })
+      return
+    }
+    setUploadingExcel(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const token = localStorage.getItem('authToken')
+      const res = await fetch(apiUrl('purchase-orders/upload-excel'), {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Upload failed')
+      }
+      toast.current?.show({ severity: 'success', summary: 'Import done', detail: data.message, life: 5000 })
+      await fetchPurchaseOrders()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Upload failed'
+      toast.current?.show({ severity: 'error', summary: 'Import failed', detail: msg, life: 5000 })
+    } finally {
+      setUploadingExcel(false)
+    }
+  }, [])
+
+  const openExcelUpload = () => fileInputRef.current?.click()
 
   const dateBodyTemplate = (rowData: PurchaseOrder) => {
     if (!rowData.po_date) return '-'
@@ -272,6 +308,14 @@ function PurchaseOrderDetails() {
               <p className={styles.pageSubtitle}>View and manage all purchase orders</p>
             </div>
             <div className={styles.headerActions}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleExcelUpload}
+                style={{ display: 'none' }}
+              />
+              <Button label="Upload Excel" icon="pi pi-upload" className={styles.uploadExcelButton} onClick={openExcelUpload} loading={uploadingExcel} disabled={uploadingExcel} />
               <Button label="Refresh" icon="pi pi-refresh" className={styles.refreshButton} onClick={() => fetchPurchaseOrders()} />
               <PageNavigation />
             </div>

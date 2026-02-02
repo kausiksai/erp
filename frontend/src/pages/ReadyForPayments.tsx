@@ -6,12 +6,23 @@ import { Column } from 'primereact/column'
 import { Button } from 'primereact/button'
 import { InputNumber } from 'primereact/inputnumber'
 import { InputText } from 'primereact/inputtext'
+import { Dropdown } from 'primereact/dropdown'
 import { Dialog } from 'primereact/dialog'
-import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
 import styles from './ReadyForPayments.module.css'
+
+const PAYMENT_TYPES = [
+  { label: 'NEFT', value: 'NEFT' },
+  { label: 'RTGS', value: 'RTGS' },
+  { label: 'IMPS', value: 'IMPS' },
+  { label: 'Cheque', value: 'Cheque' },
+  { label: 'DD / Demand Draft', value: 'DD' },
+  { label: 'Cash', value: 'Cash' },
+  { label: 'UPI', value: 'UPI' },
+  { label: 'Other', value: 'Other' }
+]
 
 interface GrnItem {
   id: number
@@ -74,11 +85,19 @@ function ReadyForPayments() {
   const [loading, setLoading] = useState(true)
   const [markingId, setMarkingId] = useState<number | null>(null)
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
-  const [recordDialog, setRecordDialog] = useState<{ open: boolean; row: ReadyPayment | null; amount: number; notes: string }>({
+  const [recordDialog, setRecordDialog] = useState<{ open: boolean; row: ReadyPayment | null; amount: number; notes: string; paymentType: string; paymentReference: string }>({
     open: false,
     row: null,
     amount: 0,
-    notes: ''
+    notes: '',
+    paymentType: '',
+    paymentReference: ''
+  })
+  const [markDoneDialog, setMarkDoneDialog] = useState<{ open: boolean; row: ReadyPayment | null; paymentType: string; paymentReference: string }>({
+    open: false,
+    row: null,
+    paymentType: '',
+    paymentReference: ''
   })
   const [recording, setRecording] = useState(false)
 
@@ -110,15 +129,12 @@ function ReadyForPayments() {
     fetchReady()
   }, [])
 
-  const confirmMarkDone = (row: ReadyPayment) => {
-    confirmDialog({
-      message: 'Are you sure you want to send this payment to payments?',
-      header: 'Confirm send to payments',
-      icon: 'pi pi-question-circle',
-      acceptClassName: 'p-button-success',
-      accept: () => handleMarkDone(row.id),
-      reject: () => {}
-    })
+  const openMarkDoneDialog = (row: ReadyPayment) => {
+    setMarkDoneDialog({ open: true, row, paymentType: '', paymentReference: '' })
+  }
+
+  const closeMarkDoneDialog = () => {
+    if (!markingId) setMarkDoneDialog({ open: false, row: null, paymentType: '', paymentReference: '' })
   }
 
   const getTotalAmount = (row: ReadyPayment) => {
@@ -129,7 +145,7 @@ function ReadyForPayments() {
 
   const openRecordDialog = (row: ReadyPayment) => {
     const remaining = getRemainingAmount(row)
-    setRecordDialog({ open: true, row, amount: remaining, notes: '' })
+    setRecordDialog({ open: true, row, amount: remaining, notes: '', paymentType: '', paymentReference: '' })
   }
 
   const handleRecordPayment = async () => {
@@ -141,7 +157,9 @@ function ReadyForPayments() {
         body: JSON.stringify({
           paymentApprovalId: recordDialog.row.id,
           amount: recordDialog.amount,
-          notes: recordDialog.notes || undefined
+          notes: recordDialog.notes || undefined,
+          paymentType: recordDialog.paymentType || undefined,
+          paymentReference: recordDialog.paymentReference || undefined
         })
       })
       const data = await res.json().catch(() => ({}))
@@ -154,7 +172,7 @@ function ReadyForPayments() {
         detail: data.message,
         life: 4000
       })
-      setRecordDialog({ open: false, row: null, amount: 0, notes: '' })
+      setRecordDialog({ open: false, row: null, amount: 0, notes: '', paymentType: '', paymentReference: '' })
       await fetchReady()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Record payment failed'
@@ -164,15 +182,22 @@ function ReadyForPayments() {
     }
   }
 
-  const handleMarkDone = async (approvalId: number) => {
+  const handleMarkDone = async (approvalId: number, paymentType: string, paymentReference: string) => {
     setMarkingId(approvalId)
     try {
-      const res = await apiFetch(`payments/${approvalId}/mark-done`, { method: 'PATCH' })
+      const res = await apiFetch(`payments/${approvalId}/mark-done`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          paymentType: paymentType || undefined,
+          paymentReference: paymentReference || undefined
+        })
+      })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         throw new Error(err.message || 'Mark done failed')
       }
       toast.current?.show({ severity: 'success', summary: 'Payment done', detail: 'Payment marked as done.', life: 4000 })
+      setMarkDoneDialog({ open: false, row: null, paymentType: '', paymentReference: '' })
       await fetchReady()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Mark done failed'
@@ -338,7 +363,7 @@ function ReadyForPayments() {
             onClick={() => openRecordDialog(row)} disabled={!!markingId} />
           <Button label="Pay full & done" icon="pi pi-check-circle" severity="success" size="small" className={styles.actionButton}
             loading={markingId === row.id} disabled={markingId !== null}
-            onClick={() => confirmMarkDone(row)} />
+            onClick={() => openMarkDoneDialog(row)} />
         </div>
       </div>
     </div>
@@ -348,7 +373,6 @@ function ReadyForPayments() {
     <div className={styles.page}>
       <Header />
       <Toast ref={toast} />
-      <ConfirmDialog />
       <div className={styles.container}>
         <div className={styles.header}>
           <div>
@@ -403,7 +427,7 @@ function ReadyForPayments() {
                           onClick={() => openRecordDialog(r)} disabled={!!markingId} />
                         <Button label="Pay full" icon="pi pi-check" severity="success" size="small" className={styles.actionButton}
                           loading={markingId === r.id} disabled={markingId !== null}
-                          onClick={() => confirmMarkDone(r)} />
+                          onClick={() => openMarkDoneDialog(r)} />
                       </div>
                     )}
                     style={{ minWidth: '220px' }}
@@ -418,11 +442,11 @@ function ReadyForPayments() {
       <Dialog
         header="Record payment"
         visible={recordDialog.open}
-        onHide={() => !recording && setRecordDialog({ open: false, row: null, amount: 0, notes: '' })}
+        onHide={() => !recording && setRecordDialog({ open: false, row: null, amount: 0, notes: '', paymentType: '', paymentReference: '' })}
         style={{ width: '400px' }}
         footer={
           <div className={styles.dialogActions}>
-            <Button label="Cancel" severity="secondary" onClick={() => setRecordDialog({ open: false, row: null, amount: 0, notes: '' })} disabled={recording} />
+            <Button label="Cancel" severity="secondary" onClick={() => setRecordDialog({ open: false, row: null, amount: 0, notes: '', paymentType: '', paymentReference: '' })} disabled={recording} />
             <Button label="Record payment" icon="pi pi-wallet" onClick={handleRecordPayment} loading={recording} disabled={recording || !recordDialog.row || recordDialog.amount <= 0} />
           </div>
         }
@@ -446,8 +470,72 @@ function ReadyForPayments() {
               />
             </div>
             <div className={styles.dialogField}>
+              <label>Payment type</label>
+              <Dropdown
+                value={recordDialog.paymentType}
+                options={PAYMENT_TYPES}
+                onChange={(e) => setRecordDialog((prev) => ({ ...prev, paymentType: e.value ?? '' }))}
+                placeholder="Select payment type"
+                className={styles.fullWidth}
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <label>Transaction / Cheque / DD number</label>
+              <InputText
+                value={recordDialog.paymentReference}
+                onChange={(e) => setRecordDialog((prev) => ({ ...prev, paymentReference: e.target.value }))}
+                placeholder="e.g. UTR, cheque no., DD no."
+              />
+            </div>
+            <div className={styles.dialogField}>
               <label>Notes (optional)</label>
-              <InputText value={recordDialog.notes} onChange={(e) => setRecordDialog((prev) => ({ ...prev, notes: e.target.value }))} placeholder="e.g. Cheque no., ref" />
+              <InputText value={recordDialog.notes} onChange={(e) => setRecordDialog((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Additional notes" />
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      <Dialog
+        header="Payment done"
+        visible={markDoneDialog.open}
+        onHide={closeMarkDoneDialog}
+        style={{ width: '400px' }}
+        footer={
+          <div className={styles.dialogActions}>
+            <Button label="Cancel" severity="secondary" onClick={closeMarkDoneDialog} disabled={!!markingId} />
+            <Button
+              label="Mark payment done"
+              icon="pi pi-check-circle"
+              severity="success"
+              onClick={() => markDoneDialog.row && handleMarkDone(markDoneDialog.row.id, markDoneDialog.paymentType, markDoneDialog.paymentReference)}
+              loading={!!markingId}
+              disabled={!!markingId || !markDoneDialog.row}
+            />
+          </div>
+        }
+      >
+        {markDoneDialog.row && (
+          <div className={styles.dialogForm}>
+            <p className={styles.dialogSummary}>
+              Invoice: <strong>{markDoneDialog.row.invoice_number}</strong> · Remaining: ₹{getRemainingAmount(markDoneDialog.row).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </p>
+            <div className={styles.dialogField}>
+              <label>Payment type</label>
+              <Dropdown
+                value={markDoneDialog.paymentType}
+                options={PAYMENT_TYPES}
+                onChange={(e) => setMarkDoneDialog((prev) => ({ ...prev, paymentType: e.value ?? '' }))}
+                placeholder="Select payment type"
+                className={styles.fullWidth}
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <label>Transaction / Cheque / DD number</label>
+              <InputText
+                value={markDoneDialog.paymentReference}
+                onChange={(e) => setMarkDoneDialog((prev) => ({ ...prev, paymentReference: e.target.value }))}
+                placeholder="e.g. UTR, cheque no., DD no."
+              />
             </div>
           </div>
         )}

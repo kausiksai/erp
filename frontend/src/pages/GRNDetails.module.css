@@ -51,6 +51,21 @@
   line-height: 1.5;
 }
 
+.uploadExcelButton {
+  background-color: #059669;
+  border: none;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  border-radius: 8px;
+  color: white;
+  transition: all 0.2s ease;
+}
+
+.uploadExcelButton:hover:not(:disabled) {
+  background-color: #047857;
+}
+
 .refreshButton {
   background-color: #ea580c;
   border: none;

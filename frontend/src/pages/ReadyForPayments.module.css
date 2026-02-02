@@ -105,6 +105,10 @@
   color: #374151;
 }
 
+.fullWidth {
+  width: 100%;
+}
+
 .amountInput {
   width: 100%;
 }

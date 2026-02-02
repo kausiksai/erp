@@ -10,7 +10,7 @@ import PageNavigation from '../components/PageNavigation'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
 import styles from './SupplierReports.module.css'
 
-/** Supplier Report only: supplier counts, POs, activity. No total invoiced – see Financial Report. */
+/** Supplier Report: counts, activity, fastest delivering, best suppliers. */
 interface SupplierSummary {
   total_suppliers: number
   total_pos: number
@@ -28,9 +28,26 @@ interface SupplierRow {
   total_invoice_amount: string
 }
 
+interface FastestDeliveringRow {
+  supplier_id: number
+  supplier_name: string
+  avg_days_po_to_invoice: number | string
+  po_count: number
+  invoice_count: number
+}
+
+interface BestSupplierRow {
+  supplier_id: number
+  supplier_name: string
+  invoice_count: number
+  total_invoice_amount: string
+}
+
 interface SupplierReportData {
   summary: SupplierSummary
   suppliers: SupplierRow[]
+  fastest_delivering?: FastestDeliveringRow[]
+  best_suppliers?: BestSupplierRow[]
 }
 
 const formatCurrency = (val: string | number) => {
@@ -163,13 +180,13 @@ function SupplierReports() {
           <div className={styles.breadcrumb}>
             <span className={styles.breadcrumbItem}>Reports & Analytics</span>
             <span className={styles.breadcrumbSep}>/</span>
-            <span className={styles.breadcrumbCurrent}>Supplier Report</span>
+            <span className={styles.breadcrumbCurrent}>Supplier Reports</span>
           </div>
           <div className={styles.headerRow}>
             <div>
-              <h1 className={styles.title}>Supplier Report</h1>
+              <h1 className={styles.title}>Supplier Reports</h1>
               <p className={styles.subtitle}>
-                Supplier activity and engagement only. For total billed amount see Financial Report.
+                Supplier performance: fastest delivery, best suppliers by value, activity and engagement.
                 {lastUpdated && (
                   <span className={styles.meta}> · Last updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                 )}
@@ -274,6 +291,55 @@ function SupplierReports() {
                 </div>
               </div>
             </div>
+
+            {data.fastest_delivering && data.fastest_delivering.length > 0 && (
+              <section className="dts-section dts-section-accent" aria-label="Fastest delivering suppliers">
+                <h3 className="dts-sectionTitle">Fastest delivering suppliers</h3>
+                <p className="dts-sectionSubtitle">Suppliers with shortest average days from PO date to invoice date (who deliver fastest)</p>
+                <div className="dts-tableWrapper">
+                  <div className="dts-tableContainer">
+                    <DataTable
+                      value={data.fastest_delivering}
+                      size="small"
+                      stripedRows
+                      emptyMessage="No delivery data (need PO and invoice dates linked to suppliers)."
+                    >
+                      <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
+                      <Column
+                        field="avg_days_po_to_invoice"
+                        header="Avg days (PO → Invoice)"
+                        body={(row) => typeof row.avg_days_po_to_invoice === 'number' ? row.avg_days_po_to_invoice.toFixed(1) : row.avg_days_po_to_invoice}
+                        sortable
+                        style={{ minWidth: '140px' }}
+                      />
+                      <Column field="po_count" header="POs" style={{ minWidth: '80px' }} />
+                      <Column field="invoice_count" header="Invoices" style={{ minWidth: '90px' }} />
+                    </DataTable>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {data.best_suppliers && data.best_suppliers.length > 0 && (
+              <section className="dts-section dts-section-accent" aria-label="Best suppliers">
+                <h3 className="dts-sectionTitle">Best suppliers (by value)</h3>
+                <p className="dts-sectionSubtitle">Top suppliers by total invoice value – your best-performing suppliers</p>
+                <div className="dts-tableWrapper">
+                  <div className="dts-tableContainer">
+                    <DataTable
+                      value={data.best_suppliers}
+                      size="small"
+                      stripedRows
+                      emptyMessage="No supplier data."
+                    >
+                      <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
+                      <Column field="invoice_count" header="Invoices" style={{ minWidth: '90px' }} />
+                      <Column field="total_invoice_amount" header="Total invoiced (₹)" body={(row) => formatCurrency(row.total_invoice_amount)} sortable style={{ minWidth: '140px' }} />
+                    </DataTable>
+                  </div>
+                </div>
+              </section>
+            )}
 
             <section className="dts-section dts-section-accent">
               <h3 className="dts-sectionTitle">All suppliers – detail</h3>

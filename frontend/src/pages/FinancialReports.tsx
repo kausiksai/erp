@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Chart } from 'primereact/chart'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
@@ -41,6 +42,15 @@ interface ProcurementSummary {
   byStatus: { status: string; count: number }[]
 }
 
+interface DashboardData {
+  financial?: { total_invoices?: number; total_billed?: string; total_tax?: string; avg_invoice_amount?: string; tax_pct?: string; current_month_billed?: string; ytd_billed?: string }
+  invoiceByStatus?: Array<{ status: string; count: number; total_amount: string }>
+  payments?: { pending_approval_count?: number; ready_count?: number; payment_done_count?: number; pending_approval_amount?: string; ready_amount?: string; payment_done_amount?: string }
+  debitNote?: { count: number; total_amount: string }
+  recentPayments?: Array<{ invoice_number: string; supplier_name: string | null; amount: string; payment_done_at: string | null }>
+  topSuppliers?: Array<{ supplier_name: string; invoice_count: number; total_amount: string }>
+}
+
 const formatCurrency = (val: string | number) => {
   const n = typeof val === 'string' ? parseFloat(val) : val
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
@@ -60,19 +70,43 @@ const chartDefaults = {
   ticks: { font: { size: 11 }, color: '#64748b' }
 }
 
+const statusLabel = (s: string) => {
+  const labels: Record<string, string> = {
+    pending: 'Pending',
+    ready_for_payment: 'Ready for payment',
+    debit_note_approval: 'Debit note approval',
+    exception_approval: 'Exception approval',
+    validated: 'Validated',
+    waiting_for_validation: 'Waiting for validation',
+    waiting_for_re_validation: 'Waiting for re-validation',
+    approved: 'Approved',
+    rejected: 'Rejected',
+    completed: 'Completed'
+  }
+  return labels[s] || s.replace(/_/g, ' ')
+}
+
+const formatDate = (val: string | null) => {
+  if (!val) return '—'
+  return new Date(val).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 function FinancialReports() {
+  const navigate = useNavigate()
   const toast = useRef<Toast>(null)
   const [data, setData] = useState<FinancialReportData | null>(null)
   const [procurement, setProcurement] = useState<ProcurementSummary | null>(null)
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   const fetchReports = async () => {
     try {
       setLoading(true)
-      const [resFin, resProc] = await Promise.all([
+      const [resFin, resProc, resDash] = await Promise.all([
         apiFetch('reports/financial-summary'),
-        apiFetch('reports/procurement-summary')
+        apiFetch('reports/procurement-summary'),
+        apiFetch('reports/dashboard')
       ])
       if (!resFin.ok) {
         const msg = await getErrorMessageFromResponse(resFin, 'Failed to load financial report')
@@ -84,6 +118,8 @@ function FinancialReports() {
       }
       setData(await resFin.json())
       setProcurement(await resProc.json())
+      if (resDash.ok) setDashboard(await resDash.json())
+      else setDashboard(null)
       setLastUpdated(new Date())
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load report'
@@ -233,13 +269,13 @@ function FinancialReports() {
           <div className={styles.breadcrumb}>
             <span className={styles.breadcrumbItem}>Reports & Analytics</span>
             <span className={styles.breadcrumbSep}>/</span>
-            <span className={styles.breadcrumbCurrent}>Financial Report</span>
+            <span className={styles.breadcrumbCurrent}>Financial Reports</span>
           </div>
           <div className={styles.headerRow}>
             <div>
-              <h1 className={styles.title}>Financial Analytics</h1>
+              <h1 className={styles.title}>Financial Reports</h1>
               <p className={styles.subtitle}>
-                Billed amounts, tax, and procurement only. Invoice volume in Invoice Report; supplier detail in Supplier Report.
+                All financial reports: summary, payment pipeline, monthly trends, procurement, and payment actions.
                 {lastUpdated && (
                   <span className={styles.meta}> · Last updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                 )}
@@ -399,6 +435,116 @@ function FinancialReports() {
                   </div>
                 </div>
               </section>
+            )}
+
+            {dashboard && (
+              <>
+                {dashboard.invoiceByStatus && dashboard.invoiceByStatus.length > 0 && (
+                  <section className={styles.summaryBlock} aria-label="Invoice status breakdown">
+                    <h3 className={styles.blockTitle}>Invoice status breakdown</h3>
+                    <p className={styles.blockSubtitle}>Count and value by invoice status</p>
+                    <div className={styles.tableWrap}>
+                      <DataTable value={dashboard.invoiceByStatus} size="small" stripedRows emptyMessage="No invoice data">
+                        <Column field="status" header="Status" body={(row) => statusLabel(row.status)} style={{ minWidth: '160px' }} />
+                        <Column field="count" header="Count" style={{ minWidth: '80px' }} />
+                        <Column field="total_amount" header="Amount (₹)" body={(row) => formatCurrency(row.total_amount)} style={{ minWidth: '140px' }} />
+                      </DataTable>
+                    </div>
+                  </section>
+                )}
+
+                {dashboard.payments && (
+                  <section className={styles.summaryBlock} aria-label="Payment pipeline">
+                    <h3 className={styles.blockTitle}>Payment pipeline</h3>
+                    <p className={styles.blockSubtitle}>Approval and disbursement status with amounts</p>
+                    <div className={styles.kpiSectionThree}>
+                      <div className={styles.kpiCard}>
+                        <div className={styles.kpiIconWrap} style={{ background: 'rgba(234, 179, 8, 0.12)', color: '#ca8a04' }}><i className="pi pi-clock" /></div>
+                        <div className={styles.kpiContent}>
+                          <span className={styles.kpiLabel}>Awaiting approval</span>
+                          <span className={styles.kpiValue}>{Number(dashboard.payments?.pending_approval_count ?? 0).toLocaleString('en-IN')}</span>
+                          {dashboard.payments?.pending_approval_amount != null && parseFloat(String(dashboard.payments.pending_approval_amount)) > 0 && (
+                            <span className={styles.kpiSub}>{formatCurrency(dashboard.payments.pending_approval_amount)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className={styles.kpiCard}>
+                        <div className={styles.kpiIconWrap} style={{ background: 'rgba(13, 148, 136, 0.12)', color: '#0d9488' }}><i className="pi pi-check-circle" /></div>
+                        <div className={styles.kpiContent}>
+                          <span className={styles.kpiLabel}>Ready for payment</span>
+                          <span className={styles.kpiValue}>{Number(dashboard.payments?.ready_count ?? 0).toLocaleString('en-IN')}</span>
+                          {dashboard.payments?.ready_amount != null && parseFloat(String(dashboard.payments.ready_amount)) > 0 && (
+                            <span className={styles.kpiSub}>{formatCurrency(dashboard.payments.ready_amount)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className={styles.kpiCard}>
+                        <div className={styles.kpiIconWrap} style={{ background: 'rgba(22, 163, 74, 0.12)', color: '#16a34a' }}><i className="pi pi-money-bill" /></div>
+                        <div className={styles.kpiContent}>
+                          <span className={styles.kpiLabel}>Payment completed</span>
+                          <span className={styles.kpiValue}>{Number(dashboard.payments?.payment_done_count ?? 0).toLocaleString('en-IN')}</span>
+                          {dashboard.payments?.payment_done_amount != null && parseFloat(String(dashboard.payments.payment_done_amount)) > 0 && (
+                            <span className={styles.kpiSub}>{formatCurrency(dashboard.payments.payment_done_amount)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {dashboard.debitNote && Number(dashboard.debitNote.count) > 0 && (
+                  <section className={styles.summaryBlock} aria-label="Debit note">
+                    <h3 className={styles.blockTitle}>Debit note approval</h3>
+                    <p className={styles.blockSubtitle}>Invoices awaiting debit note approval (quantity mismatch)</p>
+                    <div className={styles.debitNoteRow}>
+                      <span className={styles.debitNoteCount}>{dashboard.debitNote.count} invoice(s)</span>
+                      <span className={styles.debitNoteAmount}>{formatCurrency(dashboard.debitNote.total_amount)}</span>
+                    </div>
+                    <Button label="View debit note list" icon="pi pi-list" size="small" outlined onClick={() => navigate('/purchase-orders/incomplete')} className={styles.debitNoteBtn} />
+                  </section>
+                )}
+
+                <div className={styles.twoCol}>
+                  {dashboard.topSuppliers && dashboard.topSuppliers.length > 0 && (
+                    <section className={styles.summaryBlock} aria-label="Top suppliers">
+                      <h3 className={styles.blockTitle}>Top suppliers by billed amount</h3>
+                      <p className={styles.blockSubtitle}>Top 10 by total invoice value</p>
+                      <div className={styles.tableWrap}>
+                        <DataTable value={dashboard.topSuppliers} size="small" stripedRows emptyMessage="No supplier data">
+                          <Column field="supplier_name" header="Supplier" style={{ minWidth: '180px' }} />
+                          <Column field="invoice_count" header="Invoices" style={{ minWidth: '80px' }} />
+                          <Column field="total_amount" header="Total (₹)" body={(row) => formatCurrency(row.total_amount)} style={{ minWidth: '120px' }} />
+                        </DataTable>
+                      </div>
+                    </section>
+                  )}
+                  {dashboard.recentPayments && dashboard.recentPayments.length > 0 && (
+                    <section className={styles.summaryBlock} aria-label="Recent payments">
+                      <h3 className={styles.blockTitle}>Recent payments</h3>
+                      <p className={styles.blockSubtitle}>Last 10 completed payments</p>
+                      <div className={styles.tableWrap}>
+                        <DataTable value={dashboard.recentPayments} size="small" stripedRows emptyMessage="No recent payments">
+                          <Column field="invoice_number" header="Invoice" style={{ minWidth: '120px' }} />
+                          <Column field="supplier_name" header="Supplier" body={(row) => row.supplier_name || '—'} style={{ minWidth: '140px' }} />
+                          <Column field="amount" header="Amount (₹)" body={(row) => formatCurrency(row.amount)} style={{ minWidth: '110px' }} />
+                          <Column field="payment_done_at" header="Paid on" body={(row) => formatDate(row.payment_done_at)} style={{ minWidth: '110px' }} />
+                        </DataTable>
+                      </div>
+                      <Button label="View full payment history" icon="pi pi-history" size="small" outlined onClick={() => navigate('/payments/history')} className={styles.historyBtn} />
+                    </section>
+                  )}
+                </div>
+
+                <section className={styles.summaryBlock} aria-label="Finance actions">
+                  <h3 className={styles.blockTitle}>Finance actions</h3>
+                  <p className={styles.blockSubtitle}>Payment workflow and quick links</p>
+                  <div className={styles.quickLinksGrid}>
+                    <Button label="Approve payments" icon="pi pi-check-square" className={styles.quickLink} onClick={() => navigate('/payments/approve')} />
+                    <Button label="Ready for payment" icon="pi pi-money-bill" className={styles.quickLink} onClick={() => navigate('/payments/ready')} />
+                    <Button label="Payment history" icon="pi pi-history" className={styles.quickLink} onClick={() => navigate('/payments/history')} />
+                  </div>
+                </section>
+              </>
             )}
           </>
         )}

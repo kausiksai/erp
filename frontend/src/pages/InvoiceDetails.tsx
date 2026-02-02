@@ -100,6 +100,26 @@ function InvoiceDetails() {
     thisInvQty?: number
     poQty?: number
     grnQty?: number
+    errors?: string[]
+    warnings?: string[]
+    details?: {
+      header?: { invoice?: unknown; po?: unknown; supplierMatch?: boolean; errors?: string[]; warnings?: string[] }
+      lines?: Array<{
+        index: number
+        itemName?: string
+        invQty?: number
+        poQty?: number
+        invRate?: number
+        poRate?: number
+        quantityMatch?: boolean
+        rateMatch?: boolean
+        errors?: string[]
+        warnings?: string[]
+      }>
+      totals?: { thisInvQty?: number; poQty?: number; grnQty?: number; thisInvAmount?: number; errors?: string[]; warnings?: string[] }
+      grn?: { grnQty?: number; invLteGrn?: boolean; errors?: string[] }
+      asn?: { asnCount?: number; warnings?: string[] }
+    }
   } | null>(null)
   const [resolvingValidation, setResolvingValidation] = useState<boolean>(false)
   const [validationAttemptFailed, setValidationAttemptFailed] = useState<boolean>(false)
@@ -182,7 +202,10 @@ function InvoiceDetails() {
           validationFailureReason: data.validationFailureReason || data.reason,
           thisInvQty: data.thisInvQty,
           poQty: data.poQty,
-          grnQty: data.grnQty
+          grnQty: data.grnQty,
+          errors: data.errors,
+          warnings: data.warnings,
+          details: data.details
         })
         setValidating(false)
         return
@@ -420,7 +443,69 @@ function InvoiceDetails() {
         }
       >
         <p className={styles.validationDialogMessage}>{mismatchReason}{mismatchQty}</p>
-        <p className={styles.validationDialogHint}>
+        {validationMismatchData?.errors && validationMismatchData.errors.length > 0 && (
+          <div style={{ marginTop: '12px' }}>
+            <strong>Validation errors:</strong>
+            <ul style={{ margin: '6px 0 0 0', paddingLeft: '20px' }}>
+              {validationMismatchData.errors.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {validationMismatchData?.warnings && validationMismatchData.warnings.length > 0 && (
+          <div style={{ marginTop: '8px', color: '#b45309' }}>
+            <strong>Warnings:</strong>
+            <ul style={{ margin: '6px 0 0 0', paddingLeft: '20px' }}>
+              {validationMismatchData.warnings.slice(0, 10).map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+              {validationMismatchData.warnings.length > 10 && <li>… and {validationMismatchData.warnings.length - 10} more</li>}
+            </ul>
+          </div>
+        )}
+        {validationMismatchData?.details?.lines && validationMismatchData.details.lines.length > 0 && (
+          <div style={{ marginTop: '12px', overflowX: 'auto' }}>
+            <strong>Line-level check:</strong>
+            <table style={{ width: '100%', marginTop: '6px', fontSize: '12px', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                  <th style={{ textAlign: 'left', padding: '4px 8px' }}>#</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px' }}>Item</th>
+                  <th style={{ textAlign: 'right', padding: '4px 8px' }}>Inv Qty</th>
+                  <th style={{ textAlign: 'right', padding: '4px 8px' }}>PO Qty</th>
+                  <th style={{ textAlign: 'right', padding: '4px 8px' }}>Inv Rate</th>
+                  <th style={{ textAlign: 'right', padding: '4px 8px' }}>PO Rate</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {validationMismatchData.details.lines.map((line) => (
+                  <tr key={line.index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '4px 8px' }}>{line.index}</td>
+                    <td style={{ padding: '4px 8px', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }} title={line.itemName}>{line.itemName || '-'}</td>
+                    <td style={{ textAlign: 'right', padding: '4px 8px' }}>{line.invQty != null ? line.invQty : '-'}</td>
+                    <td style={{ textAlign: 'right', padding: '4px 8px' }}>{line.poQty != null ? line.poQty : '-'}</td>
+                    <td style={{ textAlign: 'right', padding: '4px 8px' }}>{line.invRate != null ? line.invRate : '-'}</td>
+                    <td style={{ textAlign: 'right', padding: '4px 8px' }}>{line.poRate != null ? line.poRate : '-'}</td>
+                    <td style={{ padding: '4px 8px' }}>
+                      {line.errors && line.errors.length > 0 ? <span style={{ color: '#dc2626' }}>Error</span> : line.quantityMatch && line.rateMatch !== false ? <span style={{ color: '#16a34a' }}>OK</span> : line.warnings && line.warnings.length > 0 ? <span style={{ color: '#b45309' }}>Warning</span> : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {validationMismatchData?.details?.header && (
+          <div style={{ marginTop: '12px', fontSize: '12px' }}>
+            <strong>Header:</strong> Supplier match: {validationMismatchData.details.header.supplierMatch === true ? 'Yes' : validationMismatchData.details.header.supplierMatch === false ? 'No' : '—'}
+            {validationMismatchData.details.totals != null && (
+              <> · Totals: Invoice qty {validationMismatchData.details.totals.thisInvQty ?? '—'}, PO qty {validationMismatchData.details.totals.poQty ?? '—'}, GRN qty {validationMismatchData.details.grn?.grnQty ?? '—'}</>
+            )}
+          </div>
+        )}
+        <p className={styles.validationDialogHint} style={{ marginTop: '12px' }}>
           Choose &quot;Confirm and proceed for payment&quot; to move this invoice to Approve Payments, or &quot;Send to debit note&quot; to handle the shortfall in Incomplete POs.
         </p>
       </Dialog>
@@ -646,15 +731,16 @@ function InvoiceDetails() {
               />
               <Column
                 field="billed_qty"
-                header="Quantity"
-                style={{ minWidth: '100px', textAlign: 'right' }}
-                body={(rowData: InvoiceLineItem) => quantityBodyTemplate(rowData.billed_qty)}
-              />
-              <Column
-                field="weight"
-                header="Weight"
-                style={{ minWidth: '100px', textAlign: 'right' }}
-                body={(rowData: InvoiceLineItem) => rowData.weight != null ? quantityBodyTemplate(rowData.weight) : '-'}
+                header="Quantity/Weight"
+                style={{ minWidth: '120px', textAlign: 'right' }}
+                body={(rowData: InvoiceLineItem) => {
+                  const qty = rowData.billed_qty != null ? quantityBodyTemplate(rowData.billed_qty) : null
+                  const wt = rowData.weight != null ? `${quantityBodyTemplate(rowData.weight)} kg` : null
+                  if (qty && wt) return <span>{qty} / {wt}</span>
+                  if (qty) return <span>{qty}</span>
+                  if (wt) return <span>{wt}</span>
+                  return '-'
+                }}
               />
               <Column
                 field="count"
