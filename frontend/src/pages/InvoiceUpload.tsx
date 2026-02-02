@@ -1860,7 +1860,7 @@ export default function InvoiceUpload() {
             <Button
               label="Save Invoice"
               icon="pi pi-save"
-              className={styles.saveButton}
+              className={`btnPrimary ${styles.saveButton}`}
               loading={loading}
               onClick={handleSave}
               disabled={!pdfFile || loading || !validationConfirmed}
@@ -1887,7 +1887,7 @@ export default function InvoiceUpload() {
                 icon="pi pi-check"
                 onClick={handleValidationConfirm}
                 disabled={!validationResults?.overall?.valid}
-                className="p-button-success"
+                className="btnPrimary"
               />
             </div>
           }

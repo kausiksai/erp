@@ -327,7 +327,7 @@ function PurchaseOrderDetails() {
 
       <div className="dts-section dts-section-accent">
         <h2 className="dts-sectionTitle">Purchase orders</h2>
-        <p className="dts-sectionSubtitle">View and manage all purchase orders. Expand a row to see line items.</p>
+        <p className="dts-sectionSubtitle">Expand a row for line items.</p>
         {!loading && (
           <div className={styles.toolbar}>
             <span className="p-input-icon-left">

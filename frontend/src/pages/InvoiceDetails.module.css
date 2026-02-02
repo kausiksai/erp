@@ -40,6 +40,10 @@
   flex-wrap: wrap;
 }
 
+.printButton {
+  padding: 0.5rem 1rem;
+}
+
 .validateButton {
   padding: 0.5rem 1rem;
 }

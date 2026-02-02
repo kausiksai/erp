@@ -223,15 +223,11 @@ function OwnerDetails() {
         </div>
 
         {!hasOwner ? (
-          <div className={styles.emptyState}>
-            <div className={styles.emptyIcon}>
-              <i className="pi pi-info-circle"></i>
-            </div>
-            <h2 className={styles.emptyTitle}>No Owner Details Found</h2>
-            <p className={styles.emptyDescription}>
-              Owner details have not been set up yet. Please contact your system administrator.
-            </p>
-          </div>
+          <EmptyState
+            icon="pi pi-info-circle"
+            title="No owner details"
+            description="Owner details have not been set up yet. Contact your system administrator."
+          />
         ) : (
           <div className={styles.sectionsContainer}>
             {/* Top Row: Basic Information and Bank Details */}
@@ -267,6 +263,7 @@ function OwnerDetails() {
                       onClick={() => handleSave('basic')}
                       loading={saving === 'basic'}
                       size="small"
+                      className="btnPrimary"
                     />
                   </div>
                 )}
@@ -469,6 +466,7 @@ function OwnerDetails() {
                       onClick={() => handleSave('address')}
                       loading={saving === 'address'}
                       size="small"
+                      className="btnPrimary"
                     />
                   </div>
                 )}
@@ -563,6 +561,7 @@ function OwnerDetails() {
                       onClick={() => handleSave('contact')}
                       loading={saving === 'contact'}
                       size="small"
+                      className="btnPrimary"
                     />
                   </div>
                 )}

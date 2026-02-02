@@ -291,7 +291,7 @@ function SupplierRegistration() {
   const dialogFooter = (
     <div className={styles.dialogFooter}>
       <Button label="Cancel" icon="pi pi-times" outlined onClick={() => setShowDialog(false)} disabled={saving} />
-      <Button label={isEditMode ? 'Update' : 'Add'} icon="pi pi-check" onClick={handleSave} loading={saving} disabled={saving} />
+      <Button label={isEditMode ? 'Update' : 'Add'} icon="pi pi-check" className="btnPrimary" onClick={handleSave} loading={saving} disabled={saving} />
     </div>
   )
 
@@ -323,7 +323,7 @@ function SupplierRegistration() {
             <Button
               label="Add Supplier"
               icon="pi pi-plus"
-              className={styles.addButton}
+              className={`btnPrimary ${styles.addButton}`}
               onClick={handleAdd}
             />
           </div>
@@ -331,7 +331,7 @@ function SupplierRegistration() {
 
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">Suppliers</h2>
-          <p className="dts-sectionSubtitle">Manage supplier records. Add, edit, or remove suppliers.</p>
+          <p className="dts-sectionSubtitle">Add, edit, or remove suppliers.</p>
           <div className="dts-tableWrapper">
             <div className="dts-tableContainer">
               <DataTable
@@ -340,7 +340,7 @@ function SupplierRegistration() {
                 paginator
                 rows={10}
                 rowsPerPageOptions={[5, 10, 25, 50]}
-                emptyMessage="No suppliers found. Add one to get started."
+                emptyMessage="No suppliers found"
                 stripedRows
               >
                 <Column field="supplier_name" header="Supplier Name" sortable style={{ minWidth: '180px' }} />

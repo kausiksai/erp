@@ -405,9 +405,7 @@ function ReadyForPayments() {
 
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">Ready for payment</h2>
-          <p className="dts-sectionSubtitle">
-            Approved payments with full PO, supplier, invoice, GRN, ASN and banking details. Mark as done when payment is completed.
-          </p>
+          <p className="dts-sectionSubtitle">Mark as done when payment is completed.</p>
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />

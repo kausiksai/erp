@@ -16,8 +16,9 @@
 }
 
 :root {
-  /* Typography: professional, readable */
-  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Professional font stack: Source Sans 3 (UI) + Inter fallback */
+  --app-font-sans: 'Source Sans 3', 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--app-font-sans);
   line-height: 1.6;
   font-weight: 400;
   color-scheme: light;
@@ -92,6 +93,14 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
   letter-spacing: -0.01em;
+  font-family: var(--app-font-sans);
+}
+
+/* Professional font on all text and controls (PrimeReact overrides need !important) */
+.p-button, .p-inputtext, .p-datatable, .p-dialog, .p-dropdown, .p-multiselect,
+.p-multiselect-label, input, button, select, textarea, .p-tag, .p-toast,
+.p-datatable-thead th, .p-datatable-tbody td {
+  font-family: var(--app-font-sans) !important;
 }
 
 /* Responsive: touch targets (min 44x44px for mobile) */
@@ -245,21 +254,23 @@ body {
   padding: 1.5rem;
 }
 
-/* ========== Optional: shared page header (e.g. .pageHeaderWrap + .pageHeaderTitle + .pageHeaderSubtitle) ========== */
+/* ========== Page title/subtitle: unified scale (professional typography) ========== */
 .pageHeaderWrap .pageHeaderTitle {
-  font-size: 1.75rem;
+  font-size: var(--app-text-page-title, 1.75rem);
   font-weight: 700;
   color: #0f172a;
   margin: 0 0 0.35rem 0;
   letter-spacing: -0.03em;
   line-height: 1.25;
+  font-family: var(--app-font-sans);
 }
 
 .pageHeaderWrap .pageHeaderSubtitle {
-  font-size: 0.9375rem;
+  font-size: var(--app-text-body, 0.9375rem);
   color: #64748b;
   margin: 0;
   line-height: 1.5;
+  font-family: var(--app-font-sans);
 }
 
 /* Loading containers: consistent, elegant */
@@ -457,7 +468,9 @@ body {
   [class*="PageNavigation"],
   [class*="navigationButtons"],
   .p-paginator,
-  button.p-button {
+  button.p-button,
+  [class*="printButton"],
+  button[class*="Print"] {
     display: none !important;
   }
 

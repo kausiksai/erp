@@ -379,6 +379,7 @@ function PaymentHistory() {
             <p className={styles.subtitle}>Completed payments and transaction details</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <Button label="Print" icon="pi pi-print" onClick={() => window.print()} outlined />
             <Button label="Export CSV" icon="pi pi-download" className="exportCsvButton" onClick={handleExportCsv} disabled={!list.length} outlined />
             <PageNavigation onRefresh={fetchHistory} refreshLoading={loading} />
           </div>
@@ -386,9 +387,7 @@ function PaymentHistory() {
 
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">Payment history</h2>
-          <p className="dts-sectionSubtitle">
-            All payments marked as done. Expand a row to see supplier, banking, PO, GRN, and ASN details.
-          </p>
+          <p className="dts-sectionSubtitle">Expand a row for details.</p>
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />

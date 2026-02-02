@@ -384,7 +384,7 @@ function FinancialReports() {
               <section className={styles.procurementSection}>
                 <div className={styles.procurementHead}>
                   <h3 className={styles.sectionTitle}>Procurement overview</h3>
-                  <span className={styles.sectionSubtitle}>POs, GRN, ASN, and invoice counts; incomplete POs requiring action</span>
+                  <span className={styles.sectionSubtitle}>POs, GRN, ASN, and invoice counts</span>
                 </div>
                 <div className={styles.procurementGrid}>
                   <div className={styles.procCard}>
@@ -443,7 +443,7 @@ function FinancialReports() {
                     <h3 className={styles.blockTitle}>Invoice status breakdown</h3>
                     <p className={styles.blockSubtitle}>Count and value by invoice status</p>
                     <div className={styles.tableWrap}>
-                      <DataTable value={dashboard.invoiceByStatus} size="small" stripedRows emptyMessage="No invoice data">
+                      <DataTable value={dashboard.invoiceByStatus} size="small" stripedRows emptyMessage="No data">
                         <Column field="status" header="Status" body={(row) => statusLabel(row.status)} style={{ minWidth: '160px' }} />
                         <Column field="count" header="Count" style={{ minWidth: '80px' }} />
                         <Column field="total_amount" header="Amount (₹)" body={(row) => formatCurrency(row.total_amount)} style={{ minWidth: '140px' }} />
@@ -522,7 +522,7 @@ function FinancialReports() {
                       <h3 className={styles.blockTitle}>Recent payments</h3>
                       <p className={styles.blockSubtitle}>Last 10 completed payments</p>
                       <div className={styles.tableWrap}>
-                        <DataTable value={dashboard.recentPayments} size="small" stripedRows emptyMessage="No recent payments">
+                        <DataTable value={dashboard.recentPayments} size="small" stripedRows emptyMessage="No data">
                           <Column field="invoice_number" header="Invoice" style={{ minWidth: '120px' }} />
                           <Column field="supplier_name" header="Supplier" body={(row) => row.supplier_name || '—'} style={{ minWidth: '140px' }} />
                           <Column field="amount" header="Amount (₹)" body={(row) => formatCurrency(row.amount)} style={{ minWidth: '110px' }} />

@@ -84,6 +84,12 @@
   transform: translateX(2px);
 }
 
+.logoSection:focus-visible {
+  outline: 2px solid var(--app-primary, #2563eb);
+  outline-offset: 2px;
+  border-radius: var(--app-radius-sm, 8px);
+}
+
 .logoWrapper {
   position: relative;
   display: flex;
@@ -192,6 +198,7 @@
 }
 
 .companyName {
+  font-family: var(--app-font-sans);
   font-size: 1.375rem;
   font-weight: 700;
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
@@ -226,6 +233,7 @@
 }
 
 .companyTagline {
+  font-family: var(--app-font-sans);
   display: flex;
   align-items: center;
   gap: 0.5rem;

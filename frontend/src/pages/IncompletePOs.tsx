@@ -418,9 +418,7 @@ function IncompletePOs() {
         {/* Debit note approval section - always show so user knows where to find debit note POs */}
         <div className={`dts-section dts-section-accent ${styles.debitNoteSection}`}>
           <h2 className="dts-sectionTitle">Debit note approval</h2>
-          <p className="dts-sectionSubtitle">
-            Invoices in debit note status (quantity mismatch or GRN &lt; invoice). Upload debit note PDF, enter amount to pay, and approve to move to Ready for Payment.
-          </p>
+          <p className="dts-sectionSubtitle">Upload debit note, enter amount, and approve.</p>
           {debitNoteInvoices.length === 0 ? (
             <div className="dts-emptySection">
               <p>No invoices awaiting debit note approval. Invoices that fail validation (e.g. GRN qty &lt; invoice qty) appear here after you click Validate on Invoice Details.</p>
@@ -619,9 +617,7 @@ function IncompletePOs() {
         {/* Same section/table CSS as Exception invoices block */}
         <div className={`dts-section dts-section-accent ${styles.debitNoteSection}`}>
           <h2 className="dts-sectionTitle">Incomplete purchase orders</h2>
-          <p className="dts-sectionSubtitle">
-            Open POs missing Invoice, GRN, or ASN. PO remains open until all invoices are in the system.
-          </p>
+          <p className="dts-sectionSubtitle">Open POs missing invoice, GRN, or ASN.</p>
           <div className="dts-tableWrapper">
             <div className="dts-tableContainer">
               <DataTable

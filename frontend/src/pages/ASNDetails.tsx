@@ -223,7 +223,7 @@ function ASNDetails() {
 
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">ASN records</h2>
-          <p className="dts-sectionSubtitle">View all Advanced Shipping Notices (loaded from Excel import). Expand a row for more details.</p>
+          <p className="dts-sectionSubtitle">Expand a row for details.</p>
           {!loading && (
             <div className={styles.toolbar}>
               <span className="p-input-icon-left">

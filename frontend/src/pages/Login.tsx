@@ -172,7 +172,7 @@ function Login() {
                 type="submit"
                 label={loading ? 'Signing in...' : 'Sign In'}
                 icon={loading ? 'pi pi-spin pi-spinner' : 'pi pi-sign-in'}
-                className={styles.submitButton}
+                className={`btnPrimary ${styles.submitButton}`}
                 disabled={loading || !username || !password}
                 loading={loading}
               />

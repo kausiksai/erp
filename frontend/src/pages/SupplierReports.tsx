@@ -316,14 +316,14 @@ function SupplierReports() {
             {data.fastest_delivering && data.fastest_delivering.length > 0 && (
               <section className="dts-section dts-section-accent" aria-label="Fastest delivering suppliers">
                 <h3 className="dts-sectionTitle">Fastest delivering suppliers</h3>
-                <p className="dts-sectionSubtitle">Suppliers with shortest average days from PO date to invoice date (who deliver fastest)</p>
+                <p className="dts-sectionSubtitle">Fastest delivery by supplier</p>
                 <div className="dts-tableWrapper">
                   <div className="dts-tableContainer">
                     <DataTable
                       value={data.fastest_delivering}
                       size="small"
                       stripedRows
-                      emptyMessage="No delivery data (need PO and invoice dates linked to suppliers)."
+                      emptyMessage="No delivery data"
                     >
                       <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
                       <Column
@@ -351,7 +351,7 @@ function SupplierReports() {
                       value={data.best_suppliers}
                       size="small"
                       stripedRows
-                      emptyMessage="No supplier data."
+                      emptyMessage="No supplier data"
                     >
                       <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '180px' }} />
                       <Column field="invoice_count" header="Invoices" style={{ minWidth: '90px' }} />
@@ -364,7 +364,7 @@ function SupplierReports() {
 
             <section className="dts-section dts-section-accent">
               <h3 className="dts-sectionTitle">All suppliers – detail</h3>
-              <p className="dts-sectionSubtitle">PO count, invoice count, and total invoiced per supplier (amounts here are per-supplier only; grand total is in Financial Report)</p>
+              <p className="dts-sectionSubtitle">PO count, invoice count, and total per supplier</p>
               <div className="dts-tableWrapper">
                 <div className="dts-tableContainer">
                   <DataTable
@@ -374,7 +374,7 @@ function SupplierReports() {
                     rowsPerPageOptions={[5, 10, 25, 50]}
                     size="small"
                     stripedRows
-                    emptyMessage="No suppliers found."
+                    emptyMessage="No suppliers found"
                     paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink CurrentPageReport RowsPerPageDropdown"
                     currentPageReportTemplate="Showing {first} to {last} of {totalRecords} suppliers"
                   >

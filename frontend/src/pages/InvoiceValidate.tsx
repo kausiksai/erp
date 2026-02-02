@@ -266,7 +266,7 @@ function InvoiceValidate() {
 
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">Invoices</h2>
-          <p className="dts-sectionSubtitle">Select an invoice to validate and match with PO / GRN.</p>
+          <p className="dts-sectionSubtitle">Select an invoice to validate.</p>
           {loading ? (
             <div className={styles.loadingContainer}>
               <ProgressSpinner />

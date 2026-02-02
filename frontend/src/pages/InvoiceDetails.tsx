@@ -548,6 +548,7 @@ function InvoiceDetails() {
                   />
                 ) : null
               })()}
+              <Button label="Print" icon="pi pi-print" onClick={() => window.print()} className={styles.printButton} outlined />
               <PageNavigation backTo="/invoices/validate" onRefresh={() => id && fetchInvoiceDetails(parseInt(id))} refreshLoading={loading} />
             </div>
           </div>

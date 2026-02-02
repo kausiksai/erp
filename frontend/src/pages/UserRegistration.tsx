@@ -585,7 +585,7 @@ function UserRegistration() {
               label="Create New User"
               icon="pi pi-plus"
               onClick={handleCreate}
-              className={styles.createButton}
+              className={`btnPrimary ${styles.createButton}`}
             />
           </div>
         </div>
@@ -862,6 +862,7 @@ function UserRegistration() {
               label={isEditMode ? 'Update' : 'Create'}
               icon={isEditMode ? 'pi pi-check' : 'pi pi-plus'}
               onClick={handleSaveUser}
+              className="btnPrimary"
             />
           </div>
         </div>
@@ -936,6 +937,7 @@ function UserRegistration() {
                 label="Save Access"
                 icon="pi pi-check"
                 onClick={handleSaveMenuAccess}
+                className="btnPrimary"
               />
             </div>
           </div>

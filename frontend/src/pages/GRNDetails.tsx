@@ -285,7 +285,7 @@ function GRNDetails() {
 
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">GRN records</h2>
-          <p className="dts-sectionSubtitle">View all Goods Receipt Notes (loaded from Excel import). Expand a row for more details.</p>
+          <p className="dts-sectionSubtitle">Expand a row for details.</p>
           {!loading && (
             <div className={styles.toolbar}>
               <span className="p-input-icon-left">

@@ -586,9 +586,7 @@ function ApprovePayments() {
 
         <div className="dts-section dts-section-accent">
           <h2 className="dts-sectionTitle">Pending approvals</h2>
-          <p className="dts-sectionSubtitle">
-            Review validated invoices with PO, supplier, GRN, ASN and banking details. Approve, modify banking and approve, or reject. Select multiple rows to approve or reject in bulk.
-          </p>
+          <p className="dts-sectionSubtitle">Approve, modify banking, or reject. Select multiple for bulk actions.</p>
           {selected.length > 0 && (
             <div className={styles.bulkToolbar}>
               <span className={styles.bulkLabel}>{selected.length} selected</span>
