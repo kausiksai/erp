@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import rateLimit from 'express-rate-limit'
 import { pool } from './db.js'
 import multer from 'multer'
 import { extractWithQwen } from './qwenService.js'
@@ -42,7 +43,37 @@ import { importPoExcel, importGrnExcel, importAsnExcel } from './excelImport.js'
 
 const app = express()
 
-app.use(cors())
+// CORS: in production set FRONTEND_ORIGIN (e.g. https://app.example.com)
+const corsOrigin = process.env.FRONTEND_ORIGIN || true
+app.use(cors({ origin: corsOrigin }))
+
+// Structured request logging (method, path, status, duration, timestamp)
+app.use((req, res, next) => {
+  const start = Date.now()
+  res.on('finish', () => {
+    const duration = Date.now() - start
+    if (process.env.NODE_ENV === 'production') {
+      console.log(JSON.stringify({
+        ts: new Date().toISOString(),
+        method: req.method,
+        path: req.originalUrl || req.url,
+        status: res.statusCode,
+        durationMs: duration
+      }))
+    } else {
+      console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`)
+    }
+  })
+  next()
+})
+
+// General API rate limit (200 requests per 15 min per IP)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 200,
+  message: { error: 'too_many_requests', message: 'Too many requests, please try again later.' }
+})
+
 const jsonLimit = process.env.JSON_LIMIT || '25mb'
 app.use(express.json({ limit: jsonLimit }))
 app.use(express.urlencoded({ limit: jsonLimit, extended: true }))
@@ -77,22 +108,19 @@ const uploadExcel = multer({
   }
 })
 
-// Health check (no prefix needed)
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' })
-})
-
-app.get('/db-health', async (req, res) => {
+// Health check: includes DB connectivity (no prefix)
+app.get('/health', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT 1 as ok')
-    res.json({ status: 'ok', db: rows[0].ok })
+    await pool.query('SELECT 1 as ok')
+    res.json({ status: 'ok', db: 'connected' })
   } catch (err) {
-    res.status(500).json({ status: 'error', error: err.message })
+    res.status(503).json({ status: 'error', db: 'disconnected', error: err.message })
   }
 })
 
 // Create API router for /api prefix routes
 const router = express.Router()
+router.use(apiLimiter)
 
 /**
  * Parse extracted text/markdown to extract structured invoice data
@@ -670,8 +698,15 @@ router.post('/auth/register', async (req, res) => {
   }
 })
 
+// Stricter rate limit for login (10 attempts per 15 min per IP)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.LOGIN_RATE_LIMIT_MAX, 10) || 10,
+  message: { error: 'too_many_attempts', message: 'Too many login attempts. Please try again later.' }
+})
+
 // Login
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body
 
@@ -708,6 +743,11 @@ router.post('/auth/login', async (req, res) => {
       'UPDATE users SET last_login = NOW() WHERE user_id = $1',
       [user.user_id]
     )
+    const { rows: lastLoginRows } = await pool.query(
+      'SELECT last_login FROM users WHERE user_id = $1',
+      [user.user_id]
+    )
+    const lastLogin = lastLoginRows[0]?.last_login ?? null
 
     // Generate token
     const token = generateToken(user)
@@ -720,7 +760,8 @@ router.post('/auth/login', async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
-        fullName: user.full_name
+        fullName: user.full_name,
+        lastLogin: lastLogin ? lastLogin.toISOString() : null
       }
     })
   } catch (err) {
@@ -2807,7 +2848,23 @@ app.use('/api', router)
 
 export default app
 
+// Env validation at startup (required in production)
+function validateEnv() {
+  if (process.env.NODE_ENV === 'production') {
+    const required = []
+    if (!process.env.JWT_SECRET) required.push('JWT_SECRET')
+    if (!process.env.DATABASE_URL && !process.env.PGDATABASE) required.push('PGDATABASE or DATABASE_URL')
+    if (!process.env.DATABASE_URL && !process.env.PGUSER) required.push('PGUSER')
+    if (!process.env.DATABASE_URL && !process.env.PGPASSWORD) required.push('PGPASSWORD')
+    if (required.length > 0) {
+      console.error('Missing required env vars:', required.join(', '))
+      process.exit(1)
+    }
+  }
+}
+
 if (process.env.NODE_ENV !== 'test') {
+  validateEnv()
   const port = process.env.PORT || 4000
   app.listen(port, () => {
     console.log(`Billing System API listening on http://localhost:${port}`)

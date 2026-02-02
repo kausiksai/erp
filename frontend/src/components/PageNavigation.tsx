@@ -5,17 +5,27 @@ import styles from './PageNavigation.module.css'
 interface PageNavigationProps {
   showBack?: boolean
   showHome?: boolean
+  /** When set, Back button navigates to this path instead of history (-1). Use on detail pages for reliable back target. */
+  backTo?: string
 }
 
-function PageNavigation({ showBack = true, showHome = true }: PageNavigationProps) {
+function PageNavigation({ showBack = true, showHome = true, backTo }: PageNavigationProps) {
   const navigate = useNavigate()
+
+  const handleBack = () => {
+    if (backTo) {
+      navigate(backTo)
+    } else {
+      navigate(-1)
+    }
+  }
 
   return (
     <div className={styles.navigationButtons}>
       {showBack && (
         <Button
           icon="pi pi-arrow-left"
-          onClick={() => navigate(-1)}
+          onClick={handleBack}
           className={styles.navButton}
           rounded
           text

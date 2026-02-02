@@ -17,6 +17,20 @@ export function apiUrl(path: string): string {
 }
 
 const DEFAULT_ERROR = 'Something went wrong. Please try again.'
+export const NETWORK_ERROR = 'Check your connection and try again.'
+
+/** Use in catch blocks to show a user-friendly message (network vs generic). */
+export function getDisplayError(err: unknown): string {
+  if (err instanceof Error) {
+    if (err.message === NETWORK_ERROR) return err.message
+    // Treat common network/fetch failures as connection message
+    const msg = (err.message || '').toLowerCase()
+    if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('load failed') || msg.includes('network request failed')) {
+      return NETWORK_ERROR
+    }
+  }
+  return err instanceof Error ? err.message : DEFAULT_ERROR
+}
 
 /**
  * Extract error message from API response body (e.g. { message: "..." }) or return fallback.
@@ -40,21 +54,37 @@ export async function getErrorMessageFromResponse(
 }
 
 /**
+ * Clear auth and notify app to redirect to login (for 401/403).
+ */
+function handleUnauthorized() {
+  localStorage.removeItem('authToken')
+  localStorage.removeItem('authUser')
+  window.dispatchEvent(new CustomEvent('auth:session-expired'))
+}
+
+/**
  * Fetch with authentication token.
+ * - On 401/403: clears token and dispatches 'auth:session-expired' (listen in app to redirect to login).
+ * - On network failure: throws with message NETWORK_ERROR so UI can show "Check your connection".
  * Use getErrorMessageFromResponse(response, fallback) when !response.ok to show server error in toast.
  */
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
   const token = localStorage.getItem('authToken')
-  
   const headers = new Headers(options.headers)
   headers.set('Content-Type', 'application/json')
-  
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
-  
-  return fetch(apiUrl(path), {
-    ...options,
-    headers,
-  })
+
+  let response: Response
+  try {
+    response = await fetch(apiUrl(path), { ...options, headers })
+  } catch {
+    throw new Error(NETWORK_ERROR)
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    handleUnauthorized()
+  }
+  return response
 }

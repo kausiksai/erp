@@ -11,6 +11,7 @@ import { Dialog } from 'primereact/dialog'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
+import { downloadCsv } from '../utils/exportCsv'
 import styles from './ReadyForPayments.module.css'
 
 const PAYMENT_TYPES = [
@@ -373,13 +374,33 @@ function ReadyForPayments() {
     <div className={styles.page}>
       <Header />
       <Toast ref={toast} />
-      <div className={styles.container}>
+      <div className={styles.container} id="main-content">
         <div className={styles.header}>
           <div>
             <h1 className={styles.title}>Ready for Payments</h1>
             <p className={styles.subtitle}>Approved payments with full PO, supplier, invoice, GRN, ASN and banking details. Mark as done when payment is completed.</p>
           </div>
-          <PageNavigation />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <Button
+              label="Export CSV"
+              icon="pi pi-download"
+              className="exportCsvButton"
+              onClick={() => {
+                const columns = [
+                  { key: 'invoice_number', header: 'Invoice' },
+                  { key: 'po_number', header: 'PO Number' },
+                  { key: 'supplier_name', header: 'Supplier' },
+                  { key: 'total_amount', header: 'Total' },
+                  { key: 'payment_due_date', header: 'Due Date' },
+                  { key: 'status', header: 'Status' }
+                ]
+                downloadCsv(list, 'ready-for-payments', columns)
+              }}
+              disabled={!list.length}
+              outlined
+            />
+            <PageNavigation />
+          </div>
         </div>
 
         <div className="dts-section dts-section-accent">

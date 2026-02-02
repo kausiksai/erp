@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from 'primereact/button'
 import { useAuth } from '../contexts/AuthContext'
@@ -6,37 +6,67 @@ import styles from './Header.module.css'
 
 const COMPANY_NAME = 'SRIMUKHA PRECISION TECHNOLOGIES PRIVATE LIMITED'
 
+function formatLastLogin(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined })
+}
+
 function Header() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const [isScrolled, setIsScrolled] = useState(false)
+  const scrollSentinelRef = useRef<HTMLDivElement>(null)
+  const SCROLL_THRESHOLD = 50
 
+  // Primary: window/document scroll – when user scrolls the page, minimize header
   useEffect(() => {
-    let lastScrollY = window.scrollY
     let ticking = false
-
+    let cancelled = false
+    const updateScrolled = () => {
+      if (cancelled) return
+      const scrollY = window.scrollY ?? document.documentElement.scrollTop ?? 0
+      setIsScrolled(scrollY > SCROLL_THRESHOLD)
+      ticking = false
+    }
     const handleScroll = () => {
       if (!ticking) {
-        window.requestAnimationFrame(() => {
-          const currentScrollY = window.scrollY
-          
-          // Minimize header when scrolling down past threshold, expand when at top
-          if (currentScrollY > 50) {
-            setIsScrolled(true)
-          } else {
-            setIsScrolled(false)
-          }
-          
-          lastScrollY = currentScrollY
-          ticking = false
-        })
         ticking = true
+        window.requestAnimationFrame(updateScrolled)
       }
     }
-
     window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
+    updateScrolled()
+    return () => {
+      cancelled = true
+      window.removeEventListener('scroll', handleScroll)
+    }
   }, [])
+
+  // Backup: Intersection Observer on sentinel below header (catches inner scroll containers)
+  useEffect(() => {
+    const sentinel = scrollSentinelRef.current
+    if (!sentinel) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry) setIsScrolled(!entry.isIntersecting)
+      },
+      { root: null, rootMargin: '-50px 0px 0px 0px', threshold: 0 }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [])
+
 
   const handleHomeClick = () => {
     navigate('/')
@@ -48,13 +78,21 @@ function Header() {
   }
 
   return (
-    <header className={`${styles.header} ${isScrolled ? styles.scrolled : ''}`}>
-      <a href="#main-content" className="skipLink">
-        Skip to main content
-      </a>
-      <div className={styles.headerBackground}></div>
-      <div className={styles.container}>
-        <div className={styles.logoSection} onClick={handleHomeClick}>
+    <>
+      <header className={`${styles.header} ${isScrolled ? styles.scrolled : ''}`}>
+        <a href="#main-content" className="skipLink">
+          Skip to main content
+        </a>
+        <div className={styles.headerBackground}></div>
+        <div className={styles.container}>
+        <div
+          className={styles.logoSection}
+          onClick={handleHomeClick}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleHomeClick() } }}
+          role="button"
+          tabIndex={0}
+          aria-label="Go to home"
+        >
           <div className={styles.logoWrapper}>
             <div className={styles.logoBadge}>
               <div className={styles.logoInner}>
@@ -77,9 +115,9 @@ function Header() {
         <div className={styles.headerActions}>
           {user && (
             <div className={styles.userInfo}>
-              <div className={styles.userDetails}>
+              <div className={styles.userDetails} title={user.lastLogin ? `Last login: ${new Date(user.lastLogin).toLocaleString()}` : undefined}>
                 <span className={styles.userName}>{user.fullName || user.username}</span>
-                <span className={styles.userRole}>{user.role}</span>
+                <span className={styles.userRole}>{user.role}{user.lastLogin ? ` · Last login ${formatLastLogin(user.lastLogin)}` : ''}</span>
               </div>
               <Button
                 icon="pi pi-sign-out"
@@ -95,6 +133,9 @@ function Header() {
         <div className={styles.headerDivider}></div>
       </div>
     </header>
+      <div className={styles.headerSpacer} aria-hidden="true" />
+      <div ref={scrollSentinelRef} className={styles.scrollSentinel} aria-hidden="true" />
+    </>
   )
 }
 

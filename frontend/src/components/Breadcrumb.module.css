@@ -1,0 +1,35 @@
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--text-color-secondary, #64748b);
+  margin-bottom: 0.5rem;
+}
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sep {
+  color: var(--text-color-secondary, #64748b);
+  opacity: 0.7;
+  margin: 0 0.125rem;
+}
+
+.link {
+  color: var(--primary-color, #6366f1);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.current {
+  color: var(--text-color, #0f172a);
+  font-weight: 500;
+}

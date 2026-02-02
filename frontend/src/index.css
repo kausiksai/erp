@@ -49,6 +49,7 @@
 
 html {
   overflow-x: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -57,6 +58,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   overflow-x: hidden;
+  overflow-y: auto;
   letter-spacing: -0.01em;
 }
 
@@ -245,4 +247,45 @@ body {
   font-weight: 500;
   color: #64748b;
   margin: 0;
+}
+
+/* ========== Export CSV button: consistent across pages ========== */
+.exportCsvButton {
+  --export-csv-color: #0d9488;
+  --export-csv-color-hover: #0f766e;
+  --export-csv-bg-hover: rgba(13, 148, 136, 0.08);
+  min-height: 2.5rem;
+  padding: 0.625rem 1.25rem !important;
+  font-size: 0.9375rem !important;
+  font-weight: 600 !important;
+  border-radius: var(--app-radius-sm) !important;
+  border: 1.5px solid var(--export-csv-color) !important;
+  color: var(--export-csv-color) !important;
+  background-color: transparent !important;
+  transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.exportCsvButton .p-button-icon {
+  color: inherit;
+}
+
+.exportCsvButton:hover:not(:disabled):not(.p-disabled) {
+  border-color: var(--export-csv-color-hover) !important;
+  color: var(--export-csv-color-hover) !important;
+  background-color: var(--export-csv-bg-hover) !important;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.15);
+}
+
+.exportCsvButton:focus-visible {
+  outline: 2px solid var(--export-csv-color);
+  outline-offset: 2px;
+}
+
+.exportCsvButton:disabled,
+.exportCsvButton.p-disabled {
+  border-color: #cbd5e1 !important;
+  color: #94a3b8 !important;
+  background-color: #f1f5f9 !important;
+  cursor: not-allowed;
+  opacity: 0.8;
 }

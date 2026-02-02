@@ -8,6 +8,7 @@ import { Button } from 'primereact/button'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
+import { downloadCsv } from '../utils/exportCsv'
 import styles from './SupplierReports.module.css'
 
 /** Supplier Report: counts, activity, fastest delivering, best suppliers. */
@@ -192,7 +193,28 @@ function SupplierReports() {
                 )}
               </p>
             </div>
-            <Button label="Refresh data" icon="pi pi-refresh" className={styles.refreshBtn} onClick={fetchReport} loading={loading} outlined />
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <Button
+                label="Export CSV"
+                icon="pi pi-download"
+                className="exportCsvButton"
+                onClick={() => {
+                  const rows = data?.suppliers ?? []
+                  const columns = [
+                    { key: 'supplier_name', header: 'Supplier' },
+                    { key: 'city', header: 'City' },
+                    { key: 'gst_number', header: 'GST' },
+                    { key: 'po_count', header: 'PO Count' },
+                    { key: 'invoice_count', header: 'Invoice Count' },
+                    { key: 'total_invoice_amount', header: 'Total Amount' }
+                  ]
+                  downloadCsv(rows, 'supplier-reports', columns)
+                }}
+                disabled={!data?.suppliers?.length}
+                outlined
+              />
+              <Button label="Refresh data" icon="pi pi-refresh" className={styles.refreshBtn} onClick={fetchReport} loading={loading} outlined />
+            </div>
           </div>
         </div>
         <PageNavigation />

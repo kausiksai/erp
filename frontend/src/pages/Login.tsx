@@ -4,7 +4,7 @@ import { InputText } from 'primereact/inputtext'
 import { Password } from 'primereact/password'
 import { Button } from 'primereact/button'
 import { Toast } from 'primereact/toast'
-import { apiUrl } from '../utils/api'
+import { apiUrl, getDisplayError } from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import Header from '../components/Header'
 import styles from './Login.module.css'
@@ -19,6 +19,17 @@ function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const trimmedUser = username.trim()
+    const trimmedPass = password.trim()
+    if (!trimmedUser || !trimmedPass) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: 'Validation',
+        detail: 'Username and password are required',
+        life: 4000
+      })
+      return
+    }
     setLoading(true)
 
     try {
@@ -27,7 +38,7 @@ function Login() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: trimmedUser, password: trimmedPass }),
       })
 
       let data
@@ -47,11 +58,11 @@ function Login() {
       } else {
         throw new Error('Invalid response from server')
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast.current?.show({
         severity: 'error',
         summary: 'Login Failed',
-        detail: err.message || 'An error occurred during login',
+        detail: getDisplayError(err),
         life: 5000
       })
     } finally {

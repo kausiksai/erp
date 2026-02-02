@@ -9,7 +9,8 @@ import { InputText } from 'primereact/inputtext'
 import { Toast } from 'primereact/toast'
 import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { ProgressSpinner } from 'primereact/progressspinner'
-import { apiUrl } from '../utils/api'
+import { apiUrl, getDisplayError } from '../utils/api'
+import { isValidEmail } from '../utils/validation'
 import styles from './SupplierRegistration.module.css'
 
 interface Supplier {
@@ -83,11 +84,11 @@ function SupplierRegistration() {
       if (!response.ok) throw new Error('Failed to fetch suppliers')
       const data = await response.json()
       setSuppliers(data)
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.current?.show({
         severity: 'error',
         summary: 'Error',
-        detail: error.message || 'Failed to load suppliers',
+        detail: getDisplayError(error),
         life: 5000
       })
     } finally {
@@ -135,11 +136,11 @@ function SupplierRegistration() {
       setIsEditMode(true)
       setEditingId(row.supplier_id)
       setShowDialog(true)
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.current?.show({
         severity: 'error',
         summary: 'Error',
-        detail: error.message || 'Failed to load supplier',
+        detail: getDisplayError(error),
         life: 5000
       })
     }
@@ -188,6 +189,15 @@ function SupplierRegistration() {
       })
       return
     }
+    if (formData.email?.trim() && !isValidEmail(formData.email)) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: 'Validation',
+        detail: 'Please enter a valid email address',
+        life: 3000
+      })
+      return
+    }
     try {
       setSaving(true)
       const token = localStorage.getItem('authToken')
@@ -216,14 +226,19 @@ function SupplierRegistration() {
         website: formData.website || null,
         contact_person: formData.contact_person || null
       }
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(body)
-      })
+      let response: Response
+      try {
+        response = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(body)
+        })
+      } catch (fetchErr) {
+        throw new Error(getDisplayError(fetchErr))
+      }
       const errData = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(errData.message || (method === 'POST' ? 'Failed to create supplier' : 'Failed to update supplier'))
       toast.current?.show({
@@ -234,11 +249,11 @@ function SupplierRegistration() {
       })
       setShowDialog(false)
       fetchSuppliers()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.current?.show({
         severity: 'error',
         summary: 'Error',
-        detail: error.message || 'Failed to save supplier',
+        detail: getDisplayError(error),
         life: 5000
       })
     } finally {

@@ -10,7 +10,9 @@ import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
-import { apiUrl, getErrorMessageFromResponse } from '../utils/api'
+import { apiUrl, apiFetch, getErrorMessageFromResponse, getDisplayError } from '../utils/api'
+import { downloadCsv } from '../utils/exportCsv'
+import { useDebounce } from '../hooks/useDebounce'
 import styles from './InvoiceValidate.module.css'
 
 interface Invoice {
@@ -50,24 +52,23 @@ function InvoiceValidate() {
   const [searchPONumber, setSearchPONumber] = useState<string>('')
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
   const [globalFilter, setGlobalFilter] = useState<string>('')
+  const debouncedInvoiceNumber = useDebounce(searchInvoiceNumber, 400)
+  const debouncedPONumber = useDebounce(searchPONumber, 400)
 
   useEffect(() => {
     fetchInvoices()
-  }, [selectedStatuses])
+  }, [selectedStatuses, debouncedInvoiceNumber, debouncedPONumber])
 
   const fetchInvoices = async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (selectedStatuses.length > 0) params.append('status', selectedStatuses.join(','))
-      if (searchInvoiceNumber) params.append('invoiceNumber', searchInvoiceNumber)
-      if (searchPONumber) params.append('poNumber', searchPONumber)
+      if (debouncedInvoiceNumber) params.append('invoiceNumber', debouncedInvoiceNumber)
+      if (debouncedPONumber) params.append('poNumber', debouncedPONumber)
 
-      const url = apiUrl('invoices') + (params.toString() ? `?${params.toString()}` : '')
-      const token = localStorage.getItem('authToken')
-      const response = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
+      const path = 'invoices' + (params.toString() ? `?${params.toString()}` : '')
+      const response = await apiFetch(path)
 
       if (!response.ok) {
         const msg = await getErrorMessageFromResponse(response, 'Failed to load invoices')
@@ -79,8 +80,7 @@ function InvoiceValidate() {
       const data = await response.json()
       setInvoices(data)
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Failed to load invoices'
-      toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: getDisplayError(error), life: 5000 })
       setInvoices([])
     } finally {
       setLoading(false)
@@ -97,6 +97,19 @@ function InvoiceValidate() {
     setSelectedStatuses([])
     setGlobalFilter('')
     fetchInvoices()
+  }
+
+  const handleExportCsv = () => {
+    const columns = [
+      { key: 'invoice_number', header: 'Invoice Number' },
+      { key: 'po_number', header: 'PO Number' },
+      { key: 'invoice_date', header: 'Invoice Date' },
+      { key: 'payment_due_date', header: 'Due Date' },
+      { key: 'supplier_name', header: 'Supplier' },
+      { key: 'total_amount', header: 'Total Amount' },
+      { key: 'status', header: 'Status' }
+    ]
+    downloadCsv(invoices, 'invoices-validate', columns)
   }
 
   const handleInvoiceClick = (invoiceId: number) => {
@@ -180,7 +193,7 @@ function InvoiceValidate() {
       <Header />
       <Toast ref={toast} />
       
-      <div className={styles.pageContainer}>
+      <div className={styles.pageContainer} id="main-content">
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <div className={styles.headerText}>
@@ -237,6 +250,14 @@ function InvoiceValidate() {
                 icon="pi pi-times"
                 onClick={handleClearSearch}
                 className={styles.clearButton}
+                outlined
+              />
+              <Button
+                label="Export CSV"
+                icon="pi pi-download"
+                onClick={handleExportCsv}
+                disabled={!invoices.length}
+                className="exportCsvButton"
                 outlined
               />
             </div>

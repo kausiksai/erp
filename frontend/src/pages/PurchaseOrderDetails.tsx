@@ -8,8 +8,10 @@ import { ProgressSpinner } from 'primereact/progressspinner'
 import { Tag } from 'primereact/tag'
 import { Divider } from 'primereact/divider'
 import { apiUrl, getErrorMessageFromResponse } from '../utils/api'
+import { useDebounce } from '../hooks/useDebounce'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
+import Breadcrumb from '../components/Breadcrumb'
 import styles from './PurchaseOrderDetails.module.css'
 
 interface PurchaseOrderLineItem {
@@ -49,12 +51,13 @@ function PurchaseOrderDetails() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({})
   const [loadingLineItems, setLoadingLineItems] = useState<Set<number>>(new Set())
   const [uploadingExcel, setUploadingExcel] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const searchLower = searchTerm.trim().toLowerCase()
+  const searchLower = debouncedSearch.trim().toLowerCase()
   const filteredPOs = searchLower
     ? purchaseOrders.filter((po) => {
         const poNumber = (po.po_number ?? '').toLowerCase()
@@ -300,7 +303,8 @@ function PurchaseOrderDetails() {
       <Header />
       <Toast ref={toast} />
       
-      <div className={styles.pageContainer}>
+      <div className={styles.pageContainer} id="main-content">
+        <Breadcrumb items={[{ label: 'Home', path: '/' }, { label: 'Purchase Orders' }]} />
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <div className={styles.headerText}>

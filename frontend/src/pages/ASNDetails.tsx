@@ -7,8 +7,10 @@ import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Tag } from 'primereact/tag'
 import { apiUrl, getErrorMessageFromResponse } from '../utils/api'
+import { useDebounce } from '../hooks/useDebounce'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
+import Breadcrumb from '../components/Breadcrumb'
 import styles from './ASNDetails.module.css'
 
 interface ASNRecord {
@@ -37,11 +39,12 @@ function ASNDetails() {
   const [records, setRecords] = useState<ASNRecord[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({})
   const [uploadingExcel, setUploadingExcel] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const searchLower = searchTerm.trim().toLowerCase()
+  const searchLower = debouncedSearch.trim().toLowerCase()
   const filteredRecords = searchLower
     ? records.filter((r) => {
         const asnNo = (r.asn_no ?? '').toLowerCase()
@@ -202,7 +205,8 @@ function ASNDetails() {
     <div className={styles.page}>
       <Header />
       <Toast ref={toast} />
-      <div className={styles.pageContainer}>
+      <div className={styles.pageContainer} id="main-content">
+        <Breadcrumb items={[{ label: 'Home', path: '/' }, { label: 'ASN' }]} />
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <div className={styles.headerText}>

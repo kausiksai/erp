@@ -8,6 +8,7 @@ import { Button } from 'primereact/button'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
+import { downloadCsv } from '../utils/exportCsv'
 import styles from './PaymentHistory.module.css'
 
 interface GrnItem {
@@ -37,6 +38,8 @@ interface PaymentTransaction {
   amount: number
   paid_at: string
   notes: string | null
+  payment_type: string | null
+  payment_reference: string | null
   paid_by_username: string | null
   paid_by_name: string | null
 }
@@ -60,6 +63,8 @@ interface PaymentHistoryItem {
   payment_done_at: string | null
   payment_done_by_username: string | null
   payment_done_by_name: string | null
+  payment_type: string | null
+  payment_reference: string | null
   notes: string | null
   invoice_number: string
   invoice_date: string | null
@@ -160,6 +165,22 @@ function PaymentHistory() {
     return '-'
   }
 
+  const paymentTypeDisplay = (row: PaymentHistoryItem) => row.payment_type || '-'
+  const paymentRefDisplay = (row: PaymentHistoryItem) => row.payment_reference || '-'
+
+  const handleExportCsv = () => {
+    const columns = [
+      { key: 'invoice_number', header: 'Invoice' },
+      { key: 'po_number', header: 'PO Number' },
+      { key: 'supplier_name', header: 'Supplier' },
+      { key: 'total_amount', header: 'Total Amount' },
+      { key: 'status', header: 'Status' },
+      { key: 'payment_type', header: 'Payment Type' },
+      { key: 'payment_reference', header: 'Payment Reference' }
+    ]
+    downloadCsv(list.map((r) => ({ ...r, payment_type: r.payment_type ?? '', payment_reference: r.payment_reference ?? '' })), 'payment-history', columns)
+  }
+
   const rowExpansionTemplate = (row: PaymentHistoryItem) => (
     <div className={styles.expandedContent}>
       <div className={styles.sectionCards}>
@@ -178,6 +199,8 @@ function PaymentHistory() {
               <div className={styles.detailItem}><span className={styles.detailLabel}>Status</span><span className={styles.detailValue}>{statusDisplay(row)}</span></div>
               <div className={styles.detailItem}><span className={styles.detailLabel}>Last payment at</span><span className={styles.detailValue}>{lastPaymentAtDisplay(row)}</span></div>
               <div className={styles.detailItem}><span className={styles.detailLabel}>Done by</span><span className={styles.detailValue}>{doneByDisplay(row)}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Payment type</span><span className={styles.detailValue}>{row.payment_type || '-'}</span></div>
+              <div className={styles.detailItem}><span className={styles.detailLabel}>Payment reference</span><span className={styles.detailValue}>{row.payment_reference || '-'}</span></div>
             </div>
           </div>
         </div>
@@ -301,6 +324,8 @@ function PaymentHistory() {
                     <tr>
                       <th>Date</th>
                       <th>Amount (₹)</th>
+                      <th>Type</th>
+                      <th>Reference</th>
                       <th>Paid by</th>
                       <th>Notes</th>
                     </tr>
@@ -310,6 +335,8 @@ function PaymentHistory() {
                       <tr key={tx.id}>
                         <td>{dateTimeDisplay(tx.paid_at)}</td>
                         <td>{Number(tx.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>{tx.payment_type || '-'}</td>
+                        <td>{tx.payment_reference || '-'}</td>
                         <td>{tx.paid_by_name || tx.paid_by_username || '-'}</td>
                         <td>{tx.notes || '-'}</td>
                       </tr>
@@ -345,7 +372,7 @@ function PaymentHistory() {
     <div className={styles.page}>
       <Header />
       <Toast ref={toast} />
-      <div className={styles.container}>
+      <div className={styles.container} id="main-content">
         <div className={styles.header}>
           <div>
             <h1 className={styles.title}>Payment History</h1>
@@ -354,6 +381,7 @@ function PaymentHistory() {
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <Button label="Export CSV" icon="pi pi-download" className="exportCsvButton" onClick={handleExportCsv} disabled={!list.length} outlined />
             <Button label="Refresh" icon="pi pi-refresh" onClick={fetchHistory} outlined />
             <PageNavigation />
           </div>
@@ -397,6 +425,8 @@ function PaymentHistory() {
                   <Column header="Status" body={statusDisplay} sortable sortField="status" style={{ minWidth: '110px' }} />
                   <Column header="Last payment at" body={lastPaymentAtDisplay} sortable sortField="payment_done_at" style={{ minWidth: '160px' }} />
                   <Column header="Done by" body={doneByDisplay} style={{ minWidth: '140px' }} />
+                  <Column header="Payment type" body={paymentTypeDisplay} sortable sortField="payment_type" style={{ minWidth: '100px' }} />
+                  <Column header="Reference" body={paymentRefDisplay} sortField="payment_reference" style={{ minWidth: '120px' }} />
                 </DataTable>
               </div>
             </div>

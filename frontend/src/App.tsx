@@ -1,5 +1,7 @@
 import './App.css'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import ScrollToTop from './components/ScrollToTop'
+import SessionExpiredHandler from './components/SessionExpiredHandler'
 import { useAuth } from './contexts/AuthContext'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -35,6 +37,8 @@ function App() {
 
   return (
     <BrowserRouter>
+      <ScrollToTop />
+      <SessionExpiredHandler />
       <Routes>
         <Route 
           path="/login" 

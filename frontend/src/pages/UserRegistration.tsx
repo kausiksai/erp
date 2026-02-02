@@ -13,7 +13,8 @@ import { Toast } from 'primereact/toast'
 import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { Badge } from 'primereact/badge'
 import { ProgressSpinner } from 'primereact/progressspinner'
-import { apiUrl } from '../utils/api'
+import { apiUrl, getDisplayError } from '../utils/api'
+import { isValidEmail, validatePassword } from '../utils/validation'
 import { useAuth } from '../contexts/AuthContext'
 import { getRoleDisplayName } from '../config/menuConfig'
 import styles from './UserRegistration.module.css'
@@ -106,11 +107,11 @@ function UserRegistration() {
 
       const data = await response.json()
       setUsers(data)
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.current?.show({
         severity: 'error',
         summary: 'Error',
-        detail: error.message || 'Failed to load users',
+        detail: getDisplayError(error),
         life: 5000
       })
     } finally {
@@ -284,16 +285,33 @@ function UserRegistration() {
 
   const handleSaveUser = async () => {
     try {
-      if (!formData.username || !formData.email) {
+      if (!formData.username?.trim()) {
         toast.current?.show({
           severity: 'warn',
           summary: 'Validation Error',
-          detail: 'Username and email are required',
+          detail: 'Username is required',
           life: 3000
         })
         return
       }
-
+      if (!formData.email?.trim()) {
+        toast.current?.show({
+          severity: 'warn',
+          summary: 'Validation Error',
+          detail: 'Email is required',
+          life: 3000
+        })
+        return
+      }
+      if (!isValidEmail(formData.email)) {
+        toast.current?.show({
+          severity: 'warn',
+          summary: 'Validation Error',
+          detail: 'Please enter a valid email address',
+          life: 3000
+        })
+        return
+      }
       if (!isEditMode && !formData.password) {
         toast.current?.show({
           severity: 'warn',
@@ -303,15 +321,17 @@ function UserRegistration() {
         })
         return
       }
-
-      if (formData.password && formData.password.length < 6) {
-        toast.current?.show({
-          severity: 'warn',
-          summary: 'Validation Error',
-          detail: 'Password must be at least 6 characters',
-          life: 3000
-        })
-        return
+      if (formData.password) {
+        const pwdCheck = validatePassword(formData.password)
+        if (!pwdCheck.valid) {
+          toast.current?.show({
+            severity: 'warn',
+            summary: 'Validation Error',
+            detail: pwdCheck.message || 'Invalid password',
+            life: 3000
+          })
+          return
+        }
       }
 
       const token = localStorage.getItem('authToken')
@@ -332,17 +352,21 @@ function UserRegistration() {
         body.password = formData.password
       }
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(body)
-      })
-
+      let response: Response
+      try {
+        response = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(body)
+        })
+      } catch (fetchErr) {
+        throw new Error(getDisplayError(fetchErr))
+      }
       if (!response.ok) {
-        const error = await response.json()
+        const error = await response.json().catch(() => ({}))
         throw new Error(error.message || 'Failed to save user')
       }
 
@@ -383,11 +407,11 @@ function UserRegistration() {
 
       setShowUserDialog(false)
       fetchUsers()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.current?.show({
         severity: 'error',
         summary: 'Error',
-        detail: error.message || 'Failed to save user',
+        detail: getDisplayError(error),
         life: 5000
       })
     }
@@ -549,7 +573,7 @@ function UserRegistration() {
       <Header />
       <Toast ref={toast} position="top-right" />
       <ConfirmDialog />
-      <div className={styles.container}>
+      <div className={styles.container} id="main-content">
         <div className={styles.header}>
           <div>
             <h1 className={styles.title}>User Registration & Management</h1>

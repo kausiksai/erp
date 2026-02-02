@@ -10,6 +10,7 @@ import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
+import Breadcrumb from '../components/Breadcrumb'
 import { apiUrl, apiFetch } from '../utils/api'
 import styles from './InvoiceDetails.module.css'
 
@@ -509,8 +510,12 @@ function InvoiceDetails() {
           Choose &quot;Confirm and proceed for payment&quot; to move this invoice to Approve Payments, or &quot;Send to debit note&quot; to handle the shortfall in Incomplete POs.
         </p>
       </Dialog>
-      <div className={styles.pageContainer}>
+      <div className={styles.pageContainer} id="main-content">
         <div className={styles.pageHeader}>
+          <Breadcrumb items={[
+            { label: 'Invoice Validate', path: '/invoices/validate' },
+            { label: `Invoice ${invoice.invoice_number}` }
+          ]} />
           <div className={styles.headerContent}>
             <div className={styles.headerText}>
               <h1 className={styles.pageTitle}>Invoice Details</h1>
@@ -543,7 +548,7 @@ function InvoiceDetails() {
                   />
                 ) : null
               })()}
-              <PageNavigation />
+              <PageNavigation backTo="/invoices/validate" />
             </div>
           </div>
         </div>
