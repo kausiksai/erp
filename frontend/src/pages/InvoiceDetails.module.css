@@ -143,6 +143,33 @@
   flex: 1;
 }
 
+.supplierBankBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  margin-top: 0.25rem;
+}
+
+.supplierBankDetails {
+  font-size: 0.875rem;
+  color: #1e293b;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.supplierBankDetails .bankLabel {
+  display: inline-block;
+  min-width: 6rem;
+  font-weight: 600;
+  color: #64748b;
+  font-size: 0.8125rem;
+}
+
 .statusBadge {
   display: inline-block;
   padding: 0.25rem 0.75rem;
@@ -215,6 +242,81 @@
 .statusBadge.approved {
   background: #dbeafe;
   color: #1e40af;
+}
+
+/* Attachments section (inside Invoice Information card) */
+.attachmentsInCard {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.attachmentsSubtitle {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+  margin: 0 0 0.75rem 0;
+  display: flex;
+  align-items: center;
+}
+
+.attachmentsEmpty {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: #64748b;
+}
+
+.attachmentsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.attachmentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.attachmentInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.attachmentType {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+}
+
+.attachmentFileName {
+  font-size: 0.9375rem;
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentActions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.attachmentBtn {
+  font-size: 0.8125rem;
+  padding: 0.375rem 0.75rem;
 }
 
 .clickableLink {

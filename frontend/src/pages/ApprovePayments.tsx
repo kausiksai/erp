@@ -13,6 +13,107 @@ import { InputText } from 'primereact/inputtext'
 import { apiFetch, apiUrl, getErrorMessageFromResponse } from '../utils/api'
 import styles from './ApprovePayments.module.css'
 
+interface AttachmentItem {
+  id: number
+  file_name: string
+  attachment_type: string
+  uploaded_at?: string
+}
+
+function InvoiceAttachmentsSection({ invoiceId, toastRef }: { invoiceId: number; toastRef: React.RefObject<Toast | null> }) {
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const fetchAttachments = async () => {
+      try {
+        const res = await apiFetch(`invoices/${invoiceId}/attachments`)
+        if (!cancelled && res.ok) {
+          const data = await res.json()
+          setAttachments(data)
+        }
+      } catch {
+        if (!cancelled) setAttachments([])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    fetchAttachments()
+    return () => { cancelled = true }
+  }, [invoiceId])
+
+  const handleView = async (attachmentId: number, attachmentType: string) => {
+    const type = attachmentType === 'weight_slip' ? 'weight_slip' : 'invoice'
+    try {
+      const res = await apiFetch(`invoices/${invoiceId}/attachments/${type}/${attachmentId}`)
+      if (!res.ok) {
+        toastRef.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not open attachment', life: 4000 })
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch {
+      toastRef.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not open attachment', life: 4000 })
+    }
+  }
+
+  const handleDownload = async (attachmentId: number, fileName: string, attachmentType: string) => {
+    const type = attachmentType === 'weight_slip' ? 'weight_slip' : 'invoice'
+    try {
+      const res = await apiFetch(`invoices/${invoiceId}/attachments/${type}/${attachmentId}?download=1`)
+      if (!res.ok) {
+        toastRef.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not download attachment', life: 4000 })
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName || 'attachment.pdf'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      toastRef.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not download attachment', life: 4000 })
+    }
+  }
+
+  return (
+    <div className={styles.sectionCard}>
+      <div className={styles.sectionCardHeader}>Attachments (invoice & weight slips)</div>
+      <div className={styles.sectionCardBody}>
+        {loading ? (
+          <div className={styles.attachmentsLoading}>
+            <ProgressSpinner style={{ width: '28px', height: '28px' }} />
+            <span>Loading attachments...</span>
+          </div>
+        ) : attachments.length === 0 ? (
+          <p className={styles.attachmentsEmpty}>No attachments for this invoice.</p>
+        ) : (
+          <ul className={styles.attachmentsList}>
+            {attachments.map((att) => (
+              <li key={`${att.attachment_type}-${att.id}`} className={styles.attachmentRow}>
+                <span className={styles.attachmentInfo}>
+                  <span className={styles.attachmentTypeLabel}>
+                    {att.attachment_type === 'weight_slip' ? 'Weight slip' : 'Invoice'}
+                  </span>
+                  <span className={styles.attachmentFileName} title={att.file_name}>{att.file_name}</span>
+                </span>
+                <span className={styles.attachmentActions}>
+                  <Button icon="pi pi-eye" label="View" size="small" outlined className={styles.attachmentBtn} onClick={() => handleView(att.id, att.attachment_type)} />
+                  <Button icon="pi pi-download" label="Download" size="small" outlined className={styles.attachmentBtn} onClick={() => handleDownload(att.id, att.file_name, att.attachment_type)} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface GrnItem {
   id: number
   grn_no: string | null
@@ -554,6 +655,8 @@ function ApprovePayments() {
             </div>
           </div>
         )}
+
+        <InvoiceAttachmentsSection invoiceId={row.invoice_id} toastRef={toast} />
 
         <div className={styles.expandedActions}>
           <Button label="Approve" icon="pi pi-check" severity="success" size="small" className={`btnPrimary ${styles.actionButton}`}

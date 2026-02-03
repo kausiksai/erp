@@ -375,7 +375,7 @@ CREATE INDEX IF NOT EXISTS idx_invoice_lines_po ON invoice_lines (po_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_lines_po_line ON invoice_lines (po_line_id);
 
 -- ============================================
--- Invoice Attachments
+-- Invoice Attachments (main invoice PDF only)
 -- ============================================
 CREATE TABLE IF NOT EXISTS invoice_attachments (
   id                 BIGSERIAL PRIMARY KEY,
@@ -387,11 +387,29 @@ CREATE TABLE IF NOT EXISTS invoice_attachments (
   uploaded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- For existing DBs: add attachment_type if missing
+-- For existing DBs: add attachment_type if missing.
 ALTER TABLE invoice_attachments ADD COLUMN IF NOT EXISTS attachment_type TEXT DEFAULT 'invoice';
+-- Optional migration: move existing weight slips to invoice_weight_attachments before dropping column (run once if you had weight slips in invoice_attachments):
+--   INSERT INTO invoice_weight_attachments (invoice_line_id, file_name, file_data, uploaded_at)
+--   SELECT invoice_line_id, file_name, file_data, uploaded_at FROM invoice_attachments WHERE attachment_type = 'weight_slip' AND invoice_line_id IS NOT NULL ON CONFLICT (invoice_line_id) DO NOTHING;
+--   DELETE FROM invoice_attachments WHERE attachment_type = 'weight_slip';
+ALTER TABLE invoice_attachments DROP COLUMN IF EXISTS invoice_line_id;
 
 CREATE INDEX IF NOT EXISTS idx_invoice_attachments_invoice ON invoice_attachments (invoice_id);
-CREATE INDEX IF NOT EXISTS idx_invoice_attachments_type ON invoice_attachments (invoice_id, attachment_type);
+
+-- ============================================
+-- Invoice Weight Attachments (one weight slip per invoice line)
+-- ============================================
+CREATE TABLE IF NOT EXISTS invoice_weight_attachments (
+  id                 BIGSERIAL PRIMARY KEY,
+  invoice_line_id    BIGINT      NOT NULL REFERENCES invoice_lines(invoice_line_id) ON DELETE CASCADE,
+  file_name          TEXT        NOT NULL,
+  file_data          BYTEA,
+  uploaded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (invoice_line_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_weight_attachments_line ON invoice_weight_attachments (invoice_line_id);
 
 -- ============================================
 -- Debit Notes (separate from invoice_attachments)

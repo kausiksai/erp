@@ -873,6 +873,74 @@ router.get('/invoices/pending-exception', authenticateToken, authorize(['admin',
   }
 })
 
+// List invoice attachments (invoice PDF from invoice_attachments + weight slips from invoice_weight_attachments)
+router.get('/invoices/:id/attachments', async (req, res) => {
+  try {
+    const { id } = req.params
+    const [invRows, weightRows] = await Promise.all([
+      pool.query(
+        `SELECT id, file_name, 'invoice' AS attachment_type, uploaded_at
+         FROM invoice_attachments
+         WHERE invoice_id = $1 AND COALESCE(attachment_type, 'invoice') = 'invoice'
+         ORDER BY uploaded_at`,
+        [id]
+      ),
+      pool.query(
+        `SELECT w.id, w.file_name, 'weight_slip' AS attachment_type, w.uploaded_at
+         FROM invoice_weight_attachments w
+         JOIN invoice_lines l ON l.invoice_line_id = w.invoice_line_id
+         WHERE l.invoice_id = $1
+         ORDER BY l.sequence_number, w.uploaded_at`,
+        [id]
+      )
+    ])
+    const list = [
+      ...invRows.rows.map(r => ({ ...r, attachment_type: 'invoice' })),
+      ...weightRows.rows.map(r => ({ ...r, attachment_type: 'weight_slip' }))
+    ].sort((a, b) => new Date(a.uploaded_at) - new Date(b.uploaded_at))
+    res.json(list)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Get one attachment by type and id (view or download). type = 'invoice' | 'weight_slip'
+router.get('/invoices/:id/attachments/:type/:attachmentId', async (req, res) => {
+  try {
+    const { id, type, attachmentId } = req.params
+    const download = req.query.download === '1' || req.query.download === 'true'
+    let rows
+    if (type === 'invoice') {
+      const r = await pool.query(
+        `SELECT file_name, file_data FROM invoice_attachments
+         WHERE invoice_id = $1 AND id = $2`,
+        [id, attachmentId]
+      )
+      rows = r.rows
+    } else if (type === 'weight_slip') {
+      const r = await pool.query(
+        `SELECT w.file_name, w.file_data
+         FROM invoice_weight_attachments w
+         JOIN invoice_lines l ON l.invoice_line_id = w.invoice_line_id
+         WHERE l.invoice_id = $1 AND w.id = $2`,
+        [id, attachmentId]
+      )
+      rows = r.rows
+    } else {
+      return res.status(400).json({ error: 'invalid_type', message: 'type must be invoice or weight_slip' })
+    }
+    if (rows.length === 0 || !rows[0].file_data) {
+      return res.status(404).json({ error: 'not_found' })
+    }
+    const disposition = download ? 'attachment' : 'inline'
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `${disposition}; filename="${rows[0].file_name}"`)
+    res.send(rows[0].file_data)
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 // Get invoice PDF (main invoice attachment)
 router.get('/invoices/:id/pdf', async (req, res) => {
   try {
@@ -952,12 +1020,29 @@ router.get('/invoices/:id', async (req, res) => {
          s.gst_number as supplier_gst,
          s.pan_number as supplier_pan,
          s.supplier_address,
+         s.city as supplier_city,
+         s.state_code as supplier_state_code,
+         s.state_name as supplier_state_name,
+         s.pincode as supplier_pincode,
          s.email as supplier_email,
          s.phone as supplier_phone,
          s.mobile as supplier_mobile,
+         s.msme_number as supplier_msme_number,
+         s.website as supplier_website,
+         s.contact_person as supplier_contact_person,
+         s.bank_account_name as supplier_bank_account_name,
+         s.bank_account_number as supplier_bank_account_number,
+         s.bank_ifsc_code as supplier_bank_ifsc_code,
+         s.bank_name as supplier_bank_name,
+         s.branch_name as supplier_branch_name,
          po.po_id,
          po.po_number,
          po.date AS po_date,
+         po.unit as po_unit,
+         po.ref_unit as po_ref_unit,
+         po.pfx as po_pfx,
+         po.amd_no as po_amd_no,
+         po.terms as po_terms,
          NULL::TEXT AS bill_to,
          NULL::TEXT AS bill_to_address,
          NULL::TEXT AS bill_to_gstin,
@@ -1033,7 +1118,8 @@ router.post('/invoices', async (req, res) => {
       notes,
       items,
       pdfFileName,
-      pdfBuffer
+      pdfBuffer,
+      weightSlips
     } = req.body
     
     await client.query('BEGIN')
@@ -1072,9 +1158,8 @@ router.post('/invoices', async (req, res) => {
     if (pdfFileName && pdfBuffer) {
       const pdfBufferBinary = Buffer.from(pdfBuffer, 'base64')
       await client.query(
-        `INSERT INTO invoice_attachments (invoice_id, file_name, file_data)
-         VALUES ($1, $2, $3)
-         ON CONFLICT DO NOTHING`,
+        `INSERT INTO invoice_attachments (invoice_id, file_name, file_data, attachment_type)
+         VALUES ($1, $2, $3, 'invoice')`,
         [invoiceId, pdfFileName, pdfBufferBinary]
       )
     }
@@ -1089,7 +1174,8 @@ router.post('/invoices', async (req, res) => {
       poLineItems = poLinesResult.rows
     }
     
-    // Insert invoice lines
+    // Insert invoice lines and collect invoice_line_id for each (so weight slips can link to line)
+    const insertedLineIds = []
     if (Array.isArray(items) && items.length > 0) {
       for (let index = 0; index < items.length; index++) {
         const item = items[index]
@@ -1112,12 +1198,13 @@ router.post('/invoices', async (req, res) => {
           }
         }
         
-        await client.query(
+        const lineResult = await client.query(
           `INSERT INTO invoice_lines 
            (invoice_id, po_id, po_line_id, item_name, hsn_sac, uom, billed_qty, weight, count, rate, rate_per,
             line_total, taxable_value, cgst_rate, cgst_amount, sgst_rate, sgst_amount,
             total_tax_amount, sequence_number)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+           RETURNING invoice_line_id`,
           [
             invoiceId,
             poId || null,
@@ -1140,6 +1227,31 @@ router.post('/invoices', async (req, res) => {
             index + 1 // sequence_number
           ]
         )
+        if (lineResult.rows[0]) {
+          insertedLineIds.push(lineResult.rows[0].invoice_line_id)
+        }
+      }
+    }
+    
+    // Store weight slip attachments in invoice_weight_attachments (one per line)
+    if (Array.isArray(weightSlips) && weightSlips.length > 0) {
+      for (const ws of weightSlips) {
+        const fileName = ws.fileName || `weight-slip-line-${ws.lineIndex ?? 0}.pdf`
+        const buffer = ws.buffer ? Buffer.from(ws.buffer, 'base64') : null
+        if (buffer) {
+          const lineIndex = ws.lineIndex != null ? parseInt(ws.lineIndex, 10) : 0
+          const invoiceLineId = Number.isNaN(lineIndex) || lineIndex < 0 || lineIndex >= insertedLineIds.length
+            ? null
+            : insertedLineIds[lineIndex]
+          if (invoiceLineId) {
+            await client.query(
+              `INSERT INTO invoice_weight_attachments (invoice_line_id, file_name, file_data)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (invoice_line_id) DO UPDATE SET file_name = EXCLUDED.file_name, file_data = EXCLUDED.file_data`,
+              [invoiceLineId, fileName, buffer]
+            )
+          }
+        }
       }
     }
     
@@ -1168,7 +1280,8 @@ router.put('/invoices/:id', async (req, res) => {
       taxAmount,
       status,
       notes,
-      items
+      items,
+      weightSlips
     } = req.body
     
     await client.query('BEGIN')
@@ -1247,12 +1360,13 @@ router.put('/invoices/:id', async (req, res) => {
       poLineItems = poLinesResult.rows
     }
     
-    // Update items if provided
+    // Update items if provided; collect invoice_line_id for each so weight slips can link
+    const insertedLineIds = []
     if (Array.isArray(items)) {
-      // Delete existing lines
+      // Delete existing lines (attachments with invoice_line_id are CASCADE deleted or orphaned; we keep invoice-level attachments)
       await client.query(`DELETE FROM invoice_lines WHERE invoice_id = $1`, [id])
       
-      // Insert new lines
+      // Insert new lines and collect invoice_line_id
       for (let index = 0; index < items.length; index++) {
         const item = items[index]
         
@@ -1274,12 +1388,13 @@ router.put('/invoices/:id', async (req, res) => {
           }
         }
         
-        await client.query(
+        const lineResult = await client.query(
           `INSERT INTO invoice_lines 
            (invoice_id, po_id, po_line_id, item_name, hsn_sac, uom, billed_qty, weight, count, rate, rate_per,
             line_total, taxable_value, cgst_rate, cgst_amount, sgst_rate, sgst_amount,
             total_tax_amount, sequence_number)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+           RETURNING invoice_line_id`,
           [
             id,
             finalPoId,
@@ -1302,6 +1417,31 @@ router.put('/invoices/:id', async (req, res) => {
             index + 1 // sequence_number
           ]
         )
+        if (lineResult.rows[0]) {
+          insertedLineIds.push(lineResult.rows[0].invoice_line_id)
+        }
+      }
+    }
+    
+    // Store additional weight slip attachments in invoice_weight_attachments (on update)
+    if (Array.isArray(weightSlips) && weightSlips.length > 0) {
+      for (const ws of weightSlips) {
+        const fileName = ws.fileName || `weight-slip-line-${ws.lineIndex ?? 0}.pdf`
+        const buffer = ws.buffer ? Buffer.from(ws.buffer, 'base64') : null
+        if (buffer) {
+          const lineIndex = ws.lineIndex != null ? parseInt(ws.lineIndex, 10) : 0
+          const invoiceLineId = Number.isNaN(lineIndex) || lineIndex < 0 || lineIndex >= insertedLineIds.length
+            ? null
+            : insertedLineIds[lineIndex]
+          if (invoiceLineId) {
+            await client.query(
+              `INSERT INTO invoice_weight_attachments (invoice_line_id, file_name, file_data)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (invoice_line_id) DO UPDATE SET file_name = EXCLUDED.file_name, file_data = EXCLUDED.file_data`,
+              [invoiceLineId, fileName, buffer]
+            )
+          }
+        }
       }
     }
     

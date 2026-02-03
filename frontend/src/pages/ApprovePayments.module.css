@@ -212,6 +212,74 @@
   min-width: 800px;
 }
 
+/* Attachments section in expanded row */
+.attachmentsLoading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.attachmentsEmpty {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.attachmentsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.attachmentRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.attachmentInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.attachmentTypeLabel {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+}
+
+.attachmentFileName {
+  font-size: 0.875rem;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentActions {
+  display: flex;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.attachmentBtn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+}
+
 .expandedActions {
   margin-top: 1.25rem;
   padding-top: 1rem;

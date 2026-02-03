@@ -65,12 +65,29 @@ interface InvoiceDetails {
   supplier_gst: string | null
   supplier_pan: string | null
   supplier_address: string | null
+  supplier_city: string | null
+  supplier_state_code: string | null
+  supplier_state_name: string | null
+  supplier_pincode: string | null
   supplier_email: string | null
   supplier_phone: string | null
   supplier_mobile: string | null
+  supplier_msme_number: string | null
+  supplier_website: string | null
+  supplier_contact_person: string | null
+  supplier_bank_account_name: string | null
+  supplier_bank_account_number: string | null
+  supplier_bank_ifsc_code: string | null
+  supplier_bank_name: string | null
+  supplier_branch_name: string | null
   po_id: number | null
   po_number: string | null
   po_date: string | null
+  po_unit: string | null
+  po_ref_unit: string | null
+  po_pfx: string | null
+  po_amd_no: number | null
+  po_terms: string | null
   bill_to: string | null
   bill_to_address: string | null
   bill_to_gstin: string | null
@@ -126,6 +143,7 @@ function InvoiceDetails() {
   const [validationAttemptFailed, setValidationAttemptFailed] = useState<boolean>(false)
   const [successDialogVisible, setSuccessDialogVisible] = useState<boolean>(false)
   const [successDialogContent, setSuccessDialogContent] = useState<{ summary: string; detail: string }>({ summary: '', detail: '' })
+  const [attachments, setAttachments] = useState<{ id: number; file_name: string; attachment_type: string; uploaded_at: string }[]>([])
 
   useEffect(() => {
     if (id) {
@@ -164,6 +182,7 @@ function InvoiceDetails() {
       }
       const data = await response.json()
       setInvoice(data)
+      await fetchAttachments(invoiceId)
     } catch (error: any) {
       toast.current?.show({
         severity: 'error',
@@ -173,6 +192,59 @@ function InvoiceDetails() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchAttachments = async (invoiceId: number) => {
+    try {
+      const res = await apiFetch(`invoices/${invoiceId}/attachments`)
+      if (res.ok) {
+        const list = await res.json()
+        setAttachments(list)
+      } else {
+        setAttachments([])
+      }
+    } catch {
+      setAttachments([])
+    }
+  }
+
+  const handleAttachmentView = async (attachmentId: number, attachmentType: string) => {
+    if (!id) return
+    const type = attachmentType === 'weight_slip' ? 'weight_slip' : 'invoice'
+    try {
+      const res = await apiFetch(`invoices/${id}/attachments/${type}/${attachmentId}`)
+      if (!res.ok) {
+        toast.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not open attachment', life: 4000 })
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch {
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not open attachment', life: 4000 })
+    }
+  }
+
+  const handleAttachmentDownload = async (attachmentId: number, fileName: string, attachmentType: string) => {
+    if (!id) return
+    const type = attachmentType === 'weight_slip' ? 'weight_slip' : 'invoice'
+    try {
+      const res = await apiFetch(`invoices/${id}/attachments/${type}/${attachmentId}?download=1`)
+      if (!res.ok) {
+        toast.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not download attachment', life: 4000 })
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName || 'attachment.pdf'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not download attachment', life: 4000 })
     }
   }
 
@@ -609,6 +681,47 @@ function InvoiceDetails() {
                 </div>
               )}
             </div>
+            {/* Attachments (invoice PDF + weight slips) inside Invoice Information */}
+            <div className={styles.attachmentsInCard}>
+              <h4 className={styles.attachmentsSubtitle}>
+                <i className="pi pi-paperclip" style={{ marginRight: '0.5rem' }}></i>
+                Attachments
+              </h4>
+              {attachments.length === 0 ? (
+                <p className={styles.attachmentsEmpty}>No attachments for this invoice.</p>
+              ) : (
+                <ul className={styles.attachmentsList}>
+                  {attachments.map((att) => (
+                    <li key={att.id} className={styles.attachmentItem}>
+                      <span className={styles.attachmentInfo}>
+                        <span className={styles.attachmentType}>
+                          {att.attachment_type === 'weight_slip' ? 'Weight slip' : 'Invoice'}
+                        </span>
+                        <span className={styles.attachmentFileName} title={att.file_name}>{att.file_name}</span>
+                      </span>
+                      <span className={styles.attachmentActions}>
+                        <Button
+                          icon="pi pi-eye"
+                          label="View"
+                          size="small"
+                          outlined
+                          className={styles.attachmentBtn}
+                          onClick={() => handleAttachmentView(att.id, att.attachment_type)}
+                        />
+                        <Button
+                          icon="pi pi-download"
+                          label="Download"
+                          size="small"
+                          outlined
+                          className={styles.attachmentBtn}
+                          onClick={() => handleAttachmentDownload(att.id, att.file_name, att.attachment_type)}
+                        />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
 
           {/* Purchase Order Information */}
@@ -640,20 +753,32 @@ function InvoiceDetails() {
                   <span className={styles.detailLabel}>PO Date:</span>
                   <span className={styles.detailValue}>{dateBodyTemplate(invoice.po_date)}</span>
                 </div>
-                <div className={styles.detailItem}>
-                  <span className={styles.detailLabel}>Bill To:</span>
-                  <span className={styles.detailValue}>{invoice.bill_to || '-'}</span>
-                </div>
-                {invoice.bill_to_address && (
+                {(invoice.po_unit || invoice.po_ref_unit) && (
+                  <>
+                    {invoice.po_unit && (
+                      <div className={styles.detailItem}>
+                        <span className={styles.detailLabel}>Unit:</span>
+                        <span className={styles.detailValue}>{invoice.po_unit}</span>
+                      </div>
+                    )}
+                    {invoice.po_ref_unit && (
+                      <div className={styles.detailItem}>
+                        <span className={styles.detailLabel}>Ref Unit:</span>
+                        <span className={styles.detailValue}>{invoice.po_ref_unit}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+                {invoice.po_pfx && (
                   <div className={styles.detailItem}>
-                    <span className={styles.detailLabel}>Bill To Address:</span>
-                    <span className={styles.detailValue}>{invoice.bill_to_address}</span>
+                    <span className={styles.detailLabel}>Prefix:</span>
+                    <span className={styles.detailValue}>{invoice.po_pfx}</span>
                   </div>
                 )}
-                {invoice.bill_to_gstin && (
+                {invoice.po_amd_no != null && invoice.po_amd_no !== 0 && (
                   <div className={styles.detailItem}>
-                    <span className={styles.detailLabel}>Bill To GSTIN:</span>
-                    <span className={styles.detailValue}>{invoice.bill_to_gstin}</span>
+                    <span className={styles.detailLabel}>Amendment No:</span>
+                    <span className={styles.detailValue}>{invoice.po_amd_no}</span>
                   </div>
                 )}
                 <div className={styles.detailItem}>
@@ -664,6 +789,34 @@ function InvoiceDetails() {
                     </span>
                   </span>
                 </div>
+                {invoice.poLineItems && invoice.poLineItems.length > 0 && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Line Items:</span>
+                    <span className={styles.detailValue}>{invoice.poLineItems.length} item(s)</span>
+                  </div>
+                )}
+                <div className={styles.detailItem}>
+                  <span className={styles.detailLabel}>Bill To:</span>
+                  <span className={styles.detailValue}>{invoice.bill_to || '-'}</span>
+                </div>
+                {invoice.bill_to_address && (
+                  <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}>
+                    <span className={styles.detailLabel}>Bill To Address:</span>
+                    <span className={styles.detailValue}>{invoice.bill_to_address}</span>
+                  </div>
+                )}
+                {invoice.bill_to_gstin && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Bill To GSTIN:</span>
+                    <span className={styles.detailValue}>{invoice.bill_to_gstin}</span>
+                  </div>
+                )}
+                {invoice.po_terms && (
+                  <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}>
+                    <span className={styles.detailLabel}>Terms & Conditions:</span>
+                    <span className={styles.detailValue}>{invoice.po_terms}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -679,6 +832,12 @@ function InvoiceDetails() {
                 <span className={styles.detailLabel}>Supplier Name:</span>
                 <span className={styles.detailValue}>{invoice.supplier_name || '-'}</span>
               </div>
+              {invoice.supplier_contact_person && (
+                <div className={styles.detailItem}>
+                  <span className={styles.detailLabel}>Contact Person:</span>
+                  <span className={styles.detailValue}>{invoice.supplier_contact_person}</span>
+                </div>
+              )}
               <div className={styles.detailItem}>
                 <span className={styles.detailLabel}>GST Number:</span>
                 <span className={styles.detailValue}>{invoice.supplier_gst || '-'}</span>
@@ -687,10 +846,24 @@ function InvoiceDetails() {
                 <span className={styles.detailLabel}>PAN Number:</span>
                 <span className={styles.detailValue}>{invoice.supplier_pan || '-'}</span>
               </div>
-              <div className={styles.detailItem}>
+              {invoice.supplier_msme_number && (
+                <div className={styles.detailItem}>
+                  <span className={styles.detailLabel}>MSME Number:</span>
+                  <span className={styles.detailValue}>{invoice.supplier_msme_number}</span>
+                </div>
+              )}
+              <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}>
                 <span className={styles.detailLabel}>Address:</span>
                 <span className={styles.detailValue}>{invoice.supplier_address || '-'}</span>
               </div>
+              {(invoice.supplier_city || invoice.supplier_state_name || invoice.supplier_pincode) && (
+                <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}>
+                  <span className={styles.detailLabel}>City / State / Pincode:</span>
+                  <span className={styles.detailValue}>
+                    {[invoice.supplier_city, invoice.supplier_state_name, invoice.supplier_pincode].filter(Boolean).join(' · ') || '-'}
+                  </span>
+                </div>
+              )}
               <div className={styles.detailItem}>
                 <span className={styles.detailLabel}>Email:</span>
                 <span className={styles.detailValue}>{invoice.supplier_email || '-'}</span>
@@ -699,6 +872,26 @@ function InvoiceDetails() {
                 <span className={styles.detailLabel}>Phone:</span>
                 <span className={styles.detailValue}>{invoice.supplier_phone || invoice.supplier_mobile || '-'}</span>
               </div>
+              {invoice.supplier_website && (
+                <div className={styles.detailItem} style={{ gridColumn: '1 / -1' }}>
+                  <span className={styles.detailLabel}>Website:</span>
+                  <span className={styles.detailValue}>
+                    <a href={invoice.supplier_website.startsWith('http') ? invoice.supplier_website : `https://${invoice.supplier_website}`} target="_blank" rel="noopener noreferrer" className={styles.clickableLink}>{invoice.supplier_website}</a>
+                  </span>
+                </div>
+              )}
+              {(invoice.supplier_bank_account_name || invoice.supplier_bank_account_number || invoice.supplier_bank_ifsc_code) && (
+                <div className={styles.supplierBankBlock} style={{ gridColumn: '1 / -1' }}>
+                  <span className={styles.detailLabel}>Banking Details:</span>
+                  <div className={styles.supplierBankDetails}>
+                    {invoice.supplier_bank_account_name && <div><span className={styles.bankLabel}>Account name</span> {invoice.supplier_bank_account_name}</div>}
+                    {invoice.supplier_bank_account_number && <div><span className={styles.bankLabel}>Account number</span> {invoice.supplier_bank_account_number}</div>}
+                    {invoice.supplier_bank_ifsc_code && <div><span className={styles.bankLabel}>IFSC</span> {invoice.supplier_bank_ifsc_code}</div>}
+                    {invoice.supplier_bank_name && <div><span className={styles.bankLabel}>Bank</span> {invoice.supplier_bank_name}</div>}
+                    {invoice.supplier_branch_name && <div><span className={styles.bankLabel}>Branch</span> {invoice.supplier_branch_name}</div>}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

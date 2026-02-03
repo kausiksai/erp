@@ -47,6 +47,10 @@ interface InvoiceItem {
   sgstRate?: number | null
   sgstAmount?: number | null
   totalTaxAmount?: number | null
+  /** Weight slip PDF file name (stored when user uploads weight slip for this line) */
+  weightSlipFileName?: string | null
+  /** Weight slip PDF as base64 (stored when user uploads weight slip for this line) */
+  weightSlipBuffer?: string | null
 }
 
 interface PurchaseOrder {
@@ -931,6 +935,14 @@ export default function InvoiceUpload() {
       // Generate scanning number if not set
       const scanningNumber = invoiceData.scanningNumber || generateScanningNumber()
 
+      const weightSlips = invoiceData.items
+        .map((item, lineIndex) =>
+          item.weightSlipFileName && item.weightSlipBuffer
+            ? { lineIndex, fileName: item.weightSlipFileName, buffer: item.weightSlipBuffer }
+            : null
+        )
+        .filter((x): x is { lineIndex: number; fileName: string; buffer: string } => x != null)
+
       const payload = {
         invoiceNumber: invoiceData.invoiceNumber,
         invoiceDate: invoiceData.invoiceDate ? invoiceData.invoiceDate.toISOString().split('T')[0] : null,
@@ -942,6 +954,7 @@ export default function InvoiceUpload() {
         notes: invoiceData.termsAndConditions || null,
         pdfFileName: pdfFileName,
         pdfBuffer: pdfBuffer,
+        weightSlips: weightSlips.length ? weightSlips : undefined,
         items: invoiceData.items.map((item, index) => ({
           itemName: item.itemName,
           itemCode: item.itemCode,
@@ -1109,6 +1122,19 @@ export default function InvoiceUpload() {
     setWeightSlipFile(null)
   }
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
+        const base64 = dataUrl.indexOf(',') >= 0 ? dataUrl.split(',')[1] : ''
+        resolve(base64 || '')
+      }
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+  }
+
   const handleWeightSlipUpload = async (file: File) => {
     if (!file || file.type !== 'application/pdf') {
       toast.current?.show({
@@ -1138,11 +1164,23 @@ export default function InvoiceUpload() {
       const extractedWeight = result.weight != null ? Number(result.weight) : null
 
       if (extractedWeight !== null && !Number.isNaN(extractedWeight)) {
-        updateItem(currentItemIndex, 'weight', extractedWeight)
+        const base64 = await fileToBase64(file)
+        setInvoiceData(prev => {
+          const newItems = [...prev.items]
+          const item = newItems[currentItemIndex]
+          if (!item) return prev
+          newItems[currentItemIndex] = {
+            ...item,
+            weight: extractedWeight,
+            weightSlipFileName: file.name,
+            weightSlipBuffer: base64
+          }
+          return { ...prev, items: newItems }
+        })
         toast.current?.show({
           severity: 'success',
           summary: 'Weight Extracted',
-          detail: `Weight extracted: ${extractedWeight}`,
+          detail: `Weight extracted: ${extractedWeight}. Weight slip will be saved with the invoice.`,
           life: 3000
         })
         setWeightSlipDialogVisible(false)
