@@ -117,7 +117,8 @@ function GRNDetails() {
       if (!res.ok) {
         throw new Error(data.message || data.error || 'Upload failed')
       }
-      toast.current?.show({ severity: 'success', summary: 'Import done', detail: data.message, life: 5000 })
+      const life = data.grnInserted === 0 && data.hint ? 12000 : 5000
+      toast.current?.show({ severity: data.grnInserted === 0 ? 'warn' : 'success', summary: 'Import done', detail: data.message, life })
       await fetchGRN()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Upload failed'

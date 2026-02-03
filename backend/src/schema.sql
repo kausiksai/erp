@@ -290,8 +290,6 @@ CREATE INDEX IF NOT EXISTS idx_grn_supplier ON grn (supplier_id);
 -- ============================================
 CREATE TABLE IF NOT EXISTS asn (
   id                 BIGSERIAL PRIMARY KEY,
-  po_id              BIGINT      REFERENCES purchase_orders(po_id),
-  supplier_id        BIGINT      REFERENCES suppliers(supplier_id),
   asn_no             VARCHAR(50),
   supplier           VARCHAR(50),
   supplier_name      VARCHAR(255),
@@ -307,11 +305,16 @@ CREATE TABLE IF NOT EXISTS asn (
   doc_no_date        VARCHAR(100),
   status             VARCHAR(50)
 );
+-- PO number for ASN is derived via: asn.inv_no -> invoices.invoice_number -> invoices.po_id -> purchase_orders.po_number
 
 CREATE INDEX IF NOT EXISTS idx_asn_asn_no ON asn (asn_no);
 CREATE INDEX IF NOT EXISTS idx_asn_dc_no ON asn (dc_no);
-CREATE INDEX IF NOT EXISTS idx_asn_po ON asn (po_id);
-CREATE INDEX IF NOT EXISTS idx_asn_supplier ON asn (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_asn_inv_no ON asn (inv_no);
+
+-- Migration for existing DBs that have asn.po_id / asn.supplier_id:
+-- DROP INDEX IF EXISTS idx_asn_po; DROP INDEX IF EXISTS idx_asn_supplier;
+-- ALTER TABLE asn DROP COLUMN IF EXISTS po_id, DROP COLUMN IF EXISTS supplier_id;
+-- CREATE INDEX IF NOT EXISTS idx_asn_inv_no ON asn (inv_no);
 
 -- ============================================
 -- Invoices

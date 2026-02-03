@@ -1576,16 +1576,15 @@ router.get('/grn', async (req, res) => {
   }
 })
 
-// List all ASN (with po_number from purchase_orders, supplier name from suppliers table)
+// List all ASN; po_number derived via (1) asn.inv_no -> invoices -> po, or (2) fallback asn.dc_no -> grn -> po
+// Match is trim + case-insensitive so Excel/API variations still link
 router.get('/asn', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT 
          a.id,
-         a.po_id,
-         po.po_number,
-         a.supplier_id,
-         COALESCE(s.supplier_name, a.supplier_name) AS supplier_name,
+         COALESCE(po.po_number, po_grn.po_number) AS po_number,
+         COALESCE(a.supplier_name, a.supplier) AS supplier_name,
          a.asn_no,
          a.supplier,
          a.dc_no,
@@ -1600,8 +1599,15 @@ router.get('/asn', async (req, res) => {
          a.doc_no_date,
          a.status
        FROM asn a
-       LEFT JOIN purchase_orders po ON po.po_id = a.po_id
-       LEFT JOIN suppliers s ON s.supplier_id = a.supplier_id
+       LEFT JOIN invoices inv ON TRIM(COALESCE(a.inv_no, '')) <> ''
+         AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no))
+       LEFT JOIN purchase_orders po ON po.po_id = inv.po_id
+       LEFT JOIN LATERAL (
+         SELECT g.po_id FROM grn g
+         WHERE TRIM(COALESCE(a.dc_no, '')) <> '' AND LOWER(TRIM(g.dc_no)) = LOWER(TRIM(a.dc_no))
+         LIMIT 1
+       ) g ON true
+       LEFT JOIN purchase_orders po_grn ON po_grn.po_id = g.po_id
        ORDER BY a.dc_date DESC NULLS LAST, a.id DESC`
     )
     res.json(result.rows)
@@ -1645,9 +1651,12 @@ router.post('/grn/upload-excel', authenticateToken, authorize(['admin', 'manager
     await client.query('BEGIN')
     const result = await importGrnExcel(req.file.buffer, client)
     await client.query('COMMIT')
+    const message = result.grnInserted === 0 && result.hint
+      ? `Imported ${result.grnInserted} GRN record(s). ${result.hint}`
+      : `Imported ${result.grnInserted} GRN record(s)`
     res.json({
       success: true,
-      message: `Imported ${result.grnInserted} GRN record(s)`,
+      message,
       ...result
     })
   } catch (err) {
@@ -1669,9 +1678,12 @@ router.post('/asn/upload-excel', authenticateToken, authorize(['admin', 'manager
     await client.query('BEGIN')
     const result = await importAsnExcel(req.file.buffer, client)
     await client.query('COMMIT')
+    const message = result.asnInserted === 0 && result.hint
+      ? `Imported ${result.asnInserted} ASN record(s). ${result.hint}`
+      : `Imported ${result.asnInserted} ASN record(s)`
     res.json({
       success: true,
-      message: `Imported ${result.asnInserted} ASN record(s)`,
+      message,
       ...result
     })
   } catch (err) {
@@ -1733,11 +1745,11 @@ router.get('/purchase-orders/incomplete', async (req, res) => {
          COALESCE(s.supplier_name, po.suplr_id::TEXT, 'N/A') AS supplier_name,
          EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id) AS has_invoice,
          EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id) AS has_grn,
-         EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id) AS has_asn,
+         EXISTS (SELECT 1 FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) AND inv.po_id = po.po_id) AS has_asn,
          ARRAY_REMOVE(ARRAY[
            CASE WHEN NOT EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id) THEN 'Invoice' END,
            CASE WHEN NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id) THEN 'GRN' END,
-           CASE WHEN NOT EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id) THEN 'ASN' END
+           CASE WHEN NOT EXISTS (SELECT 1 FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) AND inv.po_id = po.po_id) THEN 'ASN' END
          ], NULL) AS missing_items,
          (SELECT i.invoice_id FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('waiting_for_re_validation','debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_id,
          (SELECT LOWER(TRIM(i.status)) FROM invoices i WHERE i.po_id = po.po_id AND LOWER(TRIM(i.status)) IN ('waiting_for_re_validation','debit_note_approval','exception_approval') LIMIT 1) AS pending_invoice_status
@@ -1747,7 +1759,7 @@ router.get('/purchase-orders/incomplete', async (req, res) => {
          AND NOT (
            EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
            AND EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
-           AND EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
+           AND EXISTS (SELECT 1 FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) AND inv.po_id = po.po_id)
          )
        ORDER BY po.date DESC, po.po_id DESC`
     )
@@ -2418,7 +2430,7 @@ router.get('/reports/procurement-summary', authenticateToken, async (req, res) =
         FROM purchase_orders po
         WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
            OR NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
-           OR NOT EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
+           OR NOT EXISTS (SELECT 1 FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) AND inv.po_id = po.po_id)
       `)
     ])
     res.json({
@@ -2545,7 +2557,7 @@ router.get('/reports/dashboard', authenticateToken, async (req, res) => {
           SELECT COUNT(*)::int AS c FROM purchase_orders po
           WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.po_id = po.po_id)
             OR NOT EXISTS (SELECT 1 FROM grn g WHERE g.po_id = po.po_id)
-            OR NOT EXISTS (SELECT 1 FROM asn a WHERE a.po_id = po.po_id)
+            OR NOT EXISTS (SELECT 1 FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) AND inv.po_id = po.po_id)
         `)).rows[0]?.c ?? 0
       },
       byMonth: byMonth.rows.reverse()
@@ -2594,7 +2606,7 @@ router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 
           ),
           pool.query(
             `SELECT a.id, a.asn_no, a.dc_no, a.dc_date, a.inv_no, a.inv_date, a.lr_no, a.transporter_name
-             FROM asn a WHERE a.po_id = $1 ORDER BY a.dc_date DESC NULLS LAST`,
+             FROM asn a JOIN invoices inv2 ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv2.invoice_number)) = LOWER(TRIM(a.inv_no)) WHERE inv2.po_id = $1 ORDER BY a.dc_date DESC NULLS LAST`,
             [inv.po_id]
           ),
           pool.query(
@@ -2774,7 +2786,7 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
       if (r.po_id) {
         const [grnRes, asnRes] = await Promise.all([
           pool.query('SELECT id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty, unit_cost FROM grn WHERE po_id = $1 ORDER BY grn_date DESC', [r.po_id]),
-          pool.query('SELECT id, asn_no, dc_no, dc_date, inv_no, inv_date, lr_no, transporter_name FROM asn WHERE po_id = $1 ORDER BY dc_date DESC', [r.po_id])
+          pool.query('SELECT a.id, a.asn_no, a.dc_no, a.dc_date, a.inv_no, a.inv_date, a.lr_no, a.transporter_name FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,\'\')) <> \'\' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) WHERE inv.po_id = $1 ORDER BY a.dc_date DESC', [r.po_id])
         ])
         grnList = grnRes.rows
         asnList = asnRes.rows
@@ -2901,7 +2913,7 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
       if (r.po_id) {
         const [grnRes, asnRes] = await Promise.all([
           pool.query('SELECT id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty, unit_cost FROM grn WHERE po_id = $1 ORDER BY grn_date DESC', [r.po_id]),
-          pool.query('SELECT id, asn_no, dc_no, dc_date, inv_no, inv_date, lr_no, transporter_name FROM asn WHERE po_id = $1 ORDER BY dc_date DESC', [r.po_id])
+          pool.query('SELECT a.id, a.asn_no, a.dc_no, a.dc_date, a.inv_no, a.inv_date, a.lr_no, a.transporter_name FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,\'\')) <> \'\' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) WHERE inv.po_id = $1 ORDER BY a.dc_date DESC', [r.po_id])
         ])
         grnList = grnRes.rows
         asnList = asnRes.rows

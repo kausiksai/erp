@@ -157,8 +157,8 @@ WHERE po.po_number LIKE 'PO-%';
 -- 8. ASN
 -- PO-PF-01: no ASN (missing). All others have ASN.
 -- ============================================
-INSERT INTO asn (po_id, supplier_id, asn_no, supplier, supplier_name, dc_no, dc_date, inv_no, inv_date, lr_no, lr_date, unit, transporter, transporter_name, doc_no_date, status)
-SELECT po.po_id, po.supplier_id, 'ASN-'||po.po_number, 'V1', s.supplier_name, 'DC-'||po.po_number, po.date + 2, '', po.date + 2, 'LR-'||po.po_number, po.date + 3, 'U1', 'Transporter A', 'Transporter A', to_char(po.date + 2, 'DD-Mon-YYYY'), 'received'
+INSERT INTO asn (asn_no, supplier, supplier_name, dc_no, dc_date, inv_no, inv_date, lr_no, lr_date, unit, transporter, transporter_name, doc_no_date, status)
+SELECT 'ASN-'||po.po_number, 'V1', s.supplier_name, 'DC-'||po.po_number, po.date + 2, 'INV-'||po.po_number, po.date + 2, 'LR-'||po.po_number, po.date + 3, 'U1', 'Transporter A', 'Transporter A', to_char(po.date + 2, 'DD-Mon-YYYY'), 'received'
 FROM purchase_orders po
 LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
 WHERE po.po_number LIKE 'PO-%' AND po.po_number != 'PO-PF-01';

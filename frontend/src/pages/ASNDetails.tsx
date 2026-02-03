@@ -15,9 +15,7 @@ import styles from './ASNDetails.module.css'
 
 interface ASNRecord {
   id: number
-  po_id: number | null
-  po_number: string | null
-  supplier_id: number | null
+  po_number: string | null  // derived via asn.inv_no -> invoices.invoice_number -> purchase_orders.po_number
   supplier_name: string | null
   asn_no: string | null
   supplier: string | null
@@ -106,7 +104,8 @@ function ASNDetails() {
       if (!res.ok) {
         throw new Error(data.message || data.error || 'Upload failed')
       }
-      toast.current?.show({ severity: 'success', summary: 'Import done', detail: data.message, life: 5000 })
+      const life = data.asnInserted === 0 && data.hint ? 12000 : 5000
+      toast.current?.show({ severity: data.asnInserted === 0 ? 'warn' : 'success', summary: 'Import done', detail: data.message, life })
       await fetchASN()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Upload failed'

@@ -72,13 +72,18 @@ function formatDateForPg (d) {
 
 /**
  * Parse workbook buffer and return array of row objects (first row = headers).
+ * Skips rows that are completely empty (all values blank).
  */
 function parseExcelToRows (buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true })
   const firstSheet = wb.SheetNames[0]
   if (!firstSheet) return []
   const sheet = wb.Sheets[firstSheet]
-  return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
+  return rows.filter(row => {
+    const values = Object.values(row)
+    return values.some(v => v != null && String(v).trim() !== '')
+  })
 }
 
 /**
@@ -166,17 +171,39 @@ export async function importPoExcel (buffer, client) {
   return { purchaseOrdersInserted, linesInserted }
 }
 
+/** GRN Excel: all supported header names for PO number (case-insensitive, spaces → underscores) */
+const GRN_PO_HEADERS = [
+  'PO_NO', 'PO_NUMBER', 'po_number', 'O_NUMBE', 'PO No', 'PO No.', 'PO Number', 'PO #',
+  'Order No', 'Order Number', 'PO', 'P.O. No', 'P.O. Number', 'Purchase Order', 'PO Reference'
+]
+
+/** GRN Excel: header names for other key columns */
+const GRN_HEADERS = {
+  grnNo: ['GRN_NO', 'grn_no', 'GRN No', 'GRN No.', 'GRN Number', 'GRN'],
+  grnDate: ['GRN_DATE', 'grn_date', 'GRN Date', 'GRN Date.', 'Date'],
+  dcNo: ['DC_NO', 'dc_no', 'DC No', 'DC No.', 'DC Number', 'Challan No', 'Delivery Challan'],
+  dcDate: ['DC_DATE', 'dc_date', 'DC Date', 'DC Date.', 'Challan Date'],
+  grnQty: ['GRN_QTY', 'grn_qty', 'Qty', 'Quantity', 'GRN Qty', 'Received Qty', 'Receipt Qty']
+}
+
 /**
  * Import GRN matched Excel. Resolve po_id from po_no/PO_NO/po_number. Map columns to grn table.
+ * Returns grnInserted and, when 0, diagnostic info (rowsTotal, rowsWithPoNo, rowsWithMatchingPo) for a clearer message.
  */
 export async function importGrnExcel (buffer, client) {
   const rows = parseExcelToRows(buffer)
-  if (rows.length === 0) return { grnInserted: 0 }
+  if (rows.length === 0) {
+    return { grnInserted: 0, rowsTotal: 0, rowsWithPoNo: 0, rowsWithMatchingPo: 0, hint: 'Excel has no data rows (or first sheet is empty). Ensure the first row contains column headers and following rows contain GRN data.' }
+  }
 
   let grnInserted = 0
+  let rowsWithPoNo = 0
+  let rowsWithMatchingPo = 0
+
   for (const row of rows) {
-    const poNo = toStr(get(row, 'PO_NO', 'PO_NUMBER', 'po_number', 'O_NUMBE', 'PO No'))
+    const poNo = toStr(get(row, ...GRN_PO_HEADERS))
     if (!poNo) continue
+    rowsWithPoNo++
 
     const poRow = await client.query(
       `SELECT po_id FROM purchase_orders WHERE TRIM(po_number) = TRIM($1) LIMIT 1`,
@@ -184,26 +211,27 @@ export async function importGrnExcel (buffer, client) {
     )
     const poId = poRow.rows[0]?.po_id ?? null
     if (!poId) continue
+    rowsWithMatchingPo++
 
-    const grnNo = toStr(get(row, 'GRN_NO', 'grn_no', 'GRN No'), 50)
-    const grnDate = parseDate(get(row, 'GRN_DATE', 'grn_date', 'GRN Date'))
-    const dcNo = toStr(get(row, 'DC_NO', 'dc_no', 'DC No'), 50)
-    const dcDate = parseDate(get(row, 'DC_DATE', 'dc_date', 'DC Date'))
-    const grnLine = toNum(get(row, 'GRN_LINE', 'grn_line'))
+    const grnNo = toStr(get(row, ...GRN_HEADERS.grnNo), 50)
+    const grnDate = parseDate(get(row, ...GRN_HEADERS.grnDate))
+    const dcNo = toStr(get(row, ...GRN_HEADERS.dcNo), 50)
+    const dcDate = parseDate(get(row, 'DC_DATE', 'dc_date', 'DC Date', 'DC Date.', 'Challan Date'))
+    const grnLine = toNum(get(row, 'GRN_LINE', 'grn_line', 'GRN Line', 'Line'))
     const unit = toStr(get(row, 'UNIT', 'unit'), 50)
-    const item = toStr(get(row, 'ITEM', 'item_id', 'ITEM_ID'), 50)
-    const description1 = toStr(get(row, 'DESCRIPTION_1', 'description_1', 'ESCRIPTION', 'Description'))
+    const item = toStr(get(row, 'ITEM', 'item_id', 'ITEM_ID', 'Item', 'Item Code'), 50)
+    const description1 = toStr(get(row, 'DESCRIPTION_1', 'description_1', 'ESCRIPTION', 'Description', 'Item Description'), 255)
     const uom = toStr(get(row, 'UOM', 'uom'), 50)
-    const grnQty = toDecimal(get(row, 'GRN_QTY', 'grn_qty', 'Qty'))
-    const acceptedQty = toDecimal(get(row, 'ACCEPTED_QTY', 'accepted_qty', 'Accepted Qty'))
-    const unitCost = toDecimal(get(row, 'UNIT_COST', 'unit_cost'))
-    const gateEntryNo = toStr(get(row, 'GATE_ENTRY_NO', 'gate_entry_no'), 50)
+    const grnQty = toDecimal(get(row, ...GRN_HEADERS.grnQty))
+    const acceptedQty = toDecimal(get(row, 'ACCEPTED_QTY', 'accepted_qty', 'Accepted Qty', 'Accepted'))
+    const unitCost = toDecimal(get(row, 'UNIT_COST', 'unit_cost', 'Unit Cost', 'Rate'))
+    const gateEntryNo = toStr(get(row, 'GATE_ENTRY_NO', 'gate_entry_no', 'Gate Entry No'), 50)
     const supplierDocNo = toStr(get(row, 'SUPPLIER_DOC_NO', 'supplier_doc_no'), 50)
     const supplierDocDate = parseDate(get(row, 'SUPPLIER_DOC_DATE', 'supplier_doc_date'))
     const supplier = toStr(get(row, 'SUPPLIER', 'supplier'), 50)
-    const supplierName = toStr(get(row, 'SUPPLIER_NAME', 'supplier_name', 'PPLIER_NA'), 255)
+    const supplierName = toStr(get(row, 'SUPPLIER_NAME', 'supplier_name', 'PPLIER_NA', 'Supplier Name'), 255)
     const poPfx = toStr(get(row, 'PO_PFX', 'po_pfx', 'PFX'), 50)
-    const poLine = toNum(get(row, 'PO_LINE', 'po_line'))
+    const poLine = toNum(get(row, 'PO_LINE', 'po_line', 'PO Line'))
 
     await client.query(
       `INSERT INTO grn (
@@ -219,52 +247,89 @@ export async function importGrnExcel (buffer, client) {
     )
     grnInserted++
   }
-  return { grnInserted }
+
+  let hint = null
+  if (grnInserted === 0 && rows.length > 0) {
+    if (rowsWithPoNo === 0) {
+      hint = 'No PO number column found. Use a header like "PO No", "PO Number", "PO_NO", or "PO Number" in the first row. If your file has a title row (e.g. "GRN Details"), make the row with column names the first row of the sheet, or delete the title row. Column names are matched case-insensitively.'
+    } else if (rowsWithMatchingPo === 0) {
+      hint = 'PO numbers in the file do not match any Purchase Order in the system. Upload or create POs first (Purchase Order Upload), then upload GRN.'
+    } else {
+      hint = 'No rows were inserted. Check that PO numbers match exactly (no extra spaces) and that required data is present.'
+    }
+  }
+
+  return {
+    grnInserted,
+    rowsTotal: rows.length,
+    rowsWithPoNo,
+    rowsWithMatchingPo,
+    ...(hint && { hint })
+  }
 }
 
 /**
- * Import Pending ASN Excel. Resolve po_id from po_number/PO_NO. Map columns to asn table.
+ * Import ASN Excel. Expected columns (exact names, case-insensitive):
+ * ASN No., Supplier, Supplier Name, DC No., DC Date, Inv. No., Inv. Date, LR No., LR Date,
+ * Unit, Transporter, Transporter Name, Doc. No./Date, Status
+ * PO number is not stored; it is derived at display time via asn.inv_no -> invoices -> purchase_orders.
  */
 export async function importAsnExcel (buffer, client) {
   const rows = parseExcelToRows(buffer)
-  if (rows.length === 0) return { asnInserted: 0 }
+  if (rows.length === 0) {
+    return { asnInserted: 0, rowsTotal: 0, hint: 'Excel has no data rows (or first sheet is empty). Ensure the first row contains column headers: ASN No., Supplier, Supplier Name, DC No., DC Date, Inv. No., Inv. Date, LR No., LR Date, Unit, Transporter, Transporter Name, Doc. No./Date, Status.' }
+  }
 
   let asnInserted = 0
+  let rowsSkippedNoData = 0
+
   for (const row of rows) {
-    const poNo = toStr(get(row, 'PO_NO', 'PO_NUMBER', 'po_number', 'O_NUMBE', 'PO No'))
-    if (!poNo) continue
+    const asnNo = toStr(get(row, 'ASN No.', 'ASN No', 'ASN_NO', 'asn_no', 'ASN Number', 'ASN'), 50)
+    const supplier = toStr(get(row, 'Supplier', 'SUPPLIER', 'supplier'), 50)
+    const supplierName = toStr(get(row, 'Supplier Name', 'Supplier Name.', 'SUPPLIER_NAME', 'supplier_name', 'PPLIER_NA'), 255)
+    const dcNo = toStr(get(row, 'DC No.', 'DC No', 'DC_NO', 'dc_no', 'DC Number', 'Challan No'), 50)
+    const dcDate = parseDate(get(row, 'DC Date', 'DC Date.', 'DC_DATE', 'dc_date', 'Challan Date'))
+    const invNo = toStr(get(row, 'Inv. No.', 'Inv. No', 'Inv No', 'INV_NO', 'inv_no', 'Invoice No', 'Invoice Number'), 50)
+    const invDate = parseDate(get(row, 'Inv. Date', 'Inv. Date.', 'Inv Date', 'INV_DATE', 'inv_date', 'Invoice Date'))
+    const lrNo = toStr(get(row, 'LR No.', 'LR No', 'LR_NO', 'lr_no', 'LR Number', 'L.R. No'), 50)
+    const lrDate = parseDate(get(row, 'LR Date', 'LR Date.', 'LR_DATE', 'lr_date'))
+    const unit = toStr(get(row, 'Unit', 'UNIT', 'unit'), 50)
+    const transporter = toStr(get(row, 'Transporter', 'TRANSPORTER', 'transporter'), 50)
+    const transporterName = toStr(get(row, 'Transporter Name', 'Transporter Name.', 'TRANSPORTER_NAME', 'transporter_name'), 255)
+    const docNoDate = toStr(get(row, 'Doc. No./Date', 'Doc. No. / Date', 'DOC_NO_DATE', 'doc_no_date'), 100)
+    const status = toStr(get(row, 'Status', 'STATUS', 'status'), 50)
 
-    const poRow = await client.query(
-      `SELECT po_id FROM purchase_orders WHERE TRIM(po_number) = TRIM($1) LIMIT 1`,
-      [poNo]
-    )
-    const poId = poRow.rows[0]?.po_id ?? null
-    if (!poId) continue
-
-    const asnNo = toStr(get(row, 'ASN_NO', 'asn_no', 'ASN No'), 50)
-    const dcNo = toStr(get(row, 'DC_NO', 'dc_no', 'DC No'), 50)
-    const dcDate = parseDate(get(row, 'DC_DATE', 'dc_date', 'DC Date'))
-    const invNo = toStr(get(row, 'INV_NO', 'inv_no', 'Inv No'), 50)
-    const invDate = parseDate(get(row, 'INV_DATE', 'inv_date', 'Inv Date'))
-    const lrNo = toStr(get(row, 'LR_NO', 'lr_no', 'LR No'), 50)
-    const lrDate = parseDate(get(row, 'LR_DATE', 'lr_date', 'LR Date'))
-    const unit = toStr(get(row, 'UNIT', 'unit'), 50)
-    const transporter = toStr(get(row, 'TRANSPORTER', 'transporter'), 50)
-    const transporterName = toStr(get(row, 'TRANSPORTER_NAME', 'transporter_name', 'Transporter Name'), 255)
-    const supplier = toStr(get(row, 'SUPPLIER', 'supplier'), 50)
-    const supplierName = toStr(get(row, 'SUPPLIER_NAME', 'supplier_name', 'PPLIER_NA'), 255)
-    const status = toStr(get(row, 'STATUS', 'status'), 50)
+    const hasAnyData = asnNo || dcNo || invNo || lrNo || supplier || supplierName || transporter || transporterName
+    if (!hasAnyData) {
+      rowsSkippedNoData++
+      continue
+    }
 
     await client.query(
       `INSERT INTO asn (
-        po_id, asn_no, dc_no, dc_date, inv_no, inv_date, lr_no, lr_date, unit, transporter, transporter_name, supplier, supplier_name, status
+        asn_no, supplier, supplier_name, dc_no, dc_date, inv_no, inv_date, lr_no, lr_date,
+        unit, transporter, transporter_name, doc_no_date, status
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
-        poId, asnNo, dcNo, dcDate ? formatDateForPg(dcDate) : null, invNo, invDate ? formatDateForPg(invDate) : null,
-        lrNo, lrDate ? formatDateForPg(lrDate) : null, unit, transporter, transporterName, supplier, supplierName, status
+        asnNo, supplier, supplierName, dcNo, dcDate ? formatDateForPg(dcDate) : null, invNo, invDate ? formatDateForPg(invDate) : null,
+        lrNo, lrDate ? formatDateForPg(lrDate) : null, unit, transporter, transporterName, docNoDate, status
       ]
     )
     asnInserted++
   }
-  return { asnInserted }
+
+  let hint = null
+  if (asnInserted === 0 && rows.length > 0) {
+    if (rowsSkippedNoData === rows.length) {
+      hint = 'No recognizable ASN columns found. Expected first row headers: ASN No., Supplier, Supplier Name, DC No., DC Date, Inv. No., Inv. Date, LR No., LR Date, Unit, Transporter, Transporter Name, Doc. No./Date, Status. If your file has a title row, make the row with these column names the first row of the sheet. Matching is case-insensitive.'
+    } else {
+      hint = 'No rows were inserted. Ensure at least one of: ASN No., DC No., Inv. No., LR No., Transporter, or Supplier is present in each row.'
+    }
+  }
+
+  return {
+    asnInserted,
+    rowsTotal: rows.length,
+    ...(hint && { hint })
+  }
 }

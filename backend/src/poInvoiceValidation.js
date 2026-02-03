@@ -175,7 +175,7 @@ export async function runFullValidation(invoiceId) {
       [poId]
     ),
     getCumulativeQuantities(poId),
-    pool.query(`SELECT COUNT(*) AS cnt FROM asn WHERE po_id = $1`, [poId])
+    pool.query(`SELECT COUNT(*) AS cnt FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) WHERE inv.po_id = $1`, [poId])
   ])
 
   const invLines = invLinesRes.rows
