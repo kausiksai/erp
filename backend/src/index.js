@@ -1102,6 +1102,13 @@ router.get('/invoices/:id', async (req, res) => {
   }
 })
 
+// Parse payment terms days from PO terms text (e.g. "30 DAYS", "60 DAYS FROM RECEIPT")
+function parsePaymentTermsDays(terms) {
+  if (!terms || typeof terms !== 'string') return 30
+  const match = String(terms).toUpperCase().trim().match(/(\d+)\s*DAY/i)
+  return match ? Math.max(0, parseInt(match[1], 10)) || 30 : 30
+}
+
 // Create invoice (only saves when Save Invoice is clicked - no updates to suppliers, PO, or other tables)
 router.post('/invoices', async (req, res) => {
   const client = await pool.connect()
@@ -1111,6 +1118,7 @@ router.post('/invoices', async (req, res) => {
       invoiceDate,
       supplierId,
       poId,
+      poNumber: bodyPoNumber,
       scanningNumber,
       totalAmount,
       taxAmount,
@@ -1124,30 +1132,51 @@ router.post('/invoices', async (req, res) => {
     
     await client.query('BEGIN')
     
+    // Resolve po_number and payment_due_date from body or PO lookup when po_id is set
+    let poNumber = bodyPoNumber != null && String(bodyPoNumber).trim() !== '' ? String(bodyPoNumber).trim() : null
+    let paymentDueDate = null
+    if (poId) {
+      const poRow = await client.query('SELECT po_number, terms FROM purchase_orders WHERE po_id = $1', [poId])
+      const po = poRow.rows[0]
+      if (po) {
+        if (!poNumber) poNumber = po.po_number
+        if (invoiceDate) {
+          const days = parsePaymentTermsDays(po.terms)
+          const d = new Date(invoiceDate)
+          d.setDate(d.getDate() + days)
+          paymentDueDate = d.toISOString().slice(0, 10)
+        }
+      }
+    }
+    
     // CREATE new invoice (no updates to suppliers, PO, or other tables)
     const { rows: invoiceRows } = await client.query(
-      `INSERT INTO invoices (invoice_number, invoice_date, supplier_id, po_id, scanning_number, total_amount, tax_amount, status, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO invoices (invoice_number, invoice_date, supplier_id, po_id, scanning_number, po_number, total_amount, tax_amount, status, payment_due_date, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (invoice_number) DO UPDATE
        SET invoice_date = EXCLUDED.invoice_date,
            supplier_id = EXCLUDED.supplier_id,
            po_id = EXCLUDED.po_id,
            scanning_number = EXCLUDED.scanning_number,
+           po_number = EXCLUDED.po_number,
            total_amount = EXCLUDED.total_amount,
            tax_amount = EXCLUDED.tax_amount,
            status = EXCLUDED.status,
+           payment_due_date = EXCLUDED.payment_due_date,
            notes = EXCLUDED.notes,
            updated_at = NOW()
        RETURNING invoice_id`,
       [
         invoiceNumber || `INV-${Date.now()}`,
         invoiceDate || null,
-        supplierId || null, // Use provided supplier ID, don't create/update suppliers
-        poId || null, // Use provided PO ID, don't update PO
+        supplierId || null,
+        poId || null,
         scanningNumber || null,
+        poNumber || null,
         totalAmount ? parseFloat(totalAmount) : null,
         taxAmount ? parseFloat(taxAmount) : null,
         status || 'waiting_for_validation',
+        paymentDueDate || null,
         notes || null
       ]
     )
@@ -1286,6 +1315,14 @@ router.put('/invoices/:id', async (req, res) => {
     
     await client.query('BEGIN')
     
+    const existingInv = await client.query(
+      'SELECT po_id, invoice_date FROM invoices WHERE invoice_id = $1',
+      [id]
+    )
+    const existing = existingInv.rows[0] || {}
+    const effectivePoId = poId !== undefined ? poId : existing.po_id
+    const effectiveInvoiceDate = invoiceDate !== undefined ? invoiceDate : existing.invoice_date
+    
     const updateFields = []
     const values = []
     let idx = 1
@@ -1305,6 +1342,36 @@ router.put('/invoices/:id', async (req, res) => {
     if (poId !== undefined) {
       updateFields.push(`po_id = $${idx++}`)
       values.push(poId)
+      let poNumber = req.body.poNumber != null && String(req.body.poNumber).trim() !== '' ? String(req.body.poNumber).trim() : null
+      let poTerms = null
+      const poRow = await client.query('SELECT po_number, terms FROM purchase_orders WHERE po_id = $1', [poId])
+      if (poRow.rows[0]) {
+        if (!poNumber) poNumber = poRow.rows[0].po_number
+        poTerms = poRow.rows[0].terms
+      }
+      if (poNumber !== null) {
+        updateFields.push(`po_number = $${idx++}`)
+        values.push(poNumber)
+      }
+      if (effectiveInvoiceDate && poTerms != null) {
+        const days = parsePaymentTermsDays(poTerms)
+        const d = new Date(effectiveInvoiceDate)
+        d.setDate(d.getDate() + days)
+        updateFields.push(`payment_due_date = $${idx++}`)
+        values.push(d.toISOString().slice(0, 10))
+      }
+    }
+    if (req.body.poNumber !== undefined && poId === undefined) {
+      updateFields.push(`po_number = $${idx++}`)
+      values.push(String(req.body.poNumber).trim() || null)
+    }
+    if (invoiceDate !== undefined && effectivePoId && poId === undefined) {
+      const poRow = await client.query('SELECT terms FROM purchase_orders WHERE po_id = $1', [effectivePoId])
+      const days = parsePaymentTermsDays(poRow.rows[0]?.terms)
+      const d = new Date(invoiceDate)
+      d.setDate(d.getDate() + days)
+      updateFields.push(`payment_due_date = $${idx++}`)
+      values.push(d.toISOString().slice(0, 10))
     }
     if (scanningNumber !== undefined) {
       updateFields.push(`scanning_number = $${idx++}`)

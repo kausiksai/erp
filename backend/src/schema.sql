@@ -344,6 +344,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_supplier ON invoices (supplier_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_po ON invoices (po_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_po_number ON invoices (po_number);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices (status);
+CREATE INDEX IF NOT EXISTS idx_invoices_po_status ON invoices (po_id, status);
 
 -- ============================================
 -- Invoice Lines
