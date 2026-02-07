@@ -10,7 +10,7 @@ from PIL import Image
 from openai import OpenAI
 
 # ---------------- CONFIG ----------------
-MODEL_NAME = "qwen-vl-ocr"
+MODEL_NAME = "qwen-vl-max"
 
 # ⚠️ Put your API key in environment variable instead
 # QWEN_API_KEY = os.getenv("DASHSCOPE_API_KEY", "YOUR_API_KEY_HERE")
@@ -25,72 +25,156 @@ app = FastAPI(title="Qwen Invoice OCR API")
 
 # ---------------- PROMPT ----------------
 PROMPT = """
-You are a professional invoice data extraction engine.
+You are an expert invoice data extraction engine.
 
-Extract invoice data from the image and return ONLY valid JSON.
+Your task is to read the provided invoice image or PDF and extract structured data into STRICT JSON format.
 
-CRITICAL BANK RULES:
-- Account Number must contain ONLY digits.
-- IFSC Code must be 11 characters like HDFC0000166.
-- Branch Name must NOT contain IFSC code.
-- If a line contains both Branch and IFSC (like: "Second Line Beach Road & HDFC0000166"):
-    → branchName = "Second Line Beach Road"
-    → ifscCode = "HDFC0000166"
+Follow these rules carefully:
 
-JSON FORMAT:
+-------------------------
+GENERAL EXTRACTION RULES
+-------------------------
+
+1. Extract only factual data visible in the invoice.
+2. If a field is missing, unclear, or not present, return an empty string "".
+3. Do NOT hallucinate or guess missing values.
+4. Preserve numbers exactly as written (no currency symbols).
+5. Convert all numeric values to plain strings (no commas).
+   Example: "1,23,456.00" → "123456.00"
+6. Dates should be returned exactly as seen (do not reformat).
+7. Ignore stamps, signatures, watermarks, and handwritten marks unless they contain key invoice data.
+8. Extract all line items in the item table.
+9. If multiple taxes are shown per item, map them correctly.
+10. Return ONLY valid JSON. No explanations. No extra text.
+
+-------------------------
+FIELD EXTRACTION LOGIC
+-------------------------
+
+invoiceNumber:
+- Look for labels like: Invoice No, Invoice Number, Bill No, Tax Invoice No
+
+invoiceDate:
+- Look for: Invoice Date, Date, Bill Date
+
+poNumber:
+- Look for: PO Number, Purchase Order, Buyer Order No
+
+supplierName:
+- Extract seller/company issuing the invoice
+
+billTo:
+- Extract buyer/customer company name
+
+billToAddress:
+- Full buyer address block
+
+billToGst:
+- Extract GSTIN / VAT / Tax ID of buyer
+
+-------------------------
+ITEM TABLE EXTRACTION
+-------------------------
+
+For each row in the item table extract:
+
+itemName:
+- Description of goods/services
+
+quantity:
+- Quantity or Qty column
+
+unitPrice:
+- Rate / Unit Price
+
+amount:
+- Line total amount
+
+hsnSac:
+- HSN/SAC/HS Code
+
+taxableValue:
+- Taxable amount per item (if present)
+
+cgstPercent / cgstAmount:
+sgstPercent / sgstAmount:
+
+- Extract from item-level tax columns
+- If taxes only appear in summary, leave item tax empty
+
+-------------------------
+TOTALS EXTRACTION
+-------------------------
+
+subtotal:
+- Taxable total or subtotal
+
+cgst:
+sgst:
+- Total CGST/SGST from summary
+
+roundOff:
+- Round off value
+
+taxAmount:
+- Total tax amount
+
+totalAmount:
+- Final invoice total
+
+totalAmountInWords:
+- Amount in words section
+
+-------------------------
+CRITICAL OUTPUT RULES
+-------------------------
+
+1. Output must be STRICT JSON
+2. Use exactly this schema
+3. No markdown
+4. No comments
+5. No extra keys
+6. Always include all keys
+
+-------------------------
+OUTPUT JSON
+-------------------------
 
 {
- "invoiceNumber":"",
- "invoiceDate":"",
- "poNumber":"",
- "supplierName":"",
+"invoiceNumber":"",
+"invoiceDate":"",
+"poNumber":"",
+"supplierName":"",
+"billTo":"",
+"billToAddress":"",
+"billToGst":"",
 
- "billTo":"",
- "billToAddress":"",
- "billToGst":"",
- "billToMobile":"",
- "placeOfSupply":"",
- "panNumber":"",
+"items":[
+{
+"itemName":"",
+"quantity":"",
+"unitPrice":"",
+"amount":"",
+"hsnSac":"",
+"taxableValue":"",
+"cgstPercent":"",
+"cgstAmount":"",
+"sgstPercent":"",
+"sgstAmount":""
+}
+],
 
- "items":[
-   {
-     "itemName":"",
-     "quantity":"",
-     "unitPrice":"",
-     "amount":"",
-     "hsnSac":"",
-     "taxableValue":"",
-     "cgstPercent":"",
-     "cgstAmount":"",
-     "sgstPercent":"",
-     "sgstAmount":""
-   }
- ],
-
- "subtotal":"",
- "cgst":"",
- "sgst":"",
- "roundOff":"",
- "totalAmount":"",
- "totalAmountInWords":"",
-
- "bankName":"",
- "branchName":"",
- "ifscCode":"",
- "accountNumber":"",
- "accountHolderName":""
+"subtotal":"",
+"cgst":"",
+"sgst":"",
+"roundOff":"",
+"taxAmount":"",
+"totalAmount":"",
+"totalAmountInWords":""
 }
 
-STRICT RULES:
-- Use empty string if missing
-- Extract PO Number (Purchase Order Number) if present on the invoice
-- PO Number may appear as "PO No.", "P.O. No.", "Purchase Order", "PO Number", "Order No.", "Order Number", "Buyer Order No.", "Buyer Order Number", "Buyer's Order no", can start number with PO or PO- or similar
-- Return ONLY the PO identifier (e.g. PO9251598). Strip any year or financial-year suffix (e.g. "/ 2025-26", "2025-26", "- 2025-26"). poNumber must be just the PO code like PO9251598 with no slash, no year, no extra text.
-- unitPrice: Extract the RATE or PRICE PER UNIT from the line item table (the column often labelled "Rate", "Price", "Unit Price", "Rate/Unit"). This is the per-unit amount (e.g. 3130 or 3,130.00), NOT the quantity. Return the full numeric value; Indian format uses comma as thousand separator (3,130.00 means 3130). Do NOT confuse quantity (e.g. 20) with unit price (e.g. 3130).
-- Do NOT swap IFSC and account number
-- Do NOT combine branch and IFSC
-- Do NOT add explanation
-- Return JSON only
+Return ONLY this JSON.
+
 """
 
 # Weight extraction prompt
