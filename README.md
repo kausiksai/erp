@@ -81,10 +81,103 @@ The system implements the following business rules for PO, Invoice, GRN, and ASN
 - If an invoice is received for a PO already marked **Fulfilled**: Invoice → **Exception Approval**.
 - After exception approval: Invoice → **Ready for Payment**.
 
+### 6. Validate → Ready for Payment (Single Step)
+- When validation **succeeds** (all checks pass): Invoice status → **Ready for Payment** immediately; a **payment_approval** record is created with status `approved` so the invoice appears in **Ready for Payments** without a separate approval step.
+- When validation **fails** (e.g. invoice not linked to PO, supplier mismatch): API returns **400** with a clear reason; invoice status remains **Waiting for validation**. No fake success.
+
 ### Implementation Notes
-- **Schema:** `purchase_orders` has `terms` (e.g. "60 DAYS FROM RECEIPT OF MATERIAL"); days are parsed from this text for payment due date. `status` = pending | fulfilled | partially_fulfilled. `invoices` has `payment_due_date`, `debit_note_value`, and `status` (pending | ready_for_payment | debit_note_approval | exception_approval | …).
+- **Schema:** `purchase_orders` has `terms` (e.g. "60 DAYS FROM RECEIPT OF MATERIAL"); days are parsed from this text for payment due date. `status` = open | fulfilled | partially_fulfilled. `invoices` has `payment_due_date`, `debit_note_value`, `po_number`, and `status` (waiting_for_validation | ready_for_payment | debit_note_approval | exception_approval | validated | paid | rejected | …).
 - **Backend:** `poInvoiceValidation.js` implements validation, cumulative quantities, and status updates. APIs: `POST /api/invoices/:id/validate`, `PATCH /api/invoices/:id/debit-note-approve`, `PATCH /api/invoices/:id/exception-approve`, `PATCH /api/purchase-orders/:id/force-close`, `GET /api/purchase-orders/:id/cumulative`.
-- **Database:** `backend/src/schema.sql` contains tables and indexes only. `backend/src/data.sql` contains seed data (users, menu, role access, suppliers, owners) and test PO data for all scenarios (partially fulfilled, fulfilled, debit note, exception approval, ready for payment, approved, payment done). Run `npm run db:init` to apply schema and load data.
+- **Database:** `backend/src/schema.sql` contains tables and indexes. `backend/src/data.sql` contains seed data. Run `npm run db:init` (see Installation) to apply schema and load data.
+
+---
+
+## ✅ Rules and Validations (Implemented)
+
+### Invoice Validation (Backend – `poInvoiceValidation.js`)
+
+Validation runs when you click **Validate** on an invoice. The invoice must pass all checks below for status to move to **Ready for payment**.
+
+| Rule | Description | On failure |
+|------|-------------|------------|
+| **PO linked** | Invoice must have `po_id` (linked to a purchase order). | Validation fails; API returns 400, e.g. "Invoice is not linked to a PO". |
+| **PO exists** | The linked PO must exist in `purchase_orders`. | Validation fails; "PO not found". |
+| **PO not already fulfilled** | If PO status is already **fulfilled**, invoice goes to **Exception approval** (not standard validation). | Response `action: 'exception_approval'`. |
+| **Supplier match** | `invoices.supplier_id` must equal `purchase_orders.supplier_id`. | Validation fails; "Invoice supplier does not match PO supplier". |
+| **Invoice number** | Invoice should have a non-empty invoice number (warning if missing). | Can still validate; warning only. |
+| **Quantity vs PO** | Sum of invoice line quantities must match PO total quantity (tolerance 0.001). | Validation fails or **shortfall**; e.g. "Invoice quantity does not match PO total" or "Invoice total quantity exceeds PO total". |
+| **Invoice vs GRN** | Invoice total quantity must not exceed GRN total (pay only for received). | Validation fails / shortfall; "GRN total (x) is less than invoice quantity (y). Pay only for what was received." |
+| **Line-level** | Each invoice line should match a PO line (by `po_line_id` or sequence); line total ≈ qty × rate (tolerance 0.01). | Line errors contribute to validation failure. |
+| **Totals** | Sum of line totals vs invoice total amount (tolerance 0.01). | Warning only; does not block validation. |
+| **ASN** | If no ASN exists for the PO (via invoice number match), a warning is added. | Informational only. |
+
+**Tolerances:** `TOL_QTY = 0.001`, `TOL_AMOUNT = 0.01`, `TOL_RATE_PCT = 0.01`.
+
+**Validation outcomes:**
+
+- **Valid** → Invoice status = `ready_for_payment`, payment_approval created, PO → `fulfilled`.
+- **Shortfall** (quantity/GRN mismatch) → Invoice status = `waiting_for_re_validation`; user can choose "Proceed to payment" or "Send to debit note".
+- **Exception** (PO already fulfilled) → Invoice status = `exception_approval`; after exception approve → ready for payment.
+- **Failed** (no PO link, supplier mismatch, or other errors) → API returns **400** with `reason` and `errors`; invoice status unchanged.
+
+**Status flows (summary):**
+
+- **Invoice:** `waiting_for_validation` → (Validate) → `ready_for_payment` | `waiting_for_re_validation` | `debit_note_approval` | `exception_approval`. Then payment flow: approve → `ready_for_payment` → `partially_paid` / `paid`.
+- **PO:** `open` → `fulfilled` or `partially_fulfilled`; force-close → `fulfilled`.
+
+### Invoice Create/Update Rules (Backend)
+
+| Rule | Description |
+|------|-------------|
+| **po_number** | On create/update, `po_number` is set from request body or looked up from `purchase_orders` using `po_id`. Stored in `invoices.po_number`. |
+| **payment_due_date** | When `po_id` and `invoice_date` are present, payment due date = invoice_date + **payment terms days**. Terms days are parsed from `purchase_orders.terms` (e.g. "30 DAYS", "60 DAYS FROM RECEIPT") with default 30. |
+| **scanning_number vs po_number** | Columns are separate; values are not swapped. |
+
+### ASN and PO Number (Backend)
+
+| Rule | Description |
+|------|-------------|
+| **ASN table** | `asn` table has **no** `po_id` or `supplier_id`. PO number for ASN is **derived** at display time. |
+| **PO number for ASN** | Derived by: `asn.inv_no` → match `invoices.invoice_number` (trim, case-insensitive) → `invoices.po_id` → `purchase_orders.po_number`. Fallback: `asn.dc_no` → match `grn.dc_no` → `grn.po_id` → `purchase_orders.po_number`. |
+| **Has ASN / ASN list for PO** | Queries use the same join (asn ↔ invoices on invoice number, then po_id) to determine if a PO has ASN or to list ASNs for a PO. |
+
+### Excel Import Rules (Backend – `excelImport.js`)
+
+| Entity | Rules |
+|--------|--------|
+| **PO** | Header row required; `po_number` (or aliases) and optional date/amd_no. Rows grouped by (po_number, amd_no); ON CONFLICT updates. |
+| **GRN** | PO number column required; resolved to `po_id` from `purchase_orders`. If no matching PO, row skipped. Empty rows skipped. On 0 records imported, API returns a hint (missing column, no matching PO, etc.). |
+| **ASN** | PO number **not** required. Columns: ASN No., Supplier, DC No., Inv. No., etc. `inv_no` stored as-is; PO number for ASN is derived when listing (see above). Empty rows skipped. |
+
+### OCR Extraction Rules (Qwen Service – `qwen_service.py`)
+
+| Rule | Description |
+|------|-------------|
+| **Invoice number & date** | Prompt instructs model to look for Invoice No, Bill No, GI…, Date, etc., and not leave blank when visible. |
+| **PO number** | Extract only the order code (e.g. V2287); strip suffixes like " dt. 12-Jan-26", " / 2025-26". |
+| **PAN vs GST** | `panNumber` = PAN only (10 chars). If only 15-char GST is found, do not put in `panNumber`; leave blank or use billToGst. |
+| **Branch vs IFSC** | Branch name must not contain IFSC. If text is "Anna Nagar, Chennai. & KVBLO001154", split into branchName and ifscCode. |
+| **Numbers** | Amounts returned without comma (e.g. 73668.00 not 73,668.00). |
+| **Placeholders** | Values like "YOUR PLACE", "XXX", "NA" → empty string. |
+| **Post-processing** | After OCR: strip PO date suffix from poNumber; split IFSC from branchName if concatenated; clear panNumber if it looks like GST (15 chars); remove commas from numeric fields; blank placeholder values. |
+
+### Weight Slip Extraction (Qwen Service)
+
+- **WEIGHT_PROMPT**: Extract single numeric weight (kg or g; grams converted to kg). Return JSON `{ "weight": "<value>" }` or null if not found. No explanation.
+
+### Client-Side Validations (Frontend – `utils/validation.ts`)
+
+| Rule | Description |
+|------|-------------|
+| **Email** | Must match format `[^\\s@]+@[^\\s@]+\\.[^\\s@]+`. |
+| **Password** | Minimum 8 characters; at least one letter and one number. |
+
+### Attachments and Banking
+
+- **Invoice PDF**: Stored in `invoice_attachments` (one or more per invoice; `attachment_type = 'invoice'`).
+- **Weight slips**: Stored in `invoice_weight_attachments`, one per invoice line (linked by `invoice_line_id`).
+- **Debit notes**: Stored in `debit_notes` table.
+- **Payment approvals**: Created when invoice is validated (ready_for_payment) or when manager approves from Approve Payments. Banking details can come from request body or supplier master.
 
 ## 📁 Project Structure
 
@@ -156,9 +249,11 @@ Before you begin, ensure you have the following installed:
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/kausiksai/erp.git
+git clone https://github.com/Sriram-Ananth/erp.git
 cd erp
 ```
+
+(Or use `https://github.com/kausiksai/erp.git` if that is your fork.)
 
 ### Step 2: Database Setup
 
@@ -365,10 +460,17 @@ After running `npm run db:init`, you can login with:
 - `GET /api/auth/me` - Get current user info
 
 ### Invoices
-- `POST /api/invoices/upload` - Upload and extract invoice data
-- `GET /api/invoices` - List all invoices
-- `GET /api/invoices/:id` - Get invoice details
-- `PUT /api/invoices/:id` - Update invoice
+- `POST /api/invoices` - Create invoice (with po_number, payment_due_date from PO when po_id provided)
+- `GET /api/invoices` - List invoices (filter by status, invoice number, PO number)
+- `GET /api/invoices/:id` - Get invoice details (with PO, supplier, lines, attachments)
+- `PUT /api/invoices/:id` - Update invoice (po_number and payment_due_date kept in sync)
+- `POST /api/invoices/:id/validate` - Validate invoice against PO/GRN (→ ready_for_payment, shortfall, or exception_approval; returns 400 with reason if validation fails)
+- `POST /api/invoices/:id/validate-resolution` - Resolve shortfall: `proceed_to_payment` or `send_to_debit_note`
+- `PATCH /api/invoices/:id/debit-note-approve` - Approve debit note (set debit_note_value, invoice → ready_for_payment)
+- `PATCH /api/invoices/:id/exception-approve` - Exception approve (invoice for already-fulfilled PO → ready_for_payment)
+- `GET /api/invoices/:id/attachments` - List invoice attachments (PDF + weight slips)
+- `GET /api/invoices/:id/attachments/:type/:attachmentId` - Get attachment file (type: `invoice` or `weight_slip`)
+- `POST /api/invoices/upload` - Upload and extract invoice data (OCR)
 - `POST /api/invoices/extract-weight` - Extract weight from weight slip PDF
 
 ### Users
@@ -387,8 +489,20 @@ After running `npm run db:init`, you can login with:
 
 ### Purchase Orders
 - `GET /api/purchase-orders` - List all purchase orders
+- `GET /api/purchase-orders/incomplete` - Get incomplete POs (missing invoice, GRN, or ASN)
 - `GET /api/purchase-orders/:poNumber` - Get PO by number
-- `GET /api/purchase-orders/incomplete` - Get incomplete POs
+- `GET /api/purchase-orders/:poId/cumulative` - Get cumulative PO/invoice/GRN quantities
+- `PATCH /api/purchase-orders/:poId/force-close` - Force close partially fulfilled PO → fulfilled
+- `POST /api/purchase-orders/upload-excel` - Import POs from Excel
+- `POST /api/grn/upload-excel` - Import GRN from Excel
+- `POST /api/asn/upload-excel` - Import ASN from Excel
+
+### Payments
+- `GET /api/payments/pending-approval` - Invoices validated, pending manager approval
+- `POST /api/payments/approve` - Approve payment (create payment_approval, invoice → ready_for_payment)
+- `GET /api/payments/ready` - List ready for payment (approved)
+- `POST /api/payments/record-payment` - Record partial/full payment
+- `GET /api/payments/history` - Payment history
 
 ## 🗄️ Database Schema
 
@@ -401,9 +515,16 @@ The database includes the following main tables:
 - **owners** - Company/owner information
 - **purchase_orders** - Purchase order records
 - **purchase_order_lines** - PO line items
-- **invoices** - Invoice records
-- **invoice_lines** - Invoice line items with weight/count
-- **invoice_attachments** - Stored PDF files
+- **delivery_challans** - Delivery challan data (Excel import)
+- **grn** - Goods Receipt Notes (Excel import; has po_id)
+- **asn** - Advanced Shipping Notices (Excel import; no po_id; PO number derived via inv_no → invoices → po)
+- **invoices** - Invoice records (po_id, po_number, payment_due_date, status)
+- **invoice_lines** - Invoice line items (weight/count, tax, line total)
+- **invoice_attachments** - Invoice PDF attachments
+- **invoice_weight_attachments** - Weight slip attachments (one per invoice line)
+- **debit_notes** - Debit note documents
+- **payment_approvals** - Payment approval records (invoice_id unique; status approved/partially_paid/payment_done)
+- **payment_transactions** - Partial payment transactions
 
 See `backend/src/schema.sql` for the complete schema with all relationships and indexes.
 
