@@ -7,10 +7,8 @@ import { InputNumber } from 'primereact/inputnumber'
 import { Toast } from 'primereact/toast'
 import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
-import { Divider } from 'primereact/divider'
 import { Dialog } from 'primereact/dialog'
 import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
-import { FileUpload } from 'primereact/fileupload'
 import { apiUrl } from '../utils/api'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
@@ -114,11 +112,10 @@ interface InvoiceData {
 }
 
 export default function InvoiceUpload() {
-  const [poNumber, setPoNumber] = useState<string>('')
-  const [poNumberInput, setPoNumberInput] = useState<string>('')
+  const [, setPoNumber] = useState<string>('')
+  const [, setPoNumberInput] = useState<string>('')
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrder | null>(null)
-  const [loadingPO, setLoadingPO] = useState<boolean>(false)
-  const [poValidated, setPoValidated] = useState<boolean>(true) // Start directly in upload mode
+  const [, setPoValidated] = useState<boolean>(true) // Start directly in upload mode
   
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
@@ -186,110 +183,6 @@ export default function InvoiceUpload() {
     return `SCN-${timestamp}-${random}`
   }, [])
 
-  // Fetch purchase order by number
-  const fetchPurchaseOrder = useCallback(async (poNum: string) => {
-    if (!poNum.trim()) {
-      toast.current?.show({
-        severity: 'warn',
-        summary: 'Validation Error',
-        detail: 'Please enter a purchase order number',
-        life: 3000
-      })
-      return false
-    }
-
-    setLoadingPO(true)
-    try {
-      const response = await fetch(api(`purchase-orders/${encodeURIComponent(poNum.trim())}`))
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          toast.current?.show({
-            severity: 'error',
-            summary: 'Purchase Order Not Found',
-            detail: `Purchase order number "${poNum}" does not exist in the system`,
-            life: 5000
-          })
-          return false
-        }
-        throw new Error('Failed to fetch purchase order')
-      }
-
-      const poData = await response.json()
-      
-      // Validate PO data structure
-      if (!poData || !poData.po_id) {
-        throw new Error('Invalid purchase order data received')
-      }
-      
-      // Safely map PO items
-      const poItems = Array.isArray(poData.items) ? poData.items : []
-      
-      try {
-        // Populate invoice data from purchase order (non-editable)
-        const updatedInvoiceData = {
-          invoiceNumber: '',
-          invoiceDate: null,
-          scanningNumber: generateScanningNumber(), // Generate unique scanning number
-          poNumber: poNum.trim(),
-          supplierName: poData.supplier_name || '',
-          billTo: poData.bill_to || '',
-          subtotal: poData.subtotal || null,
-          cgst: poData.cgst || null,
-          sgst: poData.sgst || null,
-          taxAmount: poData.tax_amount || null,
-          roundOff: null,
-          totalAmount: poData.total_amount || null,
-          totalAmountInWords: '',
-          termsAndConditions: poData.terms_and_conditions || '',
-          authorisedSignatory: '',
-          receiverSignature: '',
-          items: poItems.map((item: any) => ({
-            itemName: item?.item_name || '',
-            itemCode: item?.item_code || '',
-            hsnSac: item?.hsn_sac || '',
-            quantity: item?.quantity || null,
-            invoiceQuantity: null, // From invoice OCR only; PO load has no OCR
-            unitPrice: null, // PO items don't have unit price
-            lineTotal: null, // PO items don't have line total
-            taxableValue: null, // PO items don't have taxable value
-            cgstRate: null, // PO items don't have tax rates
-            cgstAmount: null, // PO items don't have tax amounts
-            sgstRate: null,
-            sgstAmount: null,
-            totalTaxAmount: null
-          }))
-        }
-        
-        // Update all states together
-        setPurchaseOrder(poData)
-        setPoNumber(poNum.trim())
-        setInvoiceData(updatedInvoiceData)
-        setPoValidated(true)
-      } catch (stateError: any) {
-        throw new Error(`Failed to process PO data: ${stateError.message}`)
-      }
-
-      toast.current?.show({
-        severity: 'success',
-        summary: 'Purchase Order Found',
-        detail: `Purchase order ${poNum} loaded successfully`,
-        life: 3000
-      })
-      return true
-    } catch (err: any) {
-      toast.current?.show({
-        severity: 'error',
-        summary: 'Error',
-        detail: err.message || 'Failed to fetch purchase order',
-        life: 5000
-      })
-      return false
-    } finally {
-      setLoadingPO(false)
-    }
-  }, [api])
-
   // Fetch PO by number and return data only (does not update invoiceData). Use when resolving PO for edited poNumber.
   const fetchPOByNumber = useCallback(async (poNum: string): Promise<PurchaseOrder | null> => {
     const trimmed = poNum?.trim()
@@ -304,41 +197,6 @@ export default function InvoiceUpload() {
       return null
     }
   }, [api])
-
-  const handlePoNumberSubmit = useCallback(async (e?: React.FormEvent) => {
-    e?.preventDefault()
-    await fetchPurchaseOrder(poNumberInput)
-  }, [poNumberInput, fetchPurchaseOrder])
-
-  const handleResetPO = useCallback(() => {
-    setPoNumber('')
-    setPoNumberInput('')
-    setPurchaseOrder(null)
-    setPoValidated(false)
-    setInvoiceData({
-      invoiceNumber: '',
-      invoiceDate: null,
-      scanningNumber: '',
-      poNumber: '',
-      supplierName: '',
-      billTo: '',
-      subtotal: null,
-      cgst: null,
-      sgst: null,
-      taxAmount: null,
-      roundOff: null,
-      totalAmount: null,
-      totalAmountInWords: '',
-      termsAndConditions: '',
-      authorisedSignatory: '',
-      receiverSignature: '',
-      items: []
-    })
-    setPdfFile(null)
-    setPdfUrl(null)
-    setInvoiceId(null)
-  }, [])
-
 
   // Match heights of Document Preview and Invoice Information panels
   useEffect(() => {
@@ -528,6 +386,7 @@ export default function InvoiceUpload() {
           invoiceNumber: '',
           invoiceDate: null,
           scanningNumber: '',
+          poNumber: '',
           supplierName: '',
           billTo: '',
           subtotal: null,
@@ -1031,6 +890,7 @@ export default function InvoiceUpload() {
           invoiceNumber: '',
           invoiceDate: null,
           scanningNumber: '',
+          poNumber: '',
           supplierName: '',
           billTo: '',
           subtotal: null,
@@ -1388,7 +1248,7 @@ export default function InvoiceUpload() {
                     <Document
                       file={pdfUrl}
                       onLoadSuccess={onDocumentLoadSuccess}
-                        onLoadError={(error) => {
+                        onLoadError={(_error) => {
                           toast.current?.show({
                           severity: 'error',
                           summary: 'PDF Load Failed',
@@ -1415,7 +1275,7 @@ export default function InvoiceUpload() {
                         renderTextLayer={true}
                         renderAnnotationLayer={true}
                         className={styles.pdfPage}
-                        onLoadError={(error) => {
+                        onLoadError={(_error) => {
                           // Silently handle page load errors
                         }}
                       />

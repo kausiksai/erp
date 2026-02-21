@@ -394,7 +394,7 @@ function ReadyForPayments() {
                   { key: 'payment_due_date', header: 'Due Date' },
                   { key: 'status', header: 'Status' }
                 ]
-                downloadCsv(list, 'ready-for-payments', columns)
+                downloadCsv(list as unknown as Record<string, unknown>[], 'ready-for-payments', columns)
               }}
               disabled={!list.length}
               outlined

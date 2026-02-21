@@ -6,6 +6,7 @@ import { InputText } from 'primereact/inputtext'
 import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { apiUrl } from '../utils/api'
+import EmptyState from '../components/EmptyState'
 import styles from './OwnerDetails.module.css'
 
 interface OwnerDetails {
@@ -119,7 +120,7 @@ function OwnerDetails() {
     setOriginalDetails({ ...ownerDetails })
   }
 
-  const handleCancel = (section: string) => {
+  const handleCancel = (_section: string) => {
     setEditingSection(null)
     if (originalDetails) {
       setOwnerDetails(originalDetails)

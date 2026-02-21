@@ -103,9 +103,8 @@ function InvoiceDetails() {
   const [invoice, setInvoice] = useState<InvoiceDetails | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [validating, setValidating] = useState<boolean>(false)
-  const [debitNoteApproving, setDebitNoteApproving] = useState<boolean>(false)
-  const [debitNoteValue, setDebitNoteValue] = useState<string>('')
-  const [validationSummary, setValidationSummary] = useState<{
+  const [, setDebitNoteValue] = useState<string>('')
+  const [, setValidationSummary] = useState<{
     reason?: string
     validationFailureReason?: string
     thisInvQty?: number

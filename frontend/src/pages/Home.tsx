@@ -153,7 +153,7 @@ function Home() {
           </section>
         ) : (
           <div className={styles.categoriesContainer}>
-            {menuCategories.map((category, catIndex) => (
+            {menuCategories.map((category) => (
               <section
                 key={category.id}
                 id={`section-${category.id}`}

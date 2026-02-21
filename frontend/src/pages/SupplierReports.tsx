@@ -208,7 +208,7 @@ function SupplierReports() {
                     { key: 'invoice_count', header: 'Invoice Count' },
                     { key: 'total_invoice_amount', header: 'Total Amount' }
                   ]
-                  downloadCsv(rows, 'supplier-reports', columns)
+                  downloadCsv(rows as unknown as Record<string, unknown>[], 'supplier-reports', columns)
                 }}
                 disabled={!data?.suppliers?.length}
                 outlined

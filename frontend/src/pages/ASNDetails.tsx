@@ -252,7 +252,7 @@ function ASNDetails() {
                   emptyMessage={searchTerm ? 'No matching ASN records' : 'No ASN records found'}
                   stripedRows
                   expandedRows={expandedRows}
-                  onRowToggle={(e) => setExpandedRows(e.data)}
+                  onRowToggle={(e) => setExpandedRows((e.data || {}) as { [key: string]: boolean })}
                   rowExpansionTemplate={rowExpansionTemplate}
                   dataKey="id"
                 >

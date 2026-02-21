@@ -10,7 +10,7 @@ import { ProgressSpinner } from 'primereact/progressspinner'
 import { Dialog } from 'primereact/dialog'
 import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog'
 import { InputText } from 'primereact/inputtext'
-import { apiFetch, apiUrl, getErrorMessageFromResponse } from '../utils/api'
+import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
 import styles from './ApprovePayments.module.css'
 
 interface AttachmentItem {
@@ -732,9 +732,10 @@ function ApprovePayments() {
                   value={list}
                   dataKey="invoice_id"
                   selection={selected}
-                  onSelectionChange={(e) => setSelected(e.value ?? [])}
+                  onSelectionChange={(e) => setSelected(Array.isArray(e.value) ? e.value : (e.value ? [e.value] : []))}
+                  selectionMode="multiple"
                   expandedRows={expandedRows}
-                  onRowToggle={(e) => setExpandedRows(e.data as Record<number, boolean>)}
+                  onRowToggle={(e) => setExpandedRows((e.data || {}) as Record<number, boolean>)}
                   rowExpansionTemplate={rowExpansionTemplate}
                   stripedRows
                   size="small"

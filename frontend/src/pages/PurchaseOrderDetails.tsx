@@ -252,7 +252,7 @@ function PurchaseOrderDetails() {
           
           {isLoading ? (
             <div className={styles.lineItemsLoading}>
-              <ProgressSpinner size="small" />
+              <ProgressSpinner style={{ width: '24px', height: '24px' }} />
               <span>Loading line items...</span>
             </div>
           ) : lineItems.length === 0 ? (
@@ -357,7 +357,7 @@ function PurchaseOrderDetails() {
                 emptyMessage={searchTerm ? 'No matching purchase orders' : 'No purchase orders found'}
                 stripedRows
                 expandedRows={expandedRows}
-                onRowToggle={(e) => setExpandedRows(e.data)}
+                onRowToggle={(e) => setExpandedRows((e.data || {}) as { [key: string]: boolean })}
                 rowExpansionTemplate={rowExpansionTemplate}
                 onRowExpand={onRowExpand}
                 dataKey="po_id"

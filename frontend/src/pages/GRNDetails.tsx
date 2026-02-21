@@ -316,7 +316,7 @@ function GRNDetails() {
                   emptyMessage={searchTerm ? 'No matching GRN records' : 'No GRN records found'}
                   stripedRows
                   expandedRows={expandedRows}
-                  onRowToggle={(e) => setExpandedRows(e.data)}
+                  onRowToggle={(e) => setExpandedRows((e.data || {}) as { [key: string]: boolean })}
                   rowExpansionTemplate={rowExpansionTemplate}
                   dataKey="id"
                 >

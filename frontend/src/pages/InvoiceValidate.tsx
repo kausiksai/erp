@@ -10,7 +10,7 @@ import { Toast } from 'primereact/toast'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import Header from '../components/Header'
 import PageNavigation from '../components/PageNavigation'
-import { apiUrl, apiFetch, getErrorMessageFromResponse, getDisplayError } from '../utils/api'
+import { apiFetch, getErrorMessageFromResponse, getDisplayError } from '../utils/api'
 import { downloadCsv } from '../utils/exportCsv'
 import { useDebounce } from '../hooks/useDebounce'
 import styles from './InvoiceValidate.module.css'
@@ -109,7 +109,7 @@ function InvoiceValidate() {
       { key: 'total_amount', header: 'Total Amount' },
       { key: 'status', header: 'Status' }
     ]
-    downloadCsv(invoices, 'invoices-validate', columns)
+    downloadCsv(invoices as unknown as Record<string, unknown>[], 'invoices-validate', columns)
   }
 
   const handleInvoiceClick = (invoiceId: number) => {
