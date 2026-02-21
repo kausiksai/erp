@@ -63,9 +63,8 @@ Step-by-step guide to deploy the full application (frontend + backend) on **Wind
 ## 4. Configure database (RDS)
 
 - Database is already set: **billing_system** on RDS.
-- Ensure the **EC2 security group** allows the server to reach RDS:
-  - In AWS Console: RDS → your DB → VPC security group → Inbound rules.
-  - Add (or confirm) rule: **PostgreSQL (5432)** from the **EC2 instance security group** (or the server’s private IP).
+- **Security group:** RDS must allow connections from your app server. In AWS Console: RDS → your DB → **VPC security group** → **Edit inbound rules** → Add rule: Type **PostgreSQL**, Port **5432**, Source = your **EC2 instance’s security group** (recommended) or the server’s IP, e.g. **65.1.85.146/32**.
+- **SSL:** If you see *"no pg_hba.conf entry ... no encryption"*, RDS is requiring SSL. The backend **automatically uses SSL** when `PGHOST` contains `rds.amazonaws.com`. Pull the latest code and restart the backend; no `.env` change needed. If you use a different host and the DB requires SSL, set `PGSSL=true` in `.env`.
 
 If the database is **empty**, load schema and seed data **once**:
 

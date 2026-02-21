@@ -3073,11 +3073,18 @@ app.use('/api', router)
 // Production: serve frontend static files and SPA fallback
 if (process.env.NODE_ENV === 'production') {
   const publicDir = path.join(__dirname, '..', 'public')
+  const indexHtml = path.join(publicDir, 'index.html')
   app.use(express.static(publicDir))
   app.use((req, res, next) => {
     if (req.method !== 'GET') return next()
     if (req.path.startsWith('/api')) return next()
-    res.sendFile(path.join(publicDir, 'index.html'))
+    res.sendFile(indexHtml, (err) => {
+      if (err) {
+        res.status(500).send(
+          '<h1>Frontend not deployed</h1><p>Build the frontend and copy <code>frontend/dist/*</code> into <code>backend/public/</code>.</p><p>From project root: <code>cd frontend && npm run build</code> then <code>Copy-Item dist\\* ../backend/public/ -Recurse -Force</code></p>'
+        )
+      }
+    })
   })
 }
 

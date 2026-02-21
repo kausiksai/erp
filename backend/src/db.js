@@ -13,9 +13,14 @@ const baseConfig = process.env.DATABASE_URL
       password: process.env.PGPASSWORD,
     }
 
+// RDS and most cloud Postgres require SSL. Enable when PGSSL=true or when host looks like RDS.
+const needSsl = process.env.PGSSL?.toLowerCase() === 'true' ||
+  (process.env.PGHOST && process.env.PGHOST.includes('rds.amazonaws.com'))
+const sslOption = needSsl ? { rejectUnauthorized: false } : false
+
 const pool = new Pool({
   ...baseConfig,
-  ssl: process.env.PGSSL?.toLowerCase() === 'true' ? { rejectUnauthorized: false } : false,
+  ssl: sslOption,
   max: process.env.PGPOOL_MAX ? Number(process.env.PGPOOL_MAX) : 10,
   idleTimeoutMillis: process.env.PG_IDLE ? Number(process.env.PG_IDLE) : 30000,
 })
