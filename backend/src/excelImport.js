@@ -2,7 +2,7 @@
  * Parse Excel (PO matched, GRN matched, Pending ASN) and insert into DB.
  * Uses first sheet; first row = headers. Column names matched case-insensitively and with common aliases.
  */
-import XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { pool } from './db.js'
 
 function normalizeKey (s) {
@@ -74,16 +74,38 @@ function formatDateForPg (d) {
  * Parse workbook buffer and return array of row objects (first row = headers).
  * Skips rows that are completely empty (all values blank).
  */
-function parseExcelToRows (buffer) {
-  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true })
-  const firstSheet = wb.SheetNames[0]
-  if (!firstSheet) return []
-  const sheet = wb.Sheets[firstSheet]
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
-  return rows.filter(row => {
-    const values = Object.values(row)
-    return values.some(v => v != null && String(v).trim() !== '')
-  })
+async function parseExcelToRows (buffer) {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer)
+  const sheet = workbook.worksheets[0]
+  if (!sheet) return []
+
+  const headerRow = sheet.getRow(1)
+  const values1 = headerRow.values || []
+  const headers = []
+  for (let i = 1; i < values1.length; i++) {
+    const h = values1[i]
+    const label = (h != null && String(h).trim() !== '') ? String(h).trim() : `Column${i}`
+    headers.push(label)
+  }
+  if (headers.length === 0) return []
+
+  const rows = []
+  const maxRow = sheet.rowCount || 10000
+  for (let r = 2; r <= maxRow; r++) {
+    const row = sheet.getRow(r)
+    const vals = row.values || []
+    const obj = {}
+    let hasAny = false
+    for (let c = 0; c < headers.length; c++) {
+      const v = vals[c + 1]
+      const out = (v != null && v !== '') ? v : ''
+      if (v != null && String(v).trim() !== '') hasAny = true
+      obj[headers[c]] = out
+    }
+    if (hasAny) rows.push(obj)
+  }
+  return rows
 }
 
 /**
@@ -92,7 +114,7 @@ function parseExcelToRows (buffer) {
  * ITEM_ID, ESCRIPTION/DESCRIPTION/DESCRIPTION1, QTY, UNIT_COST, DISC%/DISC_PCT, etc.
  */
 export async function importPoExcel (buffer, client) {
-  const rows = parseExcelToRows(buffer)
+  const rows = await parseExcelToRows(buffer)
   if (rows.length === 0) return { purchaseOrdersInserted: 0, linesInserted: 0 }
 
   const poKey = (r) => {
@@ -191,7 +213,7 @@ const GRN_HEADERS = {
  * Returns grnInserted and, when 0, diagnostic info (rowsTotal, rowsWithPoNo, rowsWithMatchingPo) for a clearer message.
  */
 export async function importGrnExcel (buffer, client) {
-  const rows = parseExcelToRows(buffer)
+  const rows = await parseExcelToRows(buffer)
   if (rows.length === 0) {
     return { grnInserted: 0, rowsTotal: 0, rowsWithPoNo: 0, rowsWithMatchingPo: 0, hint: 'Excel has no data rows (or first sheet is empty). Ensure the first row contains column headers and following rows contain GRN data.' }
   }
@@ -275,7 +297,7 @@ export async function importGrnExcel (buffer, client) {
  * PO number is not stored; it is derived at display time via asn.inv_no -> invoices -> purchase_orders.
  */
 export async function importAsnExcel (buffer, client) {
-  const rows = parseExcelToRows(buffer)
+  const rows = await parseExcelToRows(buffer)
   if (rows.length === 0) {
     return { asnInserted: 0, rowsTotal: 0, hint: 'Excel has no data rows (or first sheet is empty). Ensure the first row contains column headers: ASN No., Supplier, Supplier Name, DC No., DC Date, Inv. No., Inv. Date, LR No., LR Date, Unit, Transporter, Transporter Name, Doc. No./Date, Status.' }
   }
