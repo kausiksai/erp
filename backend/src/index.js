@@ -1,6 +1,10 @@
 import 'dotenv/config'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import express from 'express'
 import cors from 'cors'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import rateLimit from 'express-rate-limit'
 import { pool } from './db.js'
 import multer from 'multer'
@@ -3065,6 +3069,16 @@ router.patch('/payments/:id/mark-done', authenticateToken, authorize(['admin', '
 
 // Mount API routes under /api prefix
 app.use('/api', router)
+
+// Production: serve frontend static files and SPA fallback
+if (process.env.NODE_ENV === 'production') {
+  const publicDir = path.join(__dirname, '..', 'public')
+  app.use(express.static(publicDir))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next()
+    res.sendFile(path.join(publicDir, 'index.html'))
+  })
+}
 
 export default app
 
