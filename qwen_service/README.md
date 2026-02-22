@@ -24,7 +24,7 @@ pip install -r requirements.txt
 ```
 
 3. **Install Poppler:**
-   - **Windows**: Download from [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) and add to PATH
+   - **Windows**: Download from [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) (64-bit ZIP), extract to e.g. `C:\Program Files\poppler`, and either add `...\Library\bin` to system PATH **or** set env var before running: `$env:POPPLER_PATH="C:\Program Files\poppler\Library\bin"`
    - **Ubuntu/Debian**: `sudo apt-get install poppler-utils`
    - **macOS**: `brew install poppler`
 

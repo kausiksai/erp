@@ -10,6 +10,8 @@ from PIL import Image
 from openai import OpenAI
 
 # ---------------- CONFIG ----------------
+# Poppler: on Windows, set POPPLER_PATH to the folder containing pdftoppm.exe (e.g. C:\Program Files\poppler\Library\bin)
+POPPLER_PATH = os.environ.get("POPPLER_PATH") or None
 MODEL_NAME = "qwen-vl-max"
 
 # ⚠️ Put your API key in environment variable instead
@@ -276,7 +278,7 @@ async def extract_invoice(pdf: UploadFile = File(...)):
     try:
         pdf_bytes = await pdf.read()
 
-        images = convert_from_bytes(pdf_bytes, dpi=300)
+        images = convert_from_bytes(pdf_bytes, dpi=300, poppler_path=POPPLER_PATH)
 
         if not images:
             raise Exception("PDF conversion failed")
@@ -296,18 +298,19 @@ async def extract_invoice(pdf: UploadFile = File(...)):
             "invoice_json": qwen_text
         }
 
-    except Exception:
+    except Exception as e:
         print("\n========== ERROR ==========\n")
         traceback.print_exc()
         print("\n=========================\n")
-        raise HTTPException(status_code=500, detail="Qwen OCR failed")
+        err_msg = str(e)[:500] if str(e) else "Qwen OCR failed"
+        raise HTTPException(status_code=500, detail=f"Qwen OCR failed: {err_msg}")
 
 @app.post("/extract-weight")
 async def extract_weight(pdf: UploadFile = File(...)):
     try:
         pdf_bytes = await pdf.read()
 
-        images = convert_from_bytes(pdf_bytes, dpi=300)
+        images = convert_from_bytes(pdf_bytes, dpi=300, poppler_path=POPPLER_PATH)
 
         if not images:
             raise Exception("PDF conversion failed")
@@ -349,11 +352,12 @@ async def extract_weight(pdf: UploadFile = File(...)):
             "weight": weight_value
         }
 
-    except Exception:
+    except Exception as e:
         print("\n========== ERROR ==========\n")
         traceback.print_exc()
         print("\n=========================\n")
-        raise HTTPException(status_code=500, detail="Weight extraction failed")
+        err_msg = str(e)[:500] if str(e) else "Weight extraction failed"
+        raise HTTPException(status_code=500, detail=f"Weight extraction failed: {err_msg}")
 
 @app.get("/health")
 def health():
