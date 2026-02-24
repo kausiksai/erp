@@ -83,7 +83,7 @@ const jsonLimit = process.env.JSON_LIMIT || '25mb'
 app.use(express.json({ limit: jsonLimit }))
 app.use(express.urlencoded({ limit: jsonLimit, extended: true }))
 
-// Configure multer for file uploads
+// Configure multer for file uploads (PDF only - e.g. debit notes)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
@@ -92,6 +92,26 @@ const upload = multer({
       cb(null, true)
     } else {
       cb(new Error('Only PDF files are allowed'), false)
+    }
+  }
+})
+
+// Multer for invoice upload: PDF and images (PNG, JPEG, WebP)
+const invoiceMimeTypes = [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp'
+]
+const uploadInvoice = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    if (invoiceMimeTypes.includes(file.mimetype)) {
+      cb(null, true)
+    } else {
+      cb(new Error('Only PDF and image files (PNG, JPEG, WebP) are allowed'), false)
     }
   }
 })
@@ -167,11 +187,26 @@ function parseInvoiceData(extractedData) {
   
   // Try to parse JSON if Qwen returned structured data
   try {
-    // Look for JSON in the response
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const jsonData = JSON.parse(jsonMatch[0])
-      if (jsonData.invoiceNumber || jsonData.items) {
+    // Look for JSON in the response (match from first { to last })
+    let jsonStr = text.match(/\{[\s\S]*\}/)?.[0]
+    if (jsonStr) {
+      let jsonData = null
+      try {
+        jsonData = JSON.parse(jsonStr)
+      } catch (parseErr) {
+        // Response may be truncated (e.g. max_tokens cut off). Try to close open arrays/objects.
+        let openBrackets = (jsonStr.match(/\[/g) || []).length - (jsonStr.match(/\]/g) || []).length
+        let openBraces = (jsonStr.match(/\{/g) || []).length - (jsonStr.match(/\}/g) || []).length
+        let repaired = jsonStr.trim()
+        if (repaired.includes('"items"') && (openBrackets > 0 || openBraces > 0)) {
+          while (openBrackets > 0) { repaired += ']'; openBrackets-- }
+          while (openBraces > 0) { repaired += '}'; openBraces-- }
+          try {
+            jsonData = JSON.parse(repaired)
+          } catch (_) { /* ignore */ }
+        }
+      }
+      if (jsonData && (jsonData.invoiceNumber || jsonData.items)) {
         // Helper function to parse date strings (handles formats like "11-Aug-25", "DD-MMM-YY", etc.)
         const parseDate = (dateStr) => {
           if (!dateStr || dateStr === '') return ''
@@ -437,13 +472,14 @@ function parseInvoiceData(extractedData) {
 }
 
 // Upload invoice and extract data (NO DATABASE WRITES - only extraction)
-router.post('/invoices/upload', upload.single('pdf'), async (req, res) => {
+router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'PDF file is required' })
+      return res.status(400).json({ error: 'Invoice file is required (PDF or image)' })
     }
     
     const pdfBuffer = req.file.buffer
+    const fileMimetype = req.file.mimetype
     
     // Comprehensive prompt for extracting all invoice fields
     const invoicePrompt = `Extract ALL invoice information from this document. 
@@ -486,7 +522,7 @@ router.post('/invoices/upload', upload.single('pdf'), async (req, res) => {
     let extractionSuccess = false
     
     try {
-      extractedData = await extractWithQwen(pdfBuffer, req.file.originalname, invoicePrompt)
+      extractedData = await extractWithQwen(pdfBuffer, req.file.originalname, invoicePrompt, fileMimetype)
       extractionSuccess = true
       const textLength = typeof extractedData.text === 'string' ? extractedData.text.length : 'N/A'
     } catch (err) {
@@ -613,18 +649,19 @@ router.get('/qwen/health', async (req, res) => {
   }
 })
 
-// Extract weight from weight slip PDF
-router.post('/invoices/extract-weight', upload.single('pdf'), async (req, res) => {
+// Extract weight from weight slip (PDF or image)
+router.post('/invoices/extract-weight', uploadInvoice.single('pdf'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'PDF file is required' })
+      return res.status(400).json({ error: 'File is required (PDF or image)' })
     }
     
     const pdfBuffer = req.file.buffer
+    const fileMimetype = req.file.mimetype
     
     try {
       const { extractWeightFromPDF } = await import('./qwenService.js')
-      const weightResult = await extractWeightFromPDF(pdfBuffer, req.file.originalname)
+      const weightResult = await extractWeightFromPDF(pdfBuffer, req.file.originalname, fileMimetype)
       
       res.json({
         success: true,

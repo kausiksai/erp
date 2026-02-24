@@ -162,7 +162,7 @@ If the database is **empty**, load schema and seed data **once**:
 
 ## 7. Run the application (production)
 
-1. In PowerShell:
+1. In PowerShell (you **must** set `NODE_ENV=production` or you will get **GET / 404**; the app only serves the frontend in production):
    ```powershell
    cd C:\billing_system\backend
    $env:NODE_ENV="production"
@@ -181,6 +181,15 @@ If the database is **empty**, load schema and seed data **once**:
 4. From another PC, use:
    - http://ec2-65-1-85-146.ap-south-1.compute.amazonaws.com:4000  
    (Replace with your EC2 public IP or DNS if different.)
+
+### Use a custom domain (e.g. srimukha.com:4000)
+
+1. **DNS:** At your domain registrar or DNS provider, add an **A record** pointing to the server IP **65.1.85.146**:
+   - For **http://srimukha.com:4000**: A record for `@` (root) → 65.1.85.146  
+   - For **http://app.srimukha.com:4000**: A record for `app` → 65.1.85.146  
+2. In **backend `.env`** set the same URL as the allowed frontend origin:  
+   `FRONTEND_ORIGIN=http://srimukha.com:4000` or `FRONTEND_ORIGIN=http://app.srimukha.com:4000`  
+3. Restart the backend. After DNS propagates, open the app at the new URL.
 
 ---
 

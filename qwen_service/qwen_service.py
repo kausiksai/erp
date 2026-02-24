@@ -16,6 +16,7 @@ MODEL_NAME = "qwen-vl-max"
 
 # ⚠️ Put your API key in environment variable instead
 # QWEN_API_KEY = os.getenv("DASHSCOPE_API_KEY", "YOUR_API_KEY_HERE")
+#sk-647cb6d403874749b16484ccbbbfb654
 QWEN_API_KEY = 'sk-85db8875d6e74de9a2331951797d03f1'
 client = OpenAI(
     api_key=QWEN_API_KEY,
@@ -231,7 +232,7 @@ def call_qwen(image: Image.Image):
             }
         ],
         temperature=0,
-        max_tokens=1200
+        max_tokens=8192   # Enough for long invoices with many line items (was 1200, caused truncation)
     )
 
     return completion.choices[0].message.content
@@ -273,19 +274,26 @@ def call_qwen_weight(image: Image.Image):
 
 
 # ---------------- API ----------------
+IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+
+
 @app.post("/ocr")
 async def extract_invoice(pdf: UploadFile = File(...)):
     try:
-        pdf_bytes = await pdf.read()
+        file_bytes = await pdf.read()
+        content_type = (pdf.content_type or "").lower().split(";")[0].strip()
 
-        images = convert_from_bytes(pdf_bytes, dpi=300, poppler_path=POPPLER_PATH)
-
-        if not images:
-            raise Exception("PDF conversion failed")
-
-        invoice_page = images[0]
-
-        print("\nPDF converted to image")
+        if content_type in IMAGE_CONTENT_TYPES:
+            invoice_page = Image.open(BytesIO(file_bytes))
+            if invoice_page.mode not in ("RGB", "RGBA"):
+                invoice_page = invoice_page.convert("RGB")
+            print("\nImage loaded for OCR")
+        else:
+            images = convert_from_bytes(file_bytes, dpi=300, poppler_path=POPPLER_PATH)
+            if not images:
+                raise Exception("PDF conversion failed")
+            invoice_page = images[0]
+            print("\nPDF converted to image")
 
         qwen_text = call_qwen(invoice_page)
 
@@ -308,16 +316,20 @@ async def extract_invoice(pdf: UploadFile = File(...)):
 @app.post("/extract-weight")
 async def extract_weight(pdf: UploadFile = File(...)):
     try:
-        pdf_bytes = await pdf.read()
+        file_bytes = await pdf.read()
+        content_type = (pdf.content_type or "").lower().split(";")[0].strip()
 
-        images = convert_from_bytes(pdf_bytes, dpi=300, poppler_path=POPPLER_PATH)
-
-        if not images:
-            raise Exception("PDF conversion failed")
-
-        weight_slip_page = images[0]
-
-        print("\nWeight slip PDF converted to image")
+        if content_type in IMAGE_CONTENT_TYPES:
+            weight_slip_page = Image.open(BytesIO(file_bytes))
+            if weight_slip_page.mode not in ("RGB", "RGBA"):
+                weight_slip_page = weight_slip_page.convert("RGB")
+            print("\nWeight slip image loaded")
+        else:
+            images = convert_from_bytes(file_bytes, dpi=300, poppler_path=POPPLER_PATH)
+            if not images:
+                raise Exception("PDF conversion failed")
+            weight_slip_page = images[0]
+            print("\nWeight slip PDF converted to image")
 
         qwen_text = call_qwen_weight(weight_slip_page)
 

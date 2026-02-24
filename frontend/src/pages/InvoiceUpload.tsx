@@ -119,6 +119,7 @@ export default function InvoiceUpload() {
   
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [uploadFileType, setUploadFileType] = useState<'pdf' | 'image' | null>(null)
   const [numPages, setNumPages] = useState<number>(0)
   const [pageNumber, setPageNumber] = useState<number>(1)
   const [loading, setLoading] = useState<boolean>(false)
@@ -237,12 +238,18 @@ export default function InvoiceUpload() {
   }, [invoiceData, pdfFile])
 
 
+  const isPdfOrImage = (file: File) =>
+    file.type === 'application/pdf' || (file.type && file.type.startsWith('image/'))
+
   const handleFileSelect = useCallback(async (file: File) => {
-    if (file && file.type === 'application/pdf') {
+    if (file && isPdfOrImage(file)) {
       setPdfFile(file)
       const url = URL.createObjectURL(file)
       setPdfUrl(url)
       setPageNumber(1)
+      const isImage = file.type.startsWith('image/')
+      setUploadFileType(isImage ? 'image' : 'pdf')
+      if (isImage) setNumPages(1)
       setExtracting(true)
       
       // Generate unique scanning number for this scan
@@ -253,7 +260,7 @@ export default function InvoiceUpload() {
       toast.current?.show({
         severity: 'info',
         summary: 'Uploading & Extracting',
-        detail: 'Uploading PDF and extracting data with Qwen...',
+        detail: `Uploading ${isImage ? 'image' : 'PDF'} and extracting data with Qwen...`,
         life: 3000
       })
       
@@ -405,11 +412,11 @@ export default function InvoiceUpload() {
       } finally {
         setExtracting(false)
       }
-    } else {
+    } else if (file) {
       toast.current?.show({
         severity: 'error',
         summary: 'Invalid File Type',
-        detail: 'Please select a valid PDF file',
+        detail: 'Please select a PDF or image file (PNG, JPEG, WebP)',
         life: 3000
       })
     }
@@ -877,6 +884,7 @@ export default function InvoiceUpload() {
         setPdfFile(null)
         if (pdfUrl) URL.revokeObjectURL(pdfUrl)
         setPdfUrl(null)
+        setUploadFileType(null)
         setPageNumber(1)
         setNumPages(0)
         setInvoiceId(null)
@@ -996,11 +1004,11 @@ export default function InvoiceUpload() {
   }
 
   const handleWeightSlipUpload = async (file: File) => {
-    if (!file || file.type !== 'application/pdf') {
+    if (!file || !isPdfOrImage(file)) {
       toast.current?.show({
         severity: 'error',
         summary: 'Invalid File',
-        detail: 'Please select a valid PDF file',
+        detail: 'Please select a PDF or image file (PNG, JPEG, WebP)',
         life: 3000
       })
       return
@@ -1101,6 +1109,7 @@ export default function InvoiceUpload() {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl)
     setPdfUrl(null)
     setPdfFile(null)
+    setUploadFileType(null)
     setPageNumber(1)
     setNumPages(0)
     setInvoiceId(null)
@@ -1183,9 +1192,9 @@ export default function InvoiceUpload() {
                     <div className={styles.uploadIconWrapper}>
                       <i className={`pi pi-cloud-upload ${styles.uploadIcon}`}></i>
                     </div>
-                    <h3 className={styles.uploadTitle}>Upload Invoice PDF</h3>
+                    <h3 className={styles.uploadTitle}>Upload Invoice (PDF or Image)</h3>
                     <p className={styles.uploadDescription}>
-                      Drag and drop your invoice PDF file here, or click the button below to browse
+                      Drag and drop your invoice (PDF, PNG, JPEG, or WebP) here, or click the button below to browse
                     </p>
                     <Button
                       label="Choose File"
@@ -1195,13 +1204,13 @@ export default function InvoiceUpload() {
                     />
                     <p className={styles.uploadHint}>
                       <i className="pi pi-info-circle"></i>
-                      Supported format: PDF (Max size: 10MB)
+                      Supported: PDF, PNG, JPEG, WebP (Max size: 10MB)
                     </p>
                   </div>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="application/pdf"
+                    accept=".pdf,application/pdf,image/png,image/jpeg,image/jpg,image/webp"
                     className={styles.hiddenInput}
                     onChange={handleFileChange}
                   />
@@ -1219,7 +1228,7 @@ export default function InvoiceUpload() {
                       <Button
                         icon="pi pi-chevron-left"
                         className={styles.pageNavButton}
-                        disabled={pageNumber <= 1}
+                        disabled={pageNumber <= 1 || uploadFileType === 'image'}
                         onClick={() => setPageNumber(prev => Math.max(1, prev - 1))}
                       />
                       <div className={styles.pageIndicator}>
@@ -1245,41 +1254,45 @@ export default function InvoiceUpload() {
                     </div>
                   </div>
                   <div className={styles.pdfDisplay}>
-                    <Document
-                      file={pdfUrl}
-                      onLoadSuccess={onDocumentLoadSuccess}
+                    {uploadFileType === 'image' ? (
+                      <img src={pdfUrl!} alt="Invoice" className={styles.pdfPage} style={{ maxWidth: '100%', objectFit: 'contain' }} />
+                    ) : (
+                      <Document
+                        file={pdfUrl}
+                        onLoadSuccess={onDocumentLoadSuccess}
                         onLoadError={(_error) => {
                           toast.current?.show({
-                          severity: 'error',
-                          summary: 'PDF Load Failed',
-                          detail: 'Failed to load PDF. Please ensure the file is a valid PDF format.',
-                          life: 5000
-                        })
-                      }}
-                      loading={
-                        <div className={styles.pdfLoading}>
-                          <ProgressSpinner />
-                          <p>Loading document...</p>
-                        </div>
-                      }
-                      error={
-                        <div className={styles.pdfLoading}>
-                          <i className="pi pi-exclamation-triangle" style={{ fontSize: '48px', color: '#ef4444', marginBottom: '16px' }}></i>
-                          <p style={{ color: '#ef4444', fontWeight: 600 }}>Failed to load PDF</p>
-                          <p style={{ color: '#64748b', fontSize: '12px' }}>Please ensure the file is a valid PDF format</p>
-                        </div>
-                      }
-                    >
-                      <Page
-                        pageNumber={pageNumber}
-                        renderTextLayer={true}
-                        renderAnnotationLayer={true}
-                        className={styles.pdfPage}
-                        onLoadError={(_error) => {
-                          // Silently handle page load errors
+                            severity: 'error',
+                            summary: 'PDF Load Failed',
+                            detail: 'Failed to load PDF. Please ensure the file is a valid PDF format.',
+                            life: 5000
+                          })
                         }}
-                      />
-                    </Document>
+                        loading={
+                          <div className={styles.pdfLoading}>
+                            <ProgressSpinner />
+                            <p>Loading document...</p>
+                          </div>
+                        }
+                        error={
+                          <div className={styles.pdfLoading}>
+                            <i className="pi pi-exclamation-triangle" style={{ fontSize: '48px', color: '#ef4444', marginBottom: '16px' }}></i>
+                            <p style={{ color: '#ef4444', fontWeight: 600 }}>Failed to load PDF</p>
+                            <p style={{ color: '#64748b', fontSize: '12px' }}>Please ensure the file is a valid PDF format</p>
+                          </div>
+                        }
+                      >
+                        <Page
+                          pageNumber={pageNumber}
+                          renderTextLayer={true}
+                          renderAnnotationLayer={true}
+                          className={styles.pdfPage}
+                          onLoadError={(_error) => {
+                            // Silently handle page load errors
+                          }}
+                        />
+                      </Document>
+                    )}
                   </div>
                 </div>
               )}
@@ -2055,14 +2068,14 @@ export default function InvoiceUpload() {
               <div>
                 <input
                   type="file"
-                  accept="application/pdf"
+                  accept=".pdf,application/pdf,image/png,image/jpeg,image/jpg,image/webp"
                   onChange={handleWeightSlipFileSelect}
                   style={{ display: 'none' }}
                   id="weight-slip-input"
                 />
                 <label htmlFor="weight-slip-input">
                   <Button
-                    label="Choose Weight Slip PDF"
+                    label="Choose Weight Slip (PDF or Image)"
                     icon="pi pi-upload"
                     onClick={() => document.getElementById('weight-slip-input')?.click()}
                     className="p-button-primary"

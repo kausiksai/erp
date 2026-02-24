@@ -9,16 +9,17 @@ import FormData from 'form-data'
 const QWEN_SERVICE_URL = process.env.QWEN_SERVICE_URL || 'http://localhost:5000'
 
 /**
- * Extract data from PDF using Qwen2.5-VL service
- * @param {Buffer} pdfBuffer - PDF file buffer
+ * Extract data from PDF or image using Qwen2.5-VL service
+ * @param {Buffer} pdfBuffer - File buffer (PDF or image)
  * @param {string} filename - Original filename
  * @param {string|null} customPrompt - Custom extraction prompt (optional)
+ * @param {string|null} contentType - MIME type (e.g. application/pdf, image/png)
  * @returns {Promise<Object>} Extracted data with text, markdown, and metadata
  */
-export async function extractWithQwen(pdfBuffer, filename = 'invoice.pdf', customPrompt = null) {
+export async function extractWithQwen(pdfBuffer, filename = 'invoice.pdf', customPrompt = null, contentType = 'application/pdf') {
   const url = `${QWEN_SERVICE_URL}/ocr`
   console.log(`[Qwen] Attempting to connect to: ${url}`)
-  console.log(`[Qwen] PDF size: ${pdfBuffer.length} bytes, filename: ${filename}`)
+  console.log(`[Qwen] File size: ${pdfBuffer.length} bytes, filename: ${filename}, type: ${contentType}`)
   
   // Skip health check - proceed directly with OCR request
   // (Health checks were timing out, but OCR endpoint may still work)
@@ -27,7 +28,7 @@ export async function extractWithQwen(pdfBuffer, filename = 'invoice.pdf', custo
     const formData = new FormData()
     formData.append('pdf', pdfBuffer, {
       filename: filename,
-      contentType: 'application/pdf'
+      contentType: contentType
     })
     
     // Note: Python service uses a hardcoded prompt for now
@@ -110,20 +111,21 @@ export async function extractWithQwen(pdfBuffer, filename = 'invoice.pdf', custo
 }
 
 /**
- * Extract weight from weight slip PDF using Qwen2.5-VL service
- * @param {Buffer} pdfBuffer - PDF file buffer
+ * Extract weight from weight slip (PDF or image) using Qwen2.5-VL service
+ * @param {Buffer} pdfBuffer - File buffer (PDF or image)
  * @param {string} filename - Original filename
+ * @param {string|null} contentType - MIME type (e.g. application/pdf, image/png)
  * @returns {Promise<Object>} Extracted weight data
  */
-export async function extractWeightFromPDF(pdfBuffer, filename = 'weight-slip.pdf') {
+export async function extractWeightFromPDF(pdfBuffer, filename = 'weight-slip.pdf', contentType = 'application/pdf') {
   const url = `${QWEN_SERVICE_URL}/extract-weight`
-  console.log(`[Qwen] Extracting weight from: ${filename}`)
+  console.log(`[Qwen] Extracting weight from: ${filename}, type: ${contentType}`)
   
   try {
     const formData = new FormData()
     formData.append('pdf', pdfBuffer, {
       filename: filename,
-      contentType: 'application/pdf'
+      contentType: contentType
     })
 
     console.log(`[Qwen] Sending POST request to ${url}...`)
