@@ -101,6 +101,39 @@ const allMenuItems: MenuItem[] = [
     allowedRoles: ['admin', 'manager', 'user'],
     order: 3
   },
+  {
+    id: 'dc-details',
+    title: 'Delivery Challan (DC)',
+    description: 'Upload and view delivery challan transactions (full replace)',
+    icon: 'pi pi-file-export',
+    path: '/delivery-challans/details',
+    color: '#0f766e',
+    comingSoon: false,
+    allowedRoles: ['admin', 'manager', 'user'],
+    order: 4
+  },
+  {
+    id: 'po-schedules',
+    title: 'PO Schedules',
+    description: 'Upload and view purchase order schedules (full replace)',
+    icon: 'pi pi-calendar',
+    path: '/po-schedules/details',
+    color: '#7c2d12',
+    comingSoon: false,
+    allowedRoles: ['admin', 'manager', 'user'],
+    order: 5
+  },
+  {
+    id: 'open-po-prefixes',
+    title: 'Open PO Prefixes',
+    description: 'Define PFX prefixes that mark a PO as Open PO (Excel upload, full replace)',
+    icon: 'pi pi-bookmark',
+    path: '/open-po-prefixes',
+    color: '#4338ca',
+    comingSoon: false,
+    allowedRoles: ['admin', 'manager'],
+    order: 6
+  },
   
   // Master Data (Admin/Manager only)
   {
@@ -227,7 +260,16 @@ export const getMenuCategories = (userRole: UserRole): MenuCategory[] => {
       id: 'purchase-orders',
       title: 'Purchase Orders',
       description: 'Purchase order and related document management',
-      items: filterItemsByRole(getMenuItemsByIds('purchase-order', 'grn-details', 'asn-details'))
+      items: filterItemsByRole(
+        getMenuItemsByIds(
+          'purchase-order',
+          'grn-details',
+          'asn-details',
+          'dc-details',
+          'po-schedules',
+          'open-po-prefixes'
+        )
+      )
     },
     {
       id: 'master-data',

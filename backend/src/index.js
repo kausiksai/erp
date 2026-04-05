@@ -43,7 +43,14 @@ import {
   debitNoteApprove,
   updatePoStatusFromCumulative
 } from './poInvoiceValidation.js'
-import { importPoExcel, importGrnExcel, importAsnExcel } from './excelImport.js'
+import {
+  importPoExcel,
+  importGrnExcel,
+  importAsnExcel,
+  importDcExcel,
+  importScheduleExcel,
+  importOpenPoPrefixesExcel
+} from './excelImport.js'
 
 const app = express()
 
@@ -562,7 +569,10 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
     const poNumber = req.body.poNumber || req.query.poNumber
     if (poNumber) {
       const poResult = await pool.query(
-        'SELECT po_id FROM purchase_orders WHERE po_number = $1',
+        `SELECT po_id FROM purchase_orders
+         WHERE TRIM(po_number) = TRIM($1)
+         ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC
+         LIMIT 1`,
         [poNumber]
       )
       if (poResult.rows.length > 0) {
@@ -1737,7 +1747,7 @@ router.post('/purchase-orders/upload-excel', authenticateToken, authorize(['admi
     await client.query('COMMIT')
     res.json({
       success: true,
-      message: `Imported ${result.purchaseOrdersInserted} PO(s) and ${result.linesInserted} line(s)`,
+      message: `PO master updated (overwrite mode): ${result.purchaseOrdersInserted} PO group(s), ${result.linesInserted} line(s). Unreferenced POs not in file were removed.`,
       ...result
     })
   } catch (err) {
@@ -1760,8 +1770,8 @@ router.post('/grn/upload-excel', authenticateToken, authorize(['admin', 'manager
     const result = await importGrnExcel(req.file.buffer, client)
     await client.query('COMMIT')
     const message = result.grnInserted === 0 && result.hint
-      ? `Imported ${result.grnInserted} GRN record(s). ${result.hint}`
-      : `Imported ${result.grnInserted} GRN record(s)`
+      ? `Replaced all GRN data: 0 rows. ${result.hint}`
+      : `Replaced all GRN data: ${result.grnInserted} row(s) loaded.`
     res.json({
       success: true,
       message,
@@ -1776,7 +1786,7 @@ router.post('/grn/upload-excel', authenticateToken, authorize(['admin', 'manager
   }
 })
 
-// Upload Excel: Pending ASN -> asn
+// Upload Excel: Pending ASN -> asn (full table replace each upload)
 router.post('/asn/upload-excel', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), uploadExcel.single('file'), async (req, res) => {
   const client = await pool.connect()
   try {
@@ -1787,8 +1797,8 @@ router.post('/asn/upload-excel', authenticateToken, authorize(['admin', 'manager
     const result = await importAsnExcel(req.file.buffer, client)
     await client.query('COMMIT')
     const message = result.asnInserted === 0 && result.hint
-      ? `Imported ${result.asnInserted} ASN record(s). ${result.hint}`
-      : `Imported ${result.asnInserted} ASN record(s)`
+      ? `Replaced all ASN data with ${result.asnInserted} row(s). ${result.hint}`
+      : `Replaced all ASN data: ${result.asnInserted} row(s) loaded.`
     res.json({
       success: true,
       message,
@@ -1797,6 +1807,123 @@ router.post('/asn/upload-excel', authenticateToken, authorize(['admin', 'manager
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
     console.error('ASN Excel import error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
+  } finally {
+    client.release()
+  }
+})
+
+// Delivery Challans (DC) — list + Excel upload (full replace)
+router.get('/delivery-challans', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT dc.id, dc.po_id, po.po_number, dc.doc_no, dc.dc_no, dc.dc_date, dc.supplier, dc.name AS supplier_display_name,
+              dc.item, dc.rev, dc.revision, dc.uom, dc.description, dc.sf_code, dc.dc_qty, dc.ord_type, dc.ord_no, dc.ord_pfx,
+              dc.unit, dc.unit_description, dc.dc_line, dc.dc_pfx, dc.source, dc.grn_pfx, dc.grn_no,
+              dc.open_order_pfx, dc.open_order_no, dc.line_no, dc.temp_qty, dc.received_qty,
+              dc.suplr_dc_no, dc.suplr_dc_date, dc.material_type, dc.received_item, dc.received_item_rev, dc.received_item_uom
+       FROM delivery_challans dc
+       LEFT JOIN purchase_orders po ON po.po_id = dc.po_id
+       ORDER BY dc.dc_date DESC NULLS LAST, dc.id DESC`
+    )
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching delivery challans:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+router.post('/delivery-challans/upload-excel', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), uploadExcel.single('file'), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'Excel file is required' })
+    }
+    await client.query('BEGIN')
+    const result = await importDcExcel(req.file.buffer, client)
+    await client.query('COMMIT')
+    const message = result.dcInserted === 0 && result.hint
+      ? `Replaced all DC data: 0 rows. ${result.hint}`
+      : `Replaced all DC data: ${result.dcInserted} row(s) loaded.`
+    res.json({ success: true, message, ...result })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('DC Excel import error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
+  } finally {
+    client.release()
+  }
+})
+
+// PO schedules — list + Excel upload (full replace)
+router.get('/po-schedules', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT ps.id, ps.po_id, ps.po_number, ps.ord_pfx, ps.ord_no, ps.schedule_ref, ps.ss_pfx, ps.ss_no, ps.line_no,
+              ps.item_id, ps.item_rev, ps.description, ps.sched_qty, ps.sched_date, ps.promise_date, ps.required_date,
+              ps.unit, ps.uom, ps.supplier, ps.supplier_name, ps.date_from, ps.date_to, ps.firm, ps.tentative,
+              ps.closeshort, ps.doc_pfx, ps.doc_no, ps.status,
+              po.po_number AS linked_po_number
+       FROM po_schedules ps
+       LEFT JOIN purchase_orders po ON po.po_id = ps.po_id
+       ORDER BY ps.sched_date DESC NULLS LAST, ps.id DESC`
+    )
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching po_schedules:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+router.post('/po-schedules/upload-excel', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), uploadExcel.single('file'), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'Excel file is required' })
+    }
+    await client.query('BEGIN')
+    const result = await importScheduleExcel(req.file.buffer, client)
+    await client.query('COMMIT')
+    const message = result.schedulesInserted === 0 && result.hint
+      ? `Replaced all schedule data: 0 rows. ${result.hint}`
+      : `Replaced all schedule data: ${result.schedulesInserted} row(s) loaded.`
+    res.json({ success: true, message, ...result })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Schedule Excel import error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
+  } finally {
+    client.release()
+  }
+})
+
+// Open PO prefixes — list + Excel upload (full replace)
+router.get('/open-po-prefixes', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, prefix, description, created_at, updated_at FROM open_po_prefixes ORDER BY prefix`
+    )
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching open_po_prefixes:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+router.post('/open-po-prefixes/upload-excel', authenticateToken, authorize(['admin', 'manager', 'finance']), uploadExcel.single('file'), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'Excel file is required' })
+    }
+    await client.query('BEGIN')
+    const result = await importOpenPoPrefixesExcel(req.file.buffer, client)
+    await client.query('COMMIT')
+    const message = `Replaced all Open PO prefixes: ${result.prefixesInserted} row(s) loaded.`
+    res.json({ success: true, message, ...result })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Open PO prefix Excel import error:', err)
     res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
   } finally {
     client.release()
@@ -1903,6 +2030,9 @@ router.patch('/purchase-orders/:poId/force-close', authenticateToken, authorize(
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
     if (err.message?.includes('not found')) return res.status(404).json({ error: 'po_not_found', message: err.message })
+    if (err.message?.includes('cannot be force-closed')) {
+      return res.status(400).json({ error: 'open_po_not_closable', message: err.message })
+    }
     res.status(500).json({ error: 'server_error', message: err.message })
   } finally {
     client.release()
@@ -2063,7 +2193,8 @@ router.get('/purchase-orders/:poNumber', async (req, res) => {
          s.supplier_name
        FROM purchase_orders po
        LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
-       WHERE po.po_number = $1 AND (po.amd_no = 0 OR po.amd_no IS NULL)
+       WHERE TRIM(po.po_number) = TRIM($1)
+       ORDER BY COALESCE(po.amd_no, 0) DESC, po.po_id DESC
        LIMIT 1`,
       [poNumber]
     )

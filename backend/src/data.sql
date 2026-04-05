@@ -77,6 +77,9 @@ INSERT INTO menu_items (menu_id, title, description, icon, path, color, category
 ('purchase-order', 'Purchase Order Details', 'View and manage purchase order details', 'pi pi-shopping-cart', '/purchase-orders/upload', '#7c3aed', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 1, TRUE, FALSE),
 ('grn-details', 'GRN Details', 'Goods Receipt Note management and tracking', 'pi pi-box', '/grn/details', '#ea580c', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 2, TRUE, FALSE),
 ('asn-details', 'ASN Details', 'Advanced Shipping Notice management', 'pi pi-truck', '/asn/details', '#0891b2', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 3, TRUE, FALSE),
+('dc-details', 'Delivery Challan (DC)', 'Upload and view delivery challan transactions (full replace)', 'pi pi-file-export', '/delivery-challans/details', '#0f766e', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 4, TRUE, FALSE),
+('po-schedules', 'PO Schedules', 'Upload and view purchase order schedules (full replace)', 'pi pi-calendar', '/po-schedules/details', '#7c2d12', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 5, TRUE, FALSE),
+('open-po-prefixes', 'Open PO Prefixes', 'Define PFX prefixes that mark a PO as Open PO (Excel upload, full replace)', 'pi pi-bookmark', '/open-po-prefixes', '#4338ca', 'purchase-orders', 'Purchase Orders', 'Purchase order and related document management', 6, TRUE, FALSE),
 ('user-registration', 'User Registration', 'Register and manage system users', 'pi pi-users', '/users/registration', '#dc2626', 'master-data', 'Master Data', 'Manage users, suppliers, and system configuration', 1, TRUE, FALSE),
 ('owner-details', 'Owner Details', 'View and edit company owner details', 'pi pi-id-card', '/owners/details', '#9333ea', 'master-data', 'Master Data', 'Manage users, suppliers, and system configuration', 2, TRUE, FALSE),
 ('supplier-registration', 'Supplier Registration', 'Register and manage supplier information', 'pi pi-building', '/suppliers/registration', '#ca8a04', 'master-data', 'Master Data', 'Manage users, suppliers, and system configuration', 3, TRUE, FALSE),
@@ -109,12 +112,12 @@ ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = N
 
 INSERT INTO role_menu_access (role, menu_item_id, has_access)
 SELECT 'manager', menu_item_id, TRUE FROM menu_items
-WHERE menu_id IN ('incomplete-pos','invoice-upload','invoice-details','purchase-order','grn-details','asn-details','user-registration','supplier-registration','approve-payments','ready-for-payment','payment-history','invoice-reports','financial-reports','supplier-reports')
+WHERE menu_id IN ('incomplete-pos','invoice-upload','invoice-details','purchase-order','grn-details','asn-details','dc-details','po-schedules','open-po-prefixes','user-registration','supplier-registration','approve-payments','ready-for-payment','payment-history','invoice-reports','financial-reports','supplier-reports')
 ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = NOW();
 
 INSERT INTO role_menu_access (role, menu_item_id, has_access)
 SELECT 'user', menu_item_id, TRUE FROM menu_items
-WHERE menu_id IN ('incomplete-pos','invoice-upload','invoice-details','purchase-order','grn-details','asn-details','supplier-registration')
+WHERE menu_id IN ('incomplete-pos','invoice-upload','invoice-details','purchase-order','grn-details','asn-details','dc-details','po-schedules','supplier-registration')
 ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = NOW();
 
 INSERT INTO role_menu_access (role, menu_item_id, has_access)
@@ -126,6 +129,12 @@ INSERT INTO role_menu_access (role, menu_item_id, has_access)
 SELECT 'viewer', menu_item_id, TRUE FROM menu_items
 WHERE menu_id IN ('invoice-details','payment-history','invoice-reports')
 ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE, updated_at = NOW();
+
+-- ============================================
+-- 5b. Open PO prefixes (PFX leading match, e.g. OP → OP1, OP2)
+-- ============================================
+INSERT INTO open_po_prefixes (prefix, description) VALUES ('OP', 'Open PO — PFX values like OP1, OP2 match this prefix')
+ON CONFLICT (prefix) DO UPDATE SET description = EXCLUDED.description, updated_at = NOW();
 
 -- ============================================
 -- 6. Purchase Orders (21 POs – all status OPEN)

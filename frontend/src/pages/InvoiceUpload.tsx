@@ -111,6 +111,77 @@ interface InvoiceData {
   items: InvoiceItem[]
 }
 
+/** Shaped row for PO vs invoice line comparison in validation dialog */
+interface LineComparisonRow {
+  itemName: string
+  quantity: number | null
+  unitPrice: number | null
+  sequenceNumber?: number
+}
+
+function normLineItemText(s: string | null | undefined) {
+  return (s ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function poInvoiceItemMatchScore(invoiceItemName: string, poItemName: string): number {
+  const inv = normLineItemText(invoiceItemName)
+  const po = normLineItemText(poItemName)
+  if (!inv || !po) return 0
+  if (inv === po) return 300
+  if (inv.includes(po) || po.includes(inv)) return 250
+  const dec = /\d+\.\d+/.exec(inv)
+  if (dec && po.includes(dec[0])) return 160
+  const decPo = /\d+\.\d+/.exec(po)
+  if (decPo && inv.includes(decPo[0])) return 160
+  const invParts = inv.split(/[\s,/-]+/).filter((t) => t.length >= 3)
+  for (const t of invParts) {
+    if (po.includes(t)) return 130
+  }
+  const poParts = po.split(/[\s,/-]+/).filter((t) => t.length >= 3)
+  for (const t of poParts) {
+    if (inv.includes(t)) return 120
+  }
+  return 0
+}
+
+/**
+ * When PO and invoice have the same line count, compare by index.
+ * When counts differ (Open PO / partial bill), pair each invoice line to the best unused PO line by
+ * sequence (if both set) or item text — do not show extra PO-only rows as "Missing".
+ */
+function buildPoInvoiceComparisonRows(
+  poItems: LineComparisonRow[],
+  invItems: LineComparisonRow[]
+): Array<{ poItem: LineComparisonRow | null; invItem: LineComparisonRow | null }> {
+  if (poItems.length === invItems.length) {
+    return poItems.map((poItem, i) => ({ poItem, invItem: invItems[i] ?? null }))
+  }
+  const usedPo = new Set<number>()
+  const rows: Array<{ poItem: LineComparisonRow | null; invItem: LineComparisonRow | null }> = []
+  const MIN_SCORE = 80
+  for (const invItem of invItems) {
+    let bestIdx = -1
+    let bestScore = 0
+    for (let idx = 0; idx < poItems.length; idx++) {
+      if (usedPo.has(idx)) continue
+      const po = poItems[idx]
+      // Invoice "sequence" here is often UI row index, not ERP line — only use text match when counts differ
+      const sc = poInvoiceItemMatchScore(invItem.itemName, po.itemName)
+      if (sc > bestScore) {
+        bestScore = sc
+        bestIdx = idx
+      }
+    }
+    if (bestIdx >= 0 && bestScore >= MIN_SCORE) {
+      usedPo.add(bestIdx)
+      rows.push({ poItem: poItems[bestIdx], invItem })
+    } else {
+      rows.push({ poItem: null, invItem })
+    }
+  }
+  return rows
+}
+
 export default function InvoiceUpload() {
   const [, setPoNumber] = useState<string>('')
   const [, setPoNumberInput] = useState<string>('')
@@ -1867,12 +1938,22 @@ export default function InvoiceUpload() {
 
               {/* Line Items Comparison */}
               {validationResults.poLineDetails.valid && validationResults.invoiceDetails.valid && 
-               validationResults.poLineDetails.data.items && validationResults.invoiceDetails.data.items && (
+               validationResults.poLineDetails.data.items && validationResults.invoiceDetails.data.items && (() => {
+                const poItems = validationResults.poLineDetails.data.items as LineComparisonRow[]
+                const invItems = validationResults.invoiceDetails.data.items as LineComparisonRow[]
+                const comparisonRows = buildPoInvoiceComparisonRows(poItems, invItems)
+                const partialBill = poItems.length !== invItems.length
+                return (
                 <div className={styles.validationSection}>
                   <h4>
                     <i className="pi pi-list"></i>
                     Line Items Comparison: PO vs Invoice
                   </h4>
+                  {partialBill && (
+                    <p className={styles.comparisonPartialNote} style={{ fontSize: '0.875rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                      This PO has {poItems.length} line(s); this invoice has {invItems.length}. Only billed lines are shown (other PO lines are not listed as missing).
+                    </p>
+                  )}
                   <div className={styles.lineItemsComparison}>
                     <div className={styles.comparisonTable}>
                       <div className={styles.comparisonHeader}>
@@ -1882,19 +1963,15 @@ export default function InvoiceUpload() {
                         <div className={styles.comparisonCol}>Rate/Price</div>
                         <div className={styles.comparisonCol}>Status</div>
                       </div>
-                      {Array.from({ length: Math.max(validationResults.poLineDetails.data.items.length, validationResults.invoiceDetails.data.items.length) }, (_, index) => {
-                        const poItem = validationResults.poLineDetails.data.items[index] || null
-                        const invItem = validationResults.invoiceDetails.data.items[index] || null
+                      {comparisonRows.map(({ poItem, invItem }, index) => {
                         const poQty = poItem?.quantity ?? null
                         const invQty = invItem?.quantity ?? null
-                        const poRate = (poItem as { unitPrice?: number | null })?.unitPrice ?? null
+                        const poRate = poItem?.unitPrice ?? null
                         const invRate = invItem?.unitPrice ?? null
 
-                        // Compare quantity and rate/price (use invoice quantity so INV. QTY from OCR is used when user didn't enter COUNT)
                         const quantityMatch = poItem && invItem
                           ? Math.abs((poQty ?? 0) - (invQty ?? 0)) < 0.01
                           : false
-                        // Rate: match when both missing, or both present and equal. If PO has no rate, don't fail (accept invoice rate).
                         const rateMatch = poItem && invItem
                           ? (poRate == null && invRate == null) || (poRate != null && invRate != null && Math.abs(poRate - invRate) < 0.01)
                           : false
@@ -1902,7 +1979,7 @@ export default function InvoiceUpload() {
                         const isMatch = quantityMatch && rateMatch
                         const hasMismatch = poItem && invItem && !isMatch
                         const isMissing = !poItem || !invItem
-                        
+
                         return (
                           <div key={index} className={`${styles.comparisonRow} ${isMatch ? styles.matchRow : hasMismatch ? styles.mismatchRow : styles.missingRow}`}>
                             <div className={styles.comparisonCol}>{index + 1}</div>
@@ -1916,12 +1993,10 @@ export default function InvoiceUpload() {
                             </div>
                             <div className={styles.comparisonCol}>
                               <div className={styles.poValue}>
-                                {(poItem as { unitPrice?: number | null })?.unitPrice != null
-                                  ? `₹${Number((poItem as { unitPrice?: number }).unitPrice).toFixed(2)}`
-                                  : '-'}
+                                {poRate != null ? `₹${Number(poRate).toFixed(2)}` : '-'}
                               </div>
                               <div className={styles.invValue}>
-                                {invItem?.unitPrice != null ? `₹${Number(invItem.unitPrice).toFixed(2)}` : '-'}
+                                {invRate != null ? `₹${Number(invRate).toFixed(2)}` : '-'}
                               </div>
                             </div>
                             <div className={styles.comparisonCol}>
@@ -1944,12 +2019,13 @@ export default function InvoiceUpload() {
                       </div>
                       <div className={styles.legendItem}>
                         <span className={styles.missingBadge}><i className="pi pi-minus"></i> Missing</span>
-                        <span>Item exists in one but not the other</span>
+                        <span>Item exists in one but not the other (or no PO line matched this invoice line)</span>
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
+                )
+              })()}
 
               <div className={`${styles.validationSection} ${validationResults.supplierDetails.valid ? styles.valid : styles.invalid}`}>
                 <h4>

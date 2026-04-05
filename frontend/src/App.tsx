@@ -9,6 +9,9 @@ import InvoiceUpload from './pages/InvoiceUpload'
 import PurchaseOrderDetails from './pages/PurchaseOrderDetails'
 import GRNDetails from './pages/GRNDetails'
 import ASNDetails from './pages/ASNDetails'
+import DCDetails from './pages/DCDetails'
+import ScheduleDetails from './pages/ScheduleDetails'
+import OpenPoPrefixes from './pages/OpenPoPrefixes'
 import InvoiceValidate from './pages/InvoiceValidate'
 import InvoiceDetails from './pages/InvoiceDetails'
 import IncompletePOs from './pages/IncompletePOs'
@@ -105,6 +108,30 @@ function App() {
           element={
             <ProtectedRoute>
               <ASNDetails />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/delivery-challans/details" 
+          element={
+            <ProtectedRoute>
+              <DCDetails />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/po-schedules/details" 
+          element={
+            <ProtectedRoute>
+              <ScheduleDetails />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/open-po-prefixes" 
+          element={
+            <ProtectedRoute>
+              <OpenPoPrefixes />
             </ProtectedRoute>
           } 
         />

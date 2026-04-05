@@ -114,6 +114,57 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders (supp
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders (status);
 
 -- ============================================
+-- Open PO prefixes (PO is treated as Open PO when pfx matches any row: UPPER(po.pfx) LIKE UPPER(prefix)||'%')
+-- ============================================
+CREATE TABLE IF NOT EXISTS open_po_prefixes (
+  id                 BIGSERIAL PRIMARY KEY,
+  prefix             VARCHAR(50) NOT NULL UNIQUE,
+  description        TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_open_po_prefixes_prefix ON open_po_prefixes (prefix);
+
+-- ============================================
+-- PO schedules (Excel upload; links to PO by po_number / po_id)
+-- ============================================
+CREATE TABLE IF NOT EXISTS po_schedules (
+  id                 BIGSERIAL PRIMARY KEY,
+  po_id              BIGINT      REFERENCES purchase_orders(po_id) ON DELETE SET NULL,
+  po_number          VARCHAR(50),
+  ord_pfx            VARCHAR(50),
+  ord_no             VARCHAR(50),
+  schedule_ref       VARCHAR(100),
+  ss_pfx             VARCHAR(50),
+  ss_no              VARCHAR(50),
+  line_no            INTEGER,
+  item_id            VARCHAR(100),
+  description        TEXT,
+  sched_qty          NUMERIC(18, 4),
+  sched_date         DATE,
+  promise_date       DATE,
+  required_date      DATE,
+  unit               VARCHAR(50),
+  uom                VARCHAR(50),
+  supplier           VARCHAR(50),
+  supplier_name      VARCHAR(255),
+  item_rev           VARCHAR(50),
+  date_from          DATE,
+  date_to            DATE,
+  firm               VARCHAR(255),
+  tentative          VARCHAR(255),
+  closeshort         VARCHAR(100),
+  doc_pfx            VARCHAR(50),
+  doc_no             VARCHAR(100),
+  status             VARCHAR(50)
+);
+
+CREATE INDEX IF NOT EXISTS idx_po_schedules_po_id ON po_schedules (po_id);
+CREATE INDEX IF NOT EXISTS idx_po_schedules_po_number ON po_schedules (po_number);
+CREATE INDEX IF NOT EXISTS idx_po_schedules_doc_no ON po_schedules (doc_no);
+
+-- ============================================
 -- Purchase Order Lines
 -- ============================================
 CREATE TABLE IF NOT EXISTS purchase_order_lines (
@@ -168,7 +219,24 @@ CREATE TABLE IF NOT EXISTS delivery_challans (
   unit               VARCHAR(50),
   unit_description   VARCHAR(255),
   ref_unit           VARCHAR(50),
-  ref_unit_description VARCHAR(255)
+  ref_unit_description VARCHAR(255),
+  revision           VARCHAR(50),
+  dc_line            INTEGER,
+  dc_pfx             VARCHAR(50),
+  source             VARCHAR(100),
+  grn_pfx            VARCHAR(50),
+  grn_no             VARCHAR(50),
+  open_order_pfx     VARCHAR(50),
+  open_order_no      VARCHAR(50),
+  material_type      VARCHAR(100),
+  line_no            INTEGER,
+  temp_qty           DECIMAL(15, 3),
+  received_qty       DECIMAL(15, 3),
+  suplr_dc_no        VARCHAR(100),
+  suplr_dc_date      DATE,
+  received_item      VARCHAR(100),
+  received_item_rev  VARCHAR(50),
+  received_item_uom  VARCHAR(50)
 );
 
 CREATE INDEX IF NOT EXISTS idx_delivery_challans_dc_no ON delivery_challans (dc_no);

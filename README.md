@@ -493,9 +493,17 @@ After running `npm run db:init`, you can login with:
 - `GET /api/purchase-orders/:poNumber` - Get PO by number
 - `GET /api/purchase-orders/:poId/cumulative` - Get cumulative PO/invoice/GRN quantities
 - `PATCH /api/purchase-orders/:poId/force-close` - Force close partially fulfilled PO → fulfilled
-- `POST /api/purchase-orders/upload-excel` - Import POs from Excel
-- `POST /api/grn/upload-excel` - Import GRN from Excel
-- `POST /api/asn/upload-excel` - Import ASN from Excel
+- `POST /api/purchase-orders/upload-excel` - Import POs from Excel (**overwrite**: removes unreferenced POs not in file; upserts lines per PO)
+- `POST /api/grn/upload-excel` - Import GRN from Excel (**full replace**: truncates `grn` then loads file)
+- `POST /api/asn/upload-excel` - Import ASN from Excel (**full replace**: truncates `asn` then loads file)
+- `GET /api/delivery-challans` - List DC rows
+- `POST /api/delivery-challans/upload-excel` - Import DC Excel (**full replace** → `delivery_challans`)
+- `GET /api/po-schedules` - List PO schedule lines
+- `POST /api/po-schedules/upload-excel` - Import schedules (**full replace** → `po_schedules`)
+- `GET /api/open-po-prefixes` - List Open PO PFX prefixes (auth)
+- `POST /api/open-po-prefixes/upload-excel` - Replace all prefixes from Excel (admin/manager/finance)
+
+**Open PO validation:** If `purchase_orders.pfx` matches `open_po_prefixes` (leading match, case-insensitive): same as standard PO **except** no invoice qty vs **PO lines** or **PO total**. **Required:** GRN with quantity, **ASN** for the PO/invoice, and **at least one Delivery Challan or Schedule**. **Invoice total quantity** must **match** (within tolerance) **GRN total** for the PO; if DC rows have a summed `dc_qty`, invoice qty must match that sum; if schedule rows have a summed `sched_qty`, invoice qty must match that sum. Supplier, rates (warnings), line totals vs qty×rate (warnings), header total vs lines (warning) as standard. On validate, PO status is set to **`open`** and **`updatePoStatusFromCumulative` never** closes Open POs.
 
 ### Payments
 - `GET /api/payments/pending-approval` - Invoices validated, pending manager approval
@@ -515,7 +523,9 @@ The database includes the following main tables:
 - **owners** - Company/owner information
 - **purchase_orders** - Purchase order records
 - **purchase_order_lines** - PO line items
-- **delivery_challans** - Delivery challan data (Excel import)
+- **delivery_challans** - Delivery challan data (DC Excel import; full replace per upload)
+- **po_schedules** - PO schedule lines (Excel import; full replace per upload)
+- **open_po_prefixes** - PFX prefixes that identify Open POs for validation rules
 - **grn** - Goods Receipt Notes (Excel import; has po_id)
 - **asn** - Advanced Shipping Notices (Excel import; no po_id; PO number derived via inv_no → invoices → po)
 - **invoices** - Invoice records (po_id, po_number, payment_due_date, status)
