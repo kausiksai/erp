@@ -1,0 +1,14 @@
+# Secrets — never commit
+.env
+
+# Runtime artefacts
+downloaded/
+failed/
+logs/
+.lock
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
