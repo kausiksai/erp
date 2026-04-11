@@ -1,0 +1,346 @@
+/* ==========================================================================
+   design-system/page-refresh.css
+   Aggressive global overrides that force every existing page (all 20+
+   CSS-Module based pages) to adopt the new design language without
+   touching any individual page's source file.
+
+   How this works:
+     Vite's CSS Modules emit class names like `_pageContainer_1a2b3c_4`.
+     The attribute selector [class*="pageContainer"] matches any element
+     whose class attribute _contains_ the substring "pageContainer", so
+     it successfully targets every CSS-Module-scoped class that started
+     out with that local name.
+
+   Result: every page (Home, InvoiceUpload, InvoiceValidate, PurchaseOrder,
+   GRN/ASN/DC/Schedule, Suppliers, Users, Owners, Payments, Reports,
+   InvoiceDetails) inherits the new theme, radii, shadows, spacing and
+   typography from a single file.
+   ========================================================================== */
+
+/* ---- Page-level container ------------------------------------------------ */
+[class*="homePage"],
+[class*="pageShell"],
+[class*="page__shell"],
+[class*="pageWrapper"] {
+  min-height: 100vh;
+  background: var(--page-bg) !important;
+  background-attachment: fixed !important;
+}
+
+[class*="pageContainer"],
+[class*="container"][class*="page"],
+[class*="appContainer"] {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--space-6) var(--gutter) var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  background: transparent !important;
+}
+
+/* ---- Page header banner -------------------------------------------------- */
+[class*="pageHeader"] {
+  padding: var(--space-6) var(--space-6) !important;
+  border-radius: var(--radius-xl) !important;
+  background: linear-gradient(135deg,
+              rgba(37, 99, 235, 0.08) 0%,
+              rgba(6, 182, 212, 0.06) 60%,
+              rgba(139, 92, 246, 0.05) 100%) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+  margin-bottom: var(--space-6) !important;
+}
+[class*="pageHeader"]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(800px 200px at 20% -40%, rgba(99, 102, 241, 0.14) 0%, transparent 55%),
+    radial-gradient(600px 200px at 100% 120%, rgba(6, 182, 212, 0.12) 0%, transparent 55%);
+  pointer-events: none;
+  z-index: 0;
+}
+[class*="pageHeader"] > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- Title / subtitle / description / welcome --------------------------- */
+[class*="pageTitle"],
+[class*="panelTitle"] {
+  font-family: var(--font-sans) !important;
+  font-size: clamp(1.5rem, 2.6vw, 2rem) !important;
+  font-weight: 800 !important;
+  margin: 0 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--text-primary) !important;
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--brand-700) 100%) !important;
+  background-clip: text !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  line-height: 1.15 !important;
+}
+[data-theme="dark"] [class*="pageTitle"],
+[data-theme="dark"] [class*="panelTitle"] {
+  background: linear-gradient(135deg, #f8fafc 0%, #93c5fd 100%) !important;
+  background-clip: text !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+[class*="pageSubtitle"],
+[class*="panelSubtitle"],
+[class*="pageDescription"] {
+  color: var(--text-muted) !important;
+  font-size: var(--fs-md) !important;
+  font-weight: 500 !important;
+  margin: var(--space-2) 0 0 !important;
+  line-height: var(--lh-snug) !important;
+}
+[class*="welcomeLine"],
+[class*="welcomeText"] {
+  color: var(--text-muted) !important;
+  font-size: var(--fs-xs) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  font-weight: 600 !important;
+  margin: 0 0 var(--space-2) !important;
+}
+[class*="welcomeRole"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-full);
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--brand-700) !important;
+  border: 1px solid rgba(37, 99, 235, 0.15);
+}
+[data-theme="dark"] [class*="welcomeRole"] {
+  background: rgba(59, 130, 246, 0.14);
+  color: var(--brand-300) !important;
+  border-color: rgba(59, 130, 246, 0.25);
+}
+[class*="menuSummary"] {
+  color: var(--text-faint) !important;
+  font-size: var(--fs-sm) !important;
+  font-weight: 500 !important;
+}
+
+/* ---- Card-ish surfaces --------------------------------------------------- */
+[class*="detailsCard"],
+[class*="summaryCard"],
+[class*="card"][class*="module"],
+[class*="formCard"],
+[class*="menuCard"],
+[class*="categorySection"],
+[class*="stateSection"],
+[class*="infoCard"],
+[class*="detailCard"] {
+  background: var(--surface-0) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-sm) !important;
+  padding: var(--space-6) !important;
+  transition: transform var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out) !important;
+}
+[class*="detailsCard"]:hover,
+[class*="menuCard"]:hover {
+  box-shadow: var(--shadow-md) !important;
+  transform: translateY(-2px);
+}
+
+/* ---- Card title / heading inside cards ---------------------------------- */
+[class*="cardTitle"],
+[class*="sectionTitle"] {
+  font-size: var(--fs-lg) !important;
+  font-weight: 700 !important;
+  color: var(--text-primary) !important;
+  margin: 0 0 var(--space-4) !important;
+  letter-spacing: -0.01em !important;
+}
+
+/* ---- Tiles / menu items -------------------------------------------------- */
+[class*="tileCard"],
+[class*="menuItem"],
+[class*="moduleCard"] {
+  background: var(--surface-0) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-xs) !important;
+  transition: transform var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out) !important;
+}
+[class*="tileCard"]:hover,
+[class*="menuItem"]:hover,
+[class*="moduleCard"]:hover {
+  transform: translateY(-3px) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border-color: var(--brand-300) !important;
+}
+
+/* ---- Labels / body text -------------------------------------------------- */
+[class*="detailLabel"],
+[class*="label"][class*="field"] {
+  color: var(--text-muted) !important;
+  font-size: var(--fs-xs) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  font-weight: 600 !important;
+}
+[class*="detailValue"] {
+  color: var(--text-primary) !important;
+  font-size: var(--fs-sm) !important;
+  font-weight: 500 !important;
+}
+
+/* ---- Legacy status badge containers -> new status chip look ------------- */
+[class*="statusBadge"] {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.4rem !important;
+  padding: 0.25rem 0.7rem !important;
+  border-radius: var(--radius-full) !important;
+  font-size: var(--fs-xs) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em !important;
+  background: var(--status-muted-bg) !important;
+  color: var(--status-muted-fg) !important;
+  border: 1px solid var(--status-muted-ring) !important;
+  text-transform: none !important;
+}
+
+/* ---- Action buttons area ------------------------------------------------- */
+[class*="headerActions"],
+[class*="actionsRow"],
+[class*="btnGroup"] {
+  display: flex !important;
+  gap: var(--space-3) !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+}
+
+/* ---- Loading containers / spinners --------------------------------------- */
+[class*="loadingContainer"],
+[class*="loadingWrap"] {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: var(--space-12) var(--space-6) !important;
+  color: var(--text-muted) !important;
+  gap: 1rem !important;
+  min-height: 320px;
+}
+
+/* ---- Forms / fields ------------------------------------------------------ */
+[class*="formSections"] {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: var(--space-5) !important;
+}
+[class*="formGrid"] {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important;
+  gap: var(--space-4) !important;
+}
+[class*="formField"] {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.4rem !important;
+}
+
+/* ---- Toast messages (PrimeReact) ---------------------------------------- */
+.p-toast-message {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-xl) !important;
+}
+
+/* ---- Breadcrumb ---------------------------------------------------------- */
+[class*="breadcrumb"] {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  font-size: var(--fs-xs) !important;
+  color: var(--text-muted) !important;
+  padding: var(--space-2) 0 !important;
+  margin-bottom: var(--space-2) !important;
+}
+[class*="breadcrumb"] a {
+  color: var(--text-muted) !important;
+  text-decoration: none !important;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+[class*="breadcrumb"] a:hover {
+  color: var(--brand-700) !important;
+}
+[data-theme="dark"] [class*="breadcrumb"] a:hover { color: var(--brand-300) !important; }
+
+/* ---- Hide old scroll sentinels / hide legacy headers ------------------- */
+[class*="scrollSentinel"] { display: none !important; }
+
+/* ---- PrimeReact paginator polish ----------------------------------------- */
+.p-paginator-page.p-highlight {
+  background: var(--brand-600) !important;
+  color: #fff !important;
+  border-color: var(--brand-600) !important;
+  border-radius: var(--radius-md) !important;
+}
+.p-paginator-page,
+.p-paginator-first,
+.p-paginator-prev,
+.p-paginator-next,
+.p-paginator-last {
+  border-radius: var(--radius-md) !important;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.p-paginator-page:hover,
+.p-paginator-first:hover,
+.p-paginator-prev:hover,
+.p-paginator-next:hover,
+.p-paginator-last:hover {
+  background: var(--surface-2) !important;
+}
+
+/* ---- Make p-button colors use design tokens ------------------------------ */
+.p-button.p-button-outlined {
+  color: var(--brand-700) !important;
+  border-color: var(--brand-300) !important;
+}
+.p-button.p-button-outlined:hover {
+  background: var(--brand-50) !important;
+}
+[data-theme="dark"] .p-button.p-button-outlined {
+  color: var(--brand-300) !important;
+  border-color: rgba(59, 130, 246, 0.45) !important;
+}
+[data-theme="dark"] .p-button.p-button-outlined:hover {
+  background: rgba(59, 130, 246, 0.1) !important;
+}
+
+/* ---- Dialog + Confirm dialog backdrop ------------------------------------ */
+.p-dialog-mask {
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+}
+
+/* ---- Progress spinner circle colour (design token) ---------------------- */
+.p-progress-spinner-svg circle {
+  stroke: var(--brand-500) !important;
+}
+
+/* ---- Strip any hardcoded linear gradients on old pages ------------------- */
+[class*="homePage"],
+[class*="pageWrap"] {
+  background-image: none !important;
+}

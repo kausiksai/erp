@@ -1,0 +1,237 @@
+/* ==========================================================================
+   design-system/tokens.css
+   Core design tokens: color, typography, spacing, elevation, motion, radii.
+   Every other stylesheet references these as CSS custom properties so we
+   can retheme the entire portal in one place.
+
+   Two themes:
+     :root          – light (default)
+     [data-theme="dark"]  – dark mode (toggled by ThemeProvider)
+
+   Import order: this file must come first.
+   ========================================================================== */
+
+:root {
+  /* ----- Brand ----------------------------------------------------------- */
+  --brand-50:  #eff6ff;
+  --brand-100: #dbeafe;
+  --brand-200: #bfdbfe;
+  --brand-300: #93c5fd;
+  --brand-400: #60a5fa;
+  --brand-500: #3b82f6;
+  --brand-600: #2563eb;
+  --brand-700: #1d4ed8;
+  --brand-800: #1e40af;
+  --brand-900: #1e3a8a;
+
+  /* ----- Accents --------------------------------------------------------- */
+  --accent-cyan:    #06b6d4;
+  --accent-teal:    #14b8a6;
+  --accent-indigo:  #6366f1;
+  --accent-violet:  #8b5cf6;
+  --accent-fuchsia: #d946ef;
+  --accent-amber:   #f59e0b;
+  --accent-emerald: #10b981;
+  --accent-rose:    #f43f5e;
+
+  /* ----- Status palette -------------------------------------------------- */
+  --status-success-bg:   #ecfdf5;
+  --status-success-fg:   #047857;
+  --status-success-ring: rgba(16, 185, 129, 0.35);
+
+  --status-info-bg:      #eff6ff;
+  --status-info-fg:      #1d4ed8;
+  --status-info-ring:    rgba(59, 130, 246, 0.35);
+
+  --status-warn-bg:      #fffbeb;
+  --status-warn-fg:      #b45309;
+  --status-warn-ring:    rgba(245, 158, 11, 0.35);
+
+  --status-danger-bg:    #fef2f2;
+  --status-danger-fg:    #b91c1c;
+  --status-danger-ring:  rgba(239, 68, 68, 0.35);
+
+  --status-muted-bg:     #f1f5f9;
+  --status-muted-fg:     #475569;
+  --status-muted-ring:   rgba(100, 116, 139, 0.25);
+
+  /* ----- Surface (backgrounds) ------------------------------------------ */
+  --surface-0:  #ffffff;                 /* cards, dialogs */
+  --surface-1:  #f8fafc;                 /* page bg */
+  --surface-2:  #f1f5f9;                 /* subtle alt rows */
+  --surface-3:  #e2e8f0;                 /* dividers, chips */
+  --surface-4:  #cbd5e1;                 /* borders emphasis */
+
+  --surface-glass:       rgba(255, 255, 255, 0.72);
+  --surface-glass-strong: rgba(255, 255, 255, 0.92);
+  --surface-overlay:     rgba(15, 23, 42, 0.5);
+
+  --page-bg:  radial-gradient(1200px 600px at 10% -10%, #eef2ff 0%, transparent 55%),
+              radial-gradient(1200px 600px at 100% 10%, #f0f9ff 0%, transparent 55%),
+              linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+
+  /* ----- Text ------------------------------------------------------------ */
+  --text-primary:   #0f172a;             /* headings, strong text */
+  --text-secondary: #334155;             /* body text */
+  --text-muted:     #64748b;             /* labels, subtitles */
+  --text-faint:     #94a3b8;             /* placeholders */
+  --text-inverse:   #f8fafc;             /* on dark chips */
+  --text-link:      var(--brand-600);
+  --text-link-hover: var(--brand-800);
+
+  /* ----- Borders --------------------------------------------------------- */
+  --border-subtle:  rgba(15, 23, 42, 0.06);
+  --border-default: rgba(15, 23, 42, 0.1);
+  --border-strong:  rgba(15, 23, 42, 0.16);
+  --border-focus:   rgba(59, 130, 246, 0.45);
+
+  /* ----- Elevation (shadows) -------------------------------------------- */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -1px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.1), 0 4px 6px -2px rgba(15, 23, 42, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 10px 10px -5px rgba(15, 23, 42, 0.04);
+  --shadow-2xl: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+  --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.15), 0 8px 24px -6px rgba(59, 130, 246, 0.25);
+
+  /* ----- Radii ----------------------------------------------------------- */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   16px;
+  --radius-xl:   22px;
+  --radius-2xl:  28px;
+  --radius-full: 999px;
+
+  /* ----- Spacing scale (4px base) --------------------------------------- */
+  --space-0:  0;
+  --space-1:  0.25rem;   /* 4  */
+  --space-2:  0.5rem;    /* 8  */
+  --space-3:  0.75rem;   /* 12 */
+  --space-4:  1rem;      /* 16 */
+  --space-5:  1.25rem;   /* 20 */
+  --space-6:  1.5rem;    /* 24 */
+  --space-7:  1.75rem;   /* 28 */
+  --space-8:  2rem;      /* 32 */
+  --space-10: 2.5rem;    /* 40 */
+  --space-12: 3rem;      /* 48 */
+  --space-16: 4rem;      /* 64 */
+
+  /* ----- Typography ----------------------------------------------------- */
+  --font-sans: 'Inter', 'InterVariable', -apple-system, BlinkMacSystemFont,
+               'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue',
+               sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, 'SF Mono',
+               Menlo, monospace;
+
+  --fs-xs:   0.75rem;    /* 12 */
+  --fs-sm:   0.8125rem;  /* 13 */
+  --fs-base: 0.875rem;   /* 14 */
+  --fs-md:   0.9375rem;  /* 15 */
+  --fs-lg:   1.0625rem;  /* 17 */
+  --fs-xl:   1.25rem;    /* 20 */
+  --fs-2xl:  1.5rem;     /* 24 */
+  --fs-3xl:  1.875rem;   /* 30 */
+  --fs-4xl:  2.25rem;    /* 36 */
+  --fs-5xl:  3rem;       /* 48 */
+
+  --lh-tight:  1.2;
+  --lh-snug:   1.35;
+  --lh-normal: 1.55;
+  --lh-relaxed:1.75;
+
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+
+  /* ----- Motion ---------------------------------------------------------- */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast:   120ms;
+  --dur-base:   200ms;
+  --dur-slow:   320ms;
+  --dur-slower: 520ms;
+
+  /* ----- Layout ---------------------------------------------------------- */
+  --topbar-h: 64px;
+  --sidebar-w: 260px;
+  --sidebar-w-collapsed: 72px;
+  --page-max: 1440px;
+  --gutter: clamp(1rem, 2vw, 2rem);
+
+  /* ----- Chart palette (sequential + categorical) ----------------------- */
+  --chart-1: #6366f1;
+  --chart-2: #06b6d4;
+  --chart-3: #14b8a6;
+  --chart-4: #f59e0b;
+  --chart-5: #f43f5e;
+  --chart-6: #8b5cf6;
+  --chart-7: #10b981;
+  --chart-8: #3b82f6;
+
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   Dark theme — toggled by ThemeProvider via document.documentElement
+                  [data-theme="dark"]
+   ========================================================================== */
+[data-theme="dark"] {
+  --surface-0:  #0f172a;
+  --surface-1:  #0b1120;
+  --surface-2:  #111827;
+  --surface-3:  #1e293b;
+  --surface-4:  #334155;
+
+  --surface-glass:        rgba(15, 23, 42, 0.72);
+  --surface-glass-strong: rgba(15, 23, 42, 0.92);
+  --surface-overlay:      rgba(0, 0, 0, 0.6);
+
+  --page-bg:  radial-gradient(1200px 600px at 10% -10%, rgba(99, 102, 241, 0.12) 0%, transparent 55%),
+              radial-gradient(1200px 600px at 100% 10%, rgba(6, 182, 212, 0.10) 0%, transparent 55%),
+              linear-gradient(180deg, #0b1120 0%, #0f172a 100%);
+
+  --text-primary:   #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted:     #94a3b8;
+  --text-faint:     #64748b;
+  --text-inverse:   #0f172a;
+  --text-link:      var(--brand-400);
+  --text-link-hover: var(--brand-300);
+
+  --border-subtle:  rgba(148, 163, 184, 0.08);
+  --border-default: rgba(148, 163, 184, 0.16);
+  --border-strong:  rgba(148, 163, 184, 0.28);
+  --border-focus:   rgba(96, 165, 250, 0.55);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.55), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 0 1px rgba(96, 165, 250, 0.2), 0 8px 24px -6px rgba(96, 165, 250, 0.4);
+
+  --status-success-bg:   rgba(16, 185, 129, 0.14);
+  --status-success-fg:   #6ee7b7;
+  --status-info-bg:      rgba(59, 130, 246, 0.14);
+  --status-info-fg:      #93c5fd;
+  --status-warn-bg:      rgba(245, 158, 11, 0.14);
+  --status-warn-fg:      #fcd34d;
+  --status-danger-bg:    rgba(239, 68, 68, 0.14);
+  --status-danger-fg:    #fca5a5;
+  --status-muted-bg:     rgba(100, 116, 139, 0.14);
+  --status-muted-fg:     #cbd5e1;
+
+  color-scheme: dark;
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --dur-slower: 0ms;
+  }
+}

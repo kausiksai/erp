@@ -1,0 +1,238 @@
+/* ==========================================================================
+   design-system/base.css
+   Body, typography, scrollbars, focus rings, PrimeReact overrides.
+   ========================================================================== */
+
+html {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--surface-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+  background-attachment: fixed;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  color: var(--text-primary);
+  background: var(--page-bg);
+  background-attachment: fixed;
+  min-height: 100vh;
+  transition: background var(--dur-slow) var(--ease-out),
+              color var(--dur-slow) var(--ease-out);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Headings --------------------------------------------------------------- */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--lh-tight);
+}
+
+/* Scrollbar -------------------------------------------------------------- */
+html, body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-4) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-4);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* Focus rings ------------------------------------------------------------ */
+*:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  transition: outline-offset var(--dur-fast) var(--ease-out);
+}
+
+/* Links ------------------------------------------------------------------ */
+a {
+  color: var(--text-link);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+a:hover {
+  color: var(--text-link-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+/* Selection -------------------------------------------------------------- */
+::selection {
+  background: var(--brand-200);
+  color: var(--brand-900);
+}
+[data-theme="dark"] ::selection {
+  background: rgba(99, 102, 241, 0.35);
+  color: #f1f5f9;
+}
+
+/* ==========================================================================
+   PrimeReact polish overrides
+   Goal: make PrimeReact DataTable, Button, Dialog, Tag, etc. pick up our
+   palette without having to touch each component usage.
+   ========================================================================== */
+
+.p-component,
+.p-component * {
+  font-family: var(--font-sans);
+}
+
+/* --- Buttons ------------------------------------------------------------ */
+.p-button {
+  font-weight: var(--fw-medium);
+  border-radius: var(--radius-md);
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.p-button:not(.p-button-text):not(.p-button-outlined) {
+  box-shadow: var(--shadow-xs);
+}
+.p-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+.p-button:not(:disabled):active {
+  transform: translateY(0);
+}
+.p-button.p-button-sm { font-size: var(--fs-sm); padding: 0.4rem 0.75rem; }
+
+/* --- Inputs ------------------------------------------------------------- */
+.p-inputtext,
+.p-dropdown,
+.p-multiselect,
+.p-calendar,
+.p-password {
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--border-default) !important;
+  background: var(--surface-0) !important;
+  color: var(--text-primary) !important;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.p-inputtext:focus,
+.p-inputtext:hover,
+.p-dropdown:hover,
+.p-multiselect:hover {
+  border-color: var(--border-focus) !important;
+}
+.p-inputtext:focus {
+  box-shadow: 0 0 0 3px var(--status-info-ring) !important;
+}
+
+/* --- DataTable ---------------------------------------------------------- */
+.p-datatable {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface-0);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-subtle);
+}
+.p-datatable .p-datatable-header {
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: var(--space-4) var(--space-5);
+}
+.p-datatable .p-datatable-thead > tr > th {
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.p-datatable .p-datatable-tbody > tr {
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.p-datatable .p-datatable-tbody > tr > td {
+  padding: var(--space-3) var(--space-4);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.p-datatable .p-datatable-tbody > tr:hover > td {
+  background: var(--surface-1);
+}
+.p-datatable .p-datatable-tbody > tr.p-highlight > td {
+  background: var(--brand-50);
+  color: var(--brand-800);
+}
+.p-datatable .p-paginator {
+  background: var(--surface-0);
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* Row expansion rows */
+.p-datatable .p-datatable-row-expansion > td {
+  background: var(--surface-1);
+}
+
+/* --- Tag / chip --------------------------------------------------------- */
+.p-tag {
+  border-radius: var(--radius-full);
+  padding: 0.25rem 0.65rem;
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+}
+
+/* --- Dialog ------------------------------------------------------------- */
+.p-dialog {
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-2xl);
+  background: var(--surface-0);
+}
+.p-dialog .p-dialog-header {
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: var(--space-5) var(--space-6);
+}
+.p-dialog .p-dialog-content {
+  background: var(--surface-0);
+  color: var(--text-primary);
+}
+
+/* --- Toast -------------------------------------------------------------- */
+.p-toast .p-toast-message {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* --- Progress ----------------------------------------------------------- */
+.p-progress-spinner-circle {
+  stroke: var(--brand-500);
+}

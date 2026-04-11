@@ -1,30 +1,49 @@
 import './App.css'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import ScrollToTop from './components/ScrollToTop'
 import SessionExpiredHandler from './components/SessionExpiredHandler'
-import { useAuth } from './contexts/AuthContext'
-import Home from './pages/Home'
-import Login from './pages/Login'
-import InvoiceUpload from './pages/InvoiceUpload'
-import PurchaseOrderDetails from './pages/PurchaseOrderDetails'
-import GRNDetails from './pages/GRNDetails'
-import ASNDetails from './pages/ASNDetails'
-import DCDetails from './pages/DCDetails'
-import ScheduleDetails from './pages/ScheduleDetails'
-import OpenPoPrefixes from './pages/OpenPoPrefixes'
-import InvoiceValidate from './pages/InvoiceValidate'
-import InvoiceDetails from './pages/InvoiceDetails'
-import IncompletePOs from './pages/IncompletePOs'
-import UserRegistration from './pages/UserRegistration'
-import OwnerDetails from './pages/OwnerDetails'
-import SupplierRegistration from './pages/SupplierRegistration'
-import InvoiceReports from './pages/InvoiceReports'
-import SupplierReports from './pages/SupplierReports'
-import FinancialReports from './pages/FinancialReports'
-import ApprovePayments from './pages/ApprovePayments'
-import ReadyForPayments from './pages/ReadyForPayments'
-import PaymentHistory from './pages/PaymentHistory'
+import AppShell from './components/AppShell'
 import ProtectedRoute from './components/ProtectedRoute'
+import { useAuth } from './contexts/AuthContext'
+
+// Brand-new pages — every page is a from-scratch rewrite.
+import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
+import Analytics from './pages/Analytics'
+import ReportsHubPage from './pages/ReportsHubPage'
+import InvoicesPage from './pages/InvoicesPage'
+import InvoiceDetailPage from './pages/InvoiceDetailPage'
+import InvoiceUploadPage from './pages/InvoiceUploadPage'
+import PurchaseOrdersPage from './pages/PurchaseOrdersPage'
+import IncompletePOsPage from './pages/IncompletePOsPage'
+import GRNPage from './pages/GRNPage'
+import ASNPage from './pages/ASNPage'
+import DCPage from './pages/DCPage'
+import SchedulesPage from './pages/SchedulesPage'
+import OpenPoPrefixesPage from './pages/OpenPoPrefixesPage'
+import SuppliersPage from './pages/SuppliersPage'
+import SupplierFormPage from './pages/SupplierFormPage'
+import UsersPage from './pages/UsersPage'
+import OwnerPage from './pages/OwnerPage'
+import PaymentsPage from './pages/PaymentsPage'
+import SettingsPage from './pages/SettingsPage'
+import ProfilePage from './pages/ProfilePage'
+
+/** Every authenticated route renders inside the global AppShell. */
+function ShellRoute({
+  children,
+  requiredRole
+}: {
+  children: ReactNode
+  requiredRole?: string[]
+}) {
+  return (
+    <ProtectedRoute requiredRole={requiredRole}>
+      <AppShell>{children}</AppShell>
+    </ProtectedRoute>
+  )
+}
 
 function App() {
   const { isAuthenticated, loading } = useAuth()
@@ -43,170 +62,61 @@ function App() {
       <ScrollToTop />
       <SessionExpiredHandler />
       <Routes>
-        <Route 
-          path="/login" 
-          element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} 
+        {/* Public */}
+        <Route
+          path="/login"
+          element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
         />
-        <Route 
-          path="/" 
-          element={
-            <ProtectedRoute>
-              <Home />
-            </ProtectedRoute>
-          } 
+
+        {/* Overview */}
+        <Route path="/"          element={<ShellRoute><Dashboard /></ShellRoute>} />
+        <Route path="/analytics" element={<ShellRoute><Analytics /></ShellRoute>} />
+        <Route path="/reports"   element={<ShellRoute><ReportsHubPage /></ShellRoute>} />
+
+        {/* Workflow — Invoices */}
+        <Route path="/invoices/validate"      element={<ShellRoute><InvoicesPage /></ShellRoute>} />
+        <Route path="/invoices/validate/:id"  element={<ShellRoute><InvoiceDetailPage /></ShellRoute>} />
+        <Route path="/invoices/upload"        element={<ShellRoute><InvoiceUploadPage /></ShellRoute>} />
+
+        {/* Workflow — Payments */}
+        <Route
+          path="/payments/approve"
+          element={<ShellRoute requiredRole={['admin', 'manager', 'finance']}><PaymentsPage /></ShellRoute>}
         />
-        <Route 
-          path="/invoices/upload" 
-          element={
-            <ProtectedRoute>
-              <InvoiceUpload />
-            </ProtectedRoute>
-          } 
+        <Route
+          path="/payments/ready"
+          element={<ShellRoute requiredRole={['admin', 'manager', 'finance']}><PaymentsPage /></ShellRoute>}
         />
-        <Route 
-          path="/invoices/validate" 
-          element={
-            <ProtectedRoute>
-              <InvoiceValidate />
-            </ProtectedRoute>
-          } 
+        <Route path="/payments/history" element={<ShellRoute><PaymentsPage /></ShellRoute>} />
+
+        {/* Documents */}
+        <Route path="/purchase-orders"            element={<ShellRoute><PurchaseOrdersPage /></ShellRoute>} />
+        <Route path="/purchase-orders/incomplete" element={<ShellRoute><IncompletePOsPage /></ShellRoute>} />
+        <Route path="/grn"                        element={<ShellRoute><GRNPage /></ShellRoute>} />
+        <Route path="/asn"                        element={<ShellRoute><ASNPage /></ShellRoute>} />
+        <Route path="/delivery-challans"          element={<ShellRoute><DCPage /></ShellRoute>} />
+        <Route path="/po-schedules"               element={<ShellRoute><SchedulesPage /></ShellRoute>} />
+        <Route path="/open-po-prefixes"           element={<ShellRoute><OpenPoPrefixesPage /></ShellRoute>} />
+
+        {/* Masters */}
+        <Route path="/suppliers"              element={<ShellRoute><SuppliersPage /></ShellRoute>} />
+        <Route
+          path="/suppliers/registration"
+          element={<ShellRoute requiredRole={['admin', 'manager']}><SupplierFormPage /></ShellRoute>}
         />
-        <Route 
-          path="/invoices/validate/:id" 
-          element={
-            <ProtectedRoute>
-              <InvoiceDetails />
-            </ProtectedRoute>
-          } 
+        <Route
+          path="/users/registration"
+          element={<ShellRoute requiredRole={['admin', 'manager']}><UsersPage /></ShellRoute>}
         />
-        <Route 
-          path="/purchase-orders/upload" 
-          element={
-            <ProtectedRoute>
-              <PurchaseOrderDetails />
-            </ProtectedRoute>
-          } 
+        <Route
+          path="/owners/details"
+          element={<ShellRoute requiredRole={['admin']}><OwnerPage /></ShellRoute>}
         />
-        <Route 
-          path="/purchase-orders/incomplete" 
-          element={
-            <ProtectedRoute>
-              <IncompletePOs />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/grn/details" 
-          element={
-            <ProtectedRoute>
-              <GRNDetails />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/asn/details" 
-          element={
-            <ProtectedRoute>
-              <ASNDetails />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/delivery-challans/details" 
-          element={
-            <ProtectedRoute>
-              <DCDetails />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/po-schedules/details" 
-          element={
-            <ProtectedRoute>
-              <ScheduleDetails />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/open-po-prefixes" 
-          element={
-            <ProtectedRoute>
-              <OpenPoPrefixes />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/users/registration" 
-          element={
-            <ProtectedRoute requiredRole={['admin', 'manager']}>
-              <UserRegistration />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/owners/details" 
-          element={
-            <ProtectedRoute requiredRole={['admin']}>
-              <OwnerDetails />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/suppliers/registration" 
-          element={
-            <ProtectedRoute requiredRole={['admin', 'manager']}>
-              <SupplierRegistration />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/payments/approve" 
-          element={
-            <ProtectedRoute requiredRole={['admin', 'manager', 'finance']}>
-              <ApprovePayments />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/payments/ready" 
-          element={
-            <ProtectedRoute requiredRole={['admin', 'manager', 'finance']}>
-              <ReadyForPayments />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/payments/history" 
-          element={
-            <ProtectedRoute>
-              <PaymentHistory />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/reports/invoices" 
-          element={
-            <ProtectedRoute>
-              <InvoiceReports />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/reports/financial" 
-          element={
-            <ProtectedRoute>
-              <FinancialReports />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/reports/suppliers" 
-          element={
-            <ProtectedRoute>
-              <SupplierReports />
-            </ProtectedRoute>
-          } 
-        />
+
+        {/* System */}
+        <Route path="/settings" element={<ShellRoute><SettingsPage /></ShellRoute>} />
+        <Route path="/profile"  element={<ShellRoute><ProfilePage /></ShellRoute>} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
