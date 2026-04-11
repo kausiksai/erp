@@ -48,52 +48,69 @@ interface GRNRecord {
 function GRNDetails() {
   const toast = useRef<Toast>(null)
   const [records, setRecords] = useState<GRNRecord[]>([])
+  const [total, setTotal] = useState<number>(0)
+  const [first, setFirst] = useState<number>(0)
+  const [rows, setRows] = useState<number>(25)
   const [loading, setLoading] = useState<boolean>(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const debouncedSearch = useDebounce(searchTerm, 300)
+  const debouncedSearch = useDebounce(searchTerm, 350)
   const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({})
   const [uploadingExcel, setUploadingExcel] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  const searchLower = debouncedSearch.trim().toLowerCase()
-  const filteredRecords = searchLower
-    ? records.filter((r) => {
-        const grnNo = (r.grn_no ?? '').toLowerCase()
-        const poNumber = (r.po_number ?? r.po_no ?? '').toLowerCase()
-        const supplier = (r.supplier_name ?? r.supplier ?? '').toLowerCase()
-        const dcNo = (r.dc_no ?? '').toLowerCase()
-        const item = (r.item ?? '').toLowerCase()
-        const desc = (r.description_1 ?? '').toLowerCase()
-        const status = (r.header_status ?? r.line_status ?? '').toLowerCase()
-        return grnNo.includes(searchLower) || poNumber.includes(searchLower) || supplier.includes(searchLower) || dcNo.includes(searchLower) || item.includes(searchLower) || desc.includes(searchLower) || status.includes(searchLower)
-      })
-    : records
-
-  const fetchGRN = async () => {
+  const fetchGRN = useCallback(async () => {
     try {
       setLoading(true)
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
       const token = localStorage.getItem('authToken')
-      const response = await fetch(apiUrl('grn'), {
+      const params = new URLSearchParams()
+      params.set('limit', String(rows))
+      params.set('offset', String(first))
+      const search = debouncedSearch.trim()
+      if (search) {
+        const isNumericish = /^[A-Za-z0-9/\-_]+$/.test(search) && /\d/.test(search)
+        if (isNumericish) {
+          params.set('grnNo', search)
+        } else {
+          params.set('supplier', search)
+        }
+      }
+      const response = await fetch(apiUrl(`grn?${params.toString()}`), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal,
       })
       if (!response.ok) {
         const msg = await getErrorMessageFromResponse(response, 'Failed to load GRN')
         toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
         return
       }
-      const data = await response.json()
-      setRecords(data)
+      const raw = await response.json()
+      if (Array.isArray(raw)) {
+        setRecords(raw)
+        setTotal(raw.length)
+      } else {
+        setRecords(raw.items || [])
+        setTotal(Number(raw.total) || 0)
+      }
     } catch (error: unknown) {
+      if ((error as { name?: string })?.name === 'AbortError') return
       const msg = error instanceof Error ? error.message : 'Failed to load GRN'
       toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
     } finally {
       setLoading(false)
     }
-  }
+  }, [rows, first, debouncedSearch])
 
   useEffect(() => {
     fetchGRN()
-  }, [])
+  }, [fetchGRN])
+
+  useEffect(() => {
+    setFirst(0)
+  }, [debouncedSearch])
 
   const handleExcelUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -309,10 +326,17 @@ function GRNDetails() {
             <div className="dts-tableWrapper">
               <div className="dts-tableContainer">
                 <DataTable
-                  value={filteredRecords}
+                  value={records}
+                  lazy
                   paginator
-                  rows={10}
-                  rowsPerPageOptions={[10, 25, 50]}
+                  first={first}
+                  rows={rows}
+                  totalRecords={total}
+                  onPage={(e) => {
+                    setFirst(e.first)
+                    setRows(e.rows)
+                  }}
+                  rowsPerPageOptions={[10, 25, 50, 100, 200]}
                   emptyMessage={searchTerm ? 'No matching GRN records' : 'No GRN records found'}
                   stripedRows
                   expandedRows={expandedRows}

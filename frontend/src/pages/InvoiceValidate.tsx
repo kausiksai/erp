@@ -29,6 +29,19 @@ interface Invoice {
   po_number: string | null
   po_date: string | null
   created_at: string
+  // Bill Register fields
+  unit?: string | null
+  doc_pfx?: string | null
+  doc_no?: string | null
+  doc_entry_date?: string | null
+  bill_type?: string | null
+  grn_no?: string | null
+  grn_date?: string | null
+  po_pfx?: string | null
+  gst_type?: string | null
+  gstin?: string | null
+  place_of_supply_desc?: string | null
+  source?: string | null
 }
 
 const statusOptions = [
@@ -298,12 +311,71 @@ function InvoiceValidate() {
                   }
                 >
                   <Column field="invoice_number" header="Invoice Number" sortable body={invoiceNumberBodyTemplate} />
-                  <Column field="po_number" header="PO Number" sortable body={poNumberBodyTemplate} />
+                  <Column field="unit" header="Unit" sortable style={{ minWidth: '90px' }} body={(r: Invoice) => r.unit || '-'} />
+                  <Column
+                    field="po_number"
+                    header="PO Number"
+                    sortable
+                    body={(r: Invoice) => {
+                      const display = poNumberBodyTemplate(r)
+                      if (r.po_pfx) {
+                        return (
+                          <span title={`Prefix: ${r.po_pfx}`}>
+                            <span style={{ fontSize: '0.72rem', color: '#64748b', marginRight: '0.35rem' }}>{r.po_pfx}</span>
+                            {display}
+                          </span>
+                        )
+                      }
+                      return display
+                    }}
+                  />
                   <Column field="invoice_date" header="Invoice Date" sortable body={dateBodyTemplate} />
                   <Column field="payment_due_date" header="Due Date" sortable body={(r: Invoice) => r.payment_due_date ? new Date(r.payment_due_date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '-'} style={{ minWidth: '120px' }} />
                   <Column field="supplier_name" header="Supplier" sortable />
                   <Column field="total_amount" header="Total Amount" sortable body={amountBodyTemplate} />
+                  <Column
+                    field="gst_type"
+                    header="GST"
+                    sortable
+                    style={{ minWidth: '110px' }}
+                    body={(r: Invoice) => (
+                      <span style={{ fontSize: '0.75rem' }}>
+                        {r.gst_type || '-'}
+                        {r.place_of_supply_desc && (
+                          <span style={{ display: 'block', color: '#64748b', fontSize: '0.7rem' }}>
+                            {r.place_of_supply_desc}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  />
                   <Column field="status" header="Status" sortable body={statusBodyTemplate} />
+                  <Column
+                    field="source"
+                    header="Source"
+                    sortable
+                    style={{ minWidth: '110px' }}
+                    body={(r: Invoice) => {
+                      const src = r.source || 'portal'
+                      const isAuto = src === 'email_automation'
+                      return (
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '0.75rem',
+                            background: isAuto ? '#dbeafe' : '#dcfce7',
+                            color: isAuto ? '#1e3a8a' : '#166534',
+                            fontWeight: 600,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.02em',
+                          }}
+                        >
+                          {isAuto ? 'auto' : src}
+                        </span>
+                      )
+                    }}
+                  />
                 </DataTable>
               </div>
             </div>

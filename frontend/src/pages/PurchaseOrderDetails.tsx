@@ -46,55 +46,75 @@ interface PurchaseOrder {
   lineItems?: PurchaseOrderLineItem[]
 }
 
+const PO_DEFAULT_ROWS = 25
+
 function PurchaseOrderDetails() {
   const toast = useRef<Toast>(null)
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
+  const [total, setTotal] = useState<number>(0)
+  const [first, setFirst] = useState<number>(0)
+  const [rows, setRows] = useState<number>(PO_DEFAULT_ROWS)
   const [loading, setLoading] = useState<boolean>(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const debouncedSearch = useDebounce(searchTerm, 300)
+  const debouncedSearch = useDebounce(searchTerm, 350)
   const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({})
   const [loadingLineItems, setLoadingLineItems] = useState<Set<number>>(new Set())
   const [uploadingExcel, setUploadingExcel] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  const searchLower = debouncedSearch.trim().toLowerCase()
-  const filteredPOs = searchLower
-    ? purchaseOrders.filter((po) => {
-        const poNumber = (po.po_number ?? '').toLowerCase()
-        const supplier = (po.supplier_name ?? '').toLowerCase()
-        const unit = (po.unit ?? '').toLowerCase()
-        const pfx = (po.pfx ?? '').toLowerCase()
-        const terms = (po.terms ?? '').toLowerCase()
-        const status = (po.status ?? '').toLowerCase()
-        return poNumber.includes(searchLower) || supplier.includes(searchLower) || unit.includes(searchLower) || pfx.includes(searchLower) || terms.includes(searchLower) || status.includes(searchLower)
-      })
-    : purchaseOrders
-
-  const fetchPurchaseOrders = async () => {
+  const fetchPurchaseOrders = useCallback(async () => {
     try {
       setLoading(true)
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
       const token = localStorage.getItem('authToken')
-      const response = await fetch(apiUrl('purchase-orders'), {
+      const params = new URLSearchParams()
+      params.set('limit', String(rows))
+      params.set('offset', String(first))
+      const search = debouncedSearch.trim()
+      if (search) {
+        const isNumericish = /^[A-Za-z0-9/\-_]+$/.test(search) && /\d/.test(search)
+        if (isNumericish) {
+          params.set('poNumber', search)
+        } else {
+          params.set('supplier', search)
+        }
+      }
+      const response = await fetch(apiUrl(`purchase-orders?${params.toString()}`), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal,
       })
       if (!response.ok) {
         const msg = await getErrorMessageFromResponse(response, 'Failed to load purchase orders')
         toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
         return
       }
-      const data = await response.json()
-      setPurchaseOrders(data)
+      const raw = await response.json()
+      if (Array.isArray(raw)) {
+        setPurchaseOrders(raw)
+        setTotal(raw.length)
+      } else {
+        setPurchaseOrders(raw.items || [])
+        setTotal(Number(raw.total) || 0)
+      }
     } catch (error: unknown) {
+      if ((error as { name?: string })?.name === 'AbortError') return
       const msg = error instanceof Error ? error.message : 'Failed to load purchase orders'
       toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
     } finally {
       setLoading(false)
     }
-  }
+  }, [rows, first, debouncedSearch])
 
   useEffect(() => {
     fetchPurchaseOrders()
-  }, [])
+  }, [fetchPurchaseOrders])
+
+  useEffect(() => {
+    setFirst(0)
+  }, [debouncedSearch])
 
   const handleExcelUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -350,10 +370,17 @@ function PurchaseOrderDetails() {
           <div className="dts-tableWrapper">
             <div className="dts-tableContainer">
               <DataTable
-                value={filteredPOs}
+                value={purchaseOrders}
+                lazy
                 paginator
-                rows={10}
-                rowsPerPageOptions={[10, 25, 50]}
+                first={first}
+                rows={rows}
+                totalRecords={total}
+                onPage={(e) => {
+                  setFirst(e.first)
+                  setRows(e.rows)
+                }}
+                rowsPerPageOptions={[10, 25, 50, 100, 200]}
                 emptyMessage={searchTerm ? 'No matching purchase orders' : 'No purchase orders found'}
                 stripedRows
                 expandedRows={expandedRows}

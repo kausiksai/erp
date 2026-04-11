@@ -18,6 +18,10 @@ interface IncompletePO {
   po_number: string
   po_date: string
   po_status?: string
+  amd_no?: number | null
+  pfx?: string | null
+  unit?: string | null
+  terms?: string | null
   supplier_name: string | null
   has_invoice: boolean
   has_grn: boolean
@@ -67,6 +71,9 @@ function IncompletePOs() {
   const navigate = useNavigate()
   const toast = useRef<Toast>(null)
   const [incompletePOs, setIncompletePOs] = useState<IncompletePO[]>([])
+  const [ipoTotal, setIpoTotal] = useState<number>(0)
+  const [ipoFirst, setIpoFirst] = useState<number>(0)
+  const [ipoRows, setIpoRows] = useState<number>(25)
   const [debitNoteInvoices, setDebitNoteInvoices] = useState<PendingDebitNote[]>([])
   const [exceptionInvoices, setExceptionInvoices] = useState<PendingException[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,14 +90,27 @@ function IncompletePOs() {
     fetchAll()
   }, [])
 
+  // Re-fetch incomplete POs when the user pages
+  useEffect(() => {
+    fetchIncompletePOs().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ipoFirst, ipoRows])
+
   const fetchIncompletePOs = async () => {
     const token = localStorage.getItem('authToken')
-    const response = await fetch(apiUrl('purchase-orders/incomplete'), {
+    const params = new URLSearchParams({ limit: String(ipoRows), offset: String(ipoFirst) })
+    const response = await fetch(apiUrl(`purchase-orders/incomplete?${params.toString()}`), {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     })
     if (!response.ok) throw new Error('Failed to fetch incomplete purchase orders')
-    const data = await response.json()
-    setIncompletePOs(data)
+    const raw = await response.json()
+    if (Array.isArray(raw)) {
+      setIncompletePOs(raw)
+      setIpoTotal(raw.length)
+    } else {
+      setIncompletePOs(raw.items || [])
+      setIpoTotal(Number(raw.total) || 0)
+    }
   }
 
   const fetchDebitNoteInvoices = async () => {
@@ -688,9 +708,16 @@ function IncompletePOs() {
                     </div>
                   )
                 }}
+                lazy
                 paginator
-                rows={10}
-                rowsPerPageOptions={[10, 25, 50]}
+                first={ipoFirst}
+                rows={ipoRows}
+                totalRecords={ipoTotal}
+                onPage={(e) => {
+                  setIpoFirst(e.first)
+                  setIpoRows(e.rows)
+                }}
+                rowsPerPageOptions={[10, 25, 50, 100, 200]}
                 emptyMessage="No incomplete purchase orders found"
                 stripedRows
               >
@@ -699,7 +726,22 @@ function IncompletePOs() {
                   field="po_number"
                   header="PO Number"
                   sortable
-                  style={{ minWidth: '150px' }}
+                  style={{ minWidth: '160px' }}
+                  body={(r: IncompletePO) => (
+                    <span>
+                      {r.pfx && (
+                        <span style={{ fontSize: '0.72rem', color: '#64748b', marginRight: '0.35rem' }}>{r.pfx}</span>
+                      )}
+                      <strong>{r.po_number}</strong>
+                      {r.amd_no != null && r.amd_no > 0 && (
+                        <Badge
+                          value={`amd ${r.amd_no}`}
+                          severity="info"
+                          style={{ marginLeft: '0.5rem', fontSize: '0.65rem' }}
+                        />
+                      )}
+                    </span>
+                  )}
                 />
                 <Column
                   field="po_date"
@@ -707,6 +749,13 @@ function IncompletePOs() {
                   sortable
                   body={dateTemplate}
                   style={{ minWidth: '120px' }}
+                />
+                <Column
+                  field="unit"
+                  header="Unit"
+                  sortable
+                  style={{ minWidth: '90px' }}
+                  body={(r: IncompletePO) => r.unit || '-'}
                 />
                 <Column
                   field="supplier_name"

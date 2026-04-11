@@ -93,13 +93,14 @@ function PaymentHistory() {
   const fetchHistory = async () => {
     setLoading(true)
     try {
-      const res = await apiFetch('payments/history')
+      const res = await apiFetch('payments/history?limit=1000')
       if (!res.ok) {
         const msg = await getErrorMessageFromResponse(res, 'Failed to fetch payment history')
         throw new Error(msg)
       }
-      const data = await res.json()
-      setList(data)
+      const raw = await res.json()
+      const items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : []
+      setList(items)
       setExpandedRows({})
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load payment history'

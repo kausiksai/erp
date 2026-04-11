@@ -231,13 +231,17 @@ function ApprovePayments() {
   const fetchPending = async () => {
     setLoading(true)
     try {
-      const res = await apiFetch('payments/pending-approval')
+      // Request all pending approvals in one page (backend caps at 1000 which
+      // is far more than the real queue). Backend now returns {items,total,...};
+      // fall back to array shape for legacy compatibility.
+      const res = await apiFetch('payments/pending-approval?limit=1000')
       if (!res.ok) {
         const msg = await getErrorMessageFromResponse(res, 'Failed to fetch pending approvals')
         throw new Error(msg)
       }
-      const data = await res.json()
-      const sorted = [...data].sort((a, b) => {
+      const raw = await res.json()
+      const items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : []
+      const sorted = [...items].sort((a, b) => {
         const da = a.payment_due_date ? new Date(a.payment_due_date).getTime() : Infinity
         const db = b.payment_due_date ? new Date(b.payment_due_date).getTime() : Infinity
         return da - db

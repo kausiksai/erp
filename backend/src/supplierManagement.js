@@ -6,6 +6,7 @@ import { pool } from './db.js'
 const SUPPLIER_COLUMNS = `
   supplier_id,
   supplier_name,
+  suplr_id,
   gst_number,
   pan_number,
   supplier_address,
@@ -72,6 +73,7 @@ export async function createSupplierRoute(req, res) {
   try {
     const {
       supplier_name,
+      suplr_id,
       gst_number,
       pan_number,
       supplier_address,
@@ -102,6 +104,7 @@ export async function createSupplierRoute(req, res) {
     const { rows } = await pool.query(
       `INSERT INTO suppliers (
         supplier_name,
+        suplr_id,
         gst_number,
         pan_number,
         supplier_address,
@@ -120,10 +123,11 @@ export async function createSupplierRoute(req, res) {
         branch_name,
         website,
         contact_person
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       RETURNING ${SUPPLIER_COLUMNS}`,
       [
         String(supplier_name).trim(),
+        suplr_id ? String(suplr_id).trim() : null,
         gst_number ?? null,
         pan_number ?? null,
         supplier_address ?? null,
@@ -165,6 +169,7 @@ export async function updateSupplierRoute(req, res) {
     const { id } = req.params
     const {
       supplier_name,
+      suplr_id,
       gst_number,
       pan_number,
       supplier_address,
@@ -198,6 +203,10 @@ export async function updateSupplierRoute(req, res) {
       }
       updates.push(`supplier_name = $${paramIndex++}`)
       values.push(String(supplier_name).trim())
+    }
+    if (suplr_id !== undefined) {
+      updates.push(`suplr_id = $${paramIndex++}`);
+      values.push(suplr_id ? String(suplr_id).trim() : null)
     }
     if (gst_number !== undefined) { updates.push(`gst_number = $${paramIndex++}`); values.push(gst_number) }
     if (pan_number !== undefined) { updates.push(`pan_number = $${paramIndex++}`); values.push(pan_number) }

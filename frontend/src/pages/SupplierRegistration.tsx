@@ -16,6 +16,7 @@ import styles from './SupplierRegistration.module.css'
 interface Supplier {
   supplier_id: number
   supplier_name: string
+  suplr_id: string | null
   gst_number: string | null
   pan_number: string | null
   supplier_address: string | null
@@ -40,6 +41,7 @@ interface Supplier {
 
 const emptySupplier: Omit<Supplier, 'supplier_id' | 'created_at' | 'updated_at'> & { supplier_id?: number } = {
   supplier_name: '',
+  suplr_id: '',
   gst_number: '',
   pan_number: '',
   supplier_address: '',
@@ -114,6 +116,7 @@ function SupplierRegistration() {
       setFormData({
         supplier_id: data.supplier_id,
         supplier_name: data.supplier_name ?? '',
+        suplr_id: data.suplr_id ?? '',
         gst_number: data.gst_number ?? '',
         pan_number: data.pan_number ?? '',
         supplier_address: data.supplier_address ?? '',
@@ -207,6 +210,7 @@ function SupplierRegistration() {
       const method = isEditMode ? 'PUT' : 'POST'
       const body = {
         supplier_name: formData.supplier_name.trim(),
+        suplr_id: formData.suplr_id ? formData.suplr_id.trim() : null,
         gst_number: formData.gst_number || null,
         pan_number: formData.pan_number || null,
         supplier_address: formData.supplier_address || null,
@@ -343,6 +347,13 @@ function SupplierRegistration() {
                 emptyMessage="No suppliers found"
                 stripedRows
               >
+                <Column
+                  field="suplr_id"
+                  header="Code"
+                  sortable
+                  style={{ minWidth: '110px', fontFamily: 'monospace' }}
+                  body={(r: Supplier) => r.suplr_id || <span style={{ color: '#94a3b8' }}>-</span>}
+                />
                 <Column field="supplier_name" header="Supplier Name" sortable style={{ minWidth: '180px' }} />
                 <Column field="gst_number" header="GST Number" sortable style={{ minWidth: '140px' }} />
                 <Column field="city" header="City" sortable style={{ minWidth: '120px' }} />
@@ -375,6 +386,15 @@ function SupplierRegistration() {
                   onChange={e => handleInputChange('supplier_name', e.target.value)}
                   className={styles.input}
                   placeholder="Enter supplier name"
+                />
+              </div>
+              <div className={styles.formField}>
+                <label className={styles.label}>Supplier Code (srimukha vendor code)</label>
+                <InputText
+                  value={formData.suplr_id || ''}
+                  onChange={e => handleInputChange('suplr_id', e.target.value)}
+                  className={styles.input}
+                  placeholder="e.g. V2375"
                 />
               </div>
               <div className={styles.formField}>

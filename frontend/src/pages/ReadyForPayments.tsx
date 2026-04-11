@@ -105,13 +105,14 @@ function ReadyForPayments() {
   const fetchReady = async () => {
     setLoading(true)
     try {
-      const res = await apiFetch('payments/ready')
+      const res = await apiFetch('payments/ready?limit=1000')
       if (!res.ok) {
         const msg = await getErrorMessageFromResponse(res, 'Failed to fetch ready payments')
         throw new Error(msg)
       }
-      const data = await res.json()
-      const sorted = [...data].sort((a, b) => {
+      const raw = await res.json()
+      const items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : []
+      const sorted = [...items].sort((a, b) => {
         const da = a.payment_due_date ? new Date(a.payment_due_date).getTime() : Infinity
         const db = b.payment_due_date ? new Date(b.payment_due_date).getTime() : Infinity
         return da - db

@@ -47,36 +47,54 @@ interface ScheduleRecord {
 function ScheduleDetails() {
   const toast = useRef<Toast>(null)
   const [records, setRecords] = useState<ScheduleRecord[]>([])
+  const [total, setTotal] = useState<number>(0)
+  const [first, setFirst] = useState<number>(0)
+  const [rows, setRows] = useState<number>(25)
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const debouncedSearch = useDebounce(searchTerm, 300)
+  const debouncedSearch = useDebounce(searchTerm, 350)
   const [uploadingExcel, setUploadingExcel] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  const searchLower = debouncedSearch.trim().toLowerCase()
-  const filtered = searchLower
-    ? records.filter((r) => {
-        const hay = [
-          r.po_number, r.ord_no, r.item_id, r.description, r.ss_no, r.schedule_ref, r.doc_no, r.supplier_name, r.status,
-        ].join(' ').toLowerCase()
-        return hay.includes(searchLower)
-      })
-    : records
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true)
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
       const token = localStorage.getItem('authToken')
-      const res = await fetch(apiUrl('po-schedules'), {
+      const params = new URLSearchParams()
+      params.set('limit', String(rows))
+      params.set('offset', String(first))
+      const search = debouncedSearch.trim()
+      if (search) {
+        const isNumericish = /^[A-Za-z0-9/\-_]+$/.test(search) && /\d/.test(search)
+        if (isNumericish) {
+          params.set('docNo', search)
+        } else {
+          params.set('supplier', search)
+        }
+      }
+      const res = await fetch(apiUrl(`po-schedules?${params.toString()}`), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal,
       })
       if (!res.ok) {
         const msg = await getErrorMessageFromResponse(res, 'Failed to load schedules')
         toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
         return
       }
-      setRecords(await res.json())
+      const raw = await res.json()
+      if (Array.isArray(raw)) {
+        setRecords(raw)
+        setTotal(raw.length)
+      } else {
+        setRecords(raw.items || [])
+        setTotal(Number(raw.total) || 0)
+      }
     } catch (e: unknown) {
+      if ((e as { name?: string })?.name === 'AbortError') return
       toast.current?.show({
         severity: 'error',
         summary: 'Error',
@@ -86,11 +104,15 @@ function ScheduleDetails() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [rows, first, debouncedSearch])
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [fetchData])
+
+  useEffect(() => {
+    setFirst(0)
+  }, [debouncedSearch])
 
   const handleExcelUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -189,10 +211,17 @@ function ScheduleDetails() {
             <div className="dts-tableWrapper">
               <div className="dts-tableContainer">
                 <DataTable
-                  value={filtered}
+                  value={records}
+                  lazy
                   paginator
-                  rows={10}
-                  rowsPerPageOptions={[10, 25, 50]}
+                  first={first}
+                  rows={rows}
+                  totalRecords={total}
+                  onPage={(e) => {
+                    setFirst(e.first)
+                    setRows(e.rows)
+                  }}
+                  rowsPerPageOptions={[10, 25, 50, 100, 200]}
                   emptyMessage={searchTerm ? 'No matches' : 'No schedules — upload an Excel file'}
                   stripedRows
                   scrollable

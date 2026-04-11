@@ -17,8 +17,14 @@ import styles from './InvoiceDetails.module.css'
 interface InvoiceLineItem {
   invoice_line_id: number
   item_name: string
+  item_code?: string | null
+  item_rev?: string | null
+  item_class?: string | null
+  item_sub_class?: string | null
+  narration?: string | null
   hsn_sac: string | null
   uom: string | null
+  uom_description?: string | null
   billed_qty: number
   weight: number | null
   count: number | null
@@ -26,10 +32,30 @@ interface InvoiceLineItem {
   rate_per: string | null
   line_total: number
   taxable_value: number
+  assessable_value?: number | null
+  gross_amount?: number | null
+  gross_amount_suplr?: number | null
+  net_amount?: number | null
+  net_amount_suplr?: number | null
+  bill_amt_tc?: number | null
+  domestic_amt?: number | null
+  import_amt?: number | null
   cgst_rate: number
   cgst_amount: number
   sgst_rate: number
   sgst_amount: number
+  igst_rate?: number | null
+  igst_amount?: number | null
+  cgst_9_amount?: number | null
+  cgst_2_5_amount?: number | null
+  sgst_9_amount?: number | null
+  sgst_2_5_amount?: number | null
+  igst_18_amount?: number | null
+  igst_5_amount?: number | null
+  cgst_rcm_amount?: number | null
+  sgst_rcm_amount?: number | null
+  igst_rcm_amount?: number | null
+  grn_tax_amount?: number | null
   total_tax_amount: number
   sequence_number: number
 }
@@ -92,6 +118,34 @@ interface InvoiceDetails {
   bill_to_address: string | null
   bill_to_gstin: string | null
   po_status: string | null
+  // Bill Register additions (from Phase 2 migrations)
+  unit?: string | null
+  doc_pfx?: string | null
+  doc_no?: string | null
+  doc_entry_date?: string | null
+  bill_type?: string | null
+  mode?: string | null
+  grn_pfx?: string | null
+  grn_no?: string | null
+  grn_date?: string | null
+  dc_no?: string | null
+  ss_pfx?: string | null
+  ss_no?: string | null
+  open_order_pfx?: string | null
+  open_order_no?: string | null
+  gstin?: string | null
+  gst_type?: string | null
+  gst_classification?: string | null
+  gst_supply_type?: string | null
+  rcm_flag?: boolean | null
+  non_gst_flag?: boolean | null
+  place_of_supply?: string | null
+  place_of_supply_desc?: string | null
+  aic_type?: string | null
+  currency?: string | null
+  exchange_rate?: number | null
+  source?: string | null
+  bill_register_run_id?: string | null
   items: InvoiceLineItem[]
   poLineItems: POLineItem[]
 }
@@ -722,6 +776,163 @@ function InvoiceDetails() {
               )}
             </div>
           </div>
+
+          {/* Bill Register Details (email_automation origin data) */}
+          {(invoice.source === 'email_automation' || invoice.unit || invoice.gstin || invoice.bill_type || invoice.grn_no) && (
+            <div className={styles.detailsCard}>
+              <h3 className={styles.cardTitle}>
+                <i className="pi pi-book" style={{ marginRight: '0.5rem' }}></i>
+                Bill Register Details
+                {invoice.source && (
+                  <span
+                    style={{
+                      marginLeft: '0.75rem',
+                      fontSize: '0.72rem',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '0.75rem',
+                      background: invoice.source === 'email_automation' ? '#dbeafe' : '#dcfce7',
+                      color: invoice.source === 'email_automation' ? '#1e3a8a' : '#166534',
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    {invoice.source === 'email_automation' ? 'auto-ingested' : invoice.source}
+                  </span>
+                )}
+              </h3>
+              <div className={styles.detailsList}>
+                {invoice.unit && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Unit:</span>
+                    <span className={styles.detailValue}>{invoice.unit}</span>
+                  </div>
+                )}
+                {invoice.bill_type && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Bill Type:</span>
+                    <span className={styles.detailValue}>{invoice.bill_type}</span>
+                  </div>
+                )}
+                {invoice.mode && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Mode:</span>
+                    <span className={styles.detailValue}>{invoice.mode}</span>
+                  </div>
+                )}
+                {(invoice.doc_pfx || invoice.doc_no) && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Doc No:</span>
+                    <span className={styles.detailValue}>
+                      {[invoice.doc_pfx, invoice.doc_no].filter(Boolean).join(' / ') || '-'}
+                    </span>
+                  </div>
+                )}
+                {invoice.doc_entry_date && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Doc Entry Date:</span>
+                    <span className={styles.detailValue}>{dateBodyTemplate(invoice.doc_entry_date)}</span>
+                  </div>
+                )}
+                {invoice.grn_no && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>GRN No:</span>
+                    <span className={styles.detailValue}>
+                      {[invoice.grn_pfx, invoice.grn_no].filter(Boolean).join(' / ')}
+                    </span>
+                  </div>
+                )}
+                {invoice.grn_date && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>GRN Date:</span>
+                    <span className={styles.detailValue}>{dateBodyTemplate(invoice.grn_date)}</span>
+                  </div>
+                )}
+                {invoice.dc_no && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>DC No:</span>
+                    <span className={styles.detailValue}>{invoice.dc_no}</span>
+                  </div>
+                )}
+                {invoice.po_pfx && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>PO Prefix:</span>
+                    <span className={styles.detailValue}>{invoice.po_pfx}</span>
+                  </div>
+                )}
+                {(invoice.ss_pfx || invoice.ss_no) && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>SS Ref:</span>
+                    <span className={styles.detailValue}>
+                      {[invoice.ss_pfx, invoice.ss_no].filter(Boolean).join(' / ')}
+                    </span>
+                  </div>
+                )}
+                {(invoice.open_order_pfx || invoice.open_order_no) && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Open Order:</span>
+                    <span className={styles.detailValue}>
+                      {[invoice.open_order_pfx, invoice.open_order_no].filter(Boolean).join(' / ')}
+                    </span>
+                  </div>
+                )}
+                {invoice.currency && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Currency:</span>
+                    <span className={styles.detailValue}>
+                      {invoice.currency}
+                      {invoice.exchange_rate && invoice.exchange_rate !== 1 ? ` @ ${invoice.exchange_rate}` : ''}
+                    </span>
+                  </div>
+                )}
+                {invoice.gstin && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>GSTIN:</span>
+                    <span className={styles.detailValue} style={{ fontFamily: 'monospace' }}>{invoice.gstin}</span>
+                  </div>
+                )}
+                {invoice.gst_type && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>GST Type:</span>
+                    <span className={styles.detailValue}>{invoice.gst_type}</span>
+                  </div>
+                )}
+                {invoice.gst_classification && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>GST Classification:</span>
+                    <span className={styles.detailValue}>{invoice.gst_classification}</span>
+                  </div>
+                )}
+                {invoice.gst_supply_type && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Supply Type:</span>
+                    <span className={styles.detailValue}>{invoice.gst_supply_type}</span>
+                  </div>
+                )}
+                {invoice.place_of_supply && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>Place of Supply:</span>
+                    <span className={styles.detailValue}>
+                      {invoice.place_of_supply}
+                      {invoice.place_of_supply_desc ? ` — ${invoice.place_of_supply_desc}` : ''}
+                    </span>
+                  </div>
+                )}
+                {invoice.rcm_flag != null && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>RCM:</span>
+                    <span className={styles.detailValue}>{invoice.rcm_flag ? 'Yes' : 'No'}</span>
+                  </div>
+                )}
+                {invoice.aic_type && (
+                  <div className={styles.detailItem}>
+                    <span className={styles.detailLabel}>AIC Type:</span>
+                    <span className={styles.detailValue}>{invoice.aic_type}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Purchase Order Information */}
           {invoice.po_number && (

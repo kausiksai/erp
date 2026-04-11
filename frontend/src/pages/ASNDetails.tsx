@@ -15,7 +15,9 @@ import styles from './ASNDetails.module.css'
 
 interface ASNRecord {
   id: number
-  po_number: string | null  // derived via asn.inv_no -> invoices.invoice_number -> purchase_orders.po_number
+  po_number: string | null  // from asn.po_no column (Phase 2.1)
+  po_pfx: string | null
+  po_no: string | null
   supplier_name: string | null
   asn_no: string | null
   supplier: string | null
@@ -30,37 +32,50 @@ interface ASNRecord {
   transporter_name: string | null
   doc_no_date: string | null
   status: string | null
+  // Phase 2.1 additions
+  item_code: string | null
+  item_desc: string | null
+  quantity: number | string | null
+  schedule_pfx: string | null
+  schedule_no: string | null
+  grn_status: string | null
 }
+
+const DEFAULT_ROWS_PER_PAGE = 25
 
 function ASNDetails() {
   const toast = useRef<Toast>(null)
   const [records, setRecords] = useState<ASNRecord[]>([])
+  const [total, setTotal] = useState<number>(0)
+  const [first, setFirst] = useState<number>(0)
+  const [rows, setRows] = useState<number>(DEFAULT_ROWS_PER_PAGE)
   const [loading, setLoading] = useState<boolean>(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const debouncedSearch = useDebounce(searchTerm, 300)
+  const debouncedSearch = useDebounce(searchTerm, 350)
   const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({})
   const [uploadingExcel, setUploadingExcel] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const searchLower = debouncedSearch.trim().toLowerCase()
-  const filteredRecords = searchLower
-    ? records.filter((r) => {
-        const asnNo = (r.asn_no ?? '').toLowerCase()
-        const poNumber = (r.po_number ?? '').toLowerCase()
-        const supplier = (r.supplier_name ?? r.supplier ?? '').toLowerCase()
-        const dcNo = (r.dc_no ?? '').toLowerCase()
-        const lrNo = (r.lr_no ?? '').toLowerCase()
-        const transporter = (r.transporter ?? r.transporter_name ?? '').toLowerCase()
-        const status = (r.status ?? '').toLowerCase()
-        return asnNo.includes(searchLower) || poNumber.includes(searchLower) || supplier.includes(searchLower) || dcNo.includes(searchLower) || lrNo.includes(searchLower) || transporter.includes(searchLower) || status.includes(searchLower)
-      })
-    : records
-
-  const fetchASN = async () => {
+  const fetchASN = useCallback(async () => {
     try {
       setLoading(true)
       const token = localStorage.getItem('authToken')
-      const response = await fetch(apiUrl('asn'), {
+      const params = new URLSearchParams()
+      params.set('limit', String(rows))
+      params.set('offset', String(first))
+      const search = debouncedSearch.trim()
+      if (search) {
+        // Use one search term across the most common fields; backend filters
+        // by exact param so we fan-out via a simple heuristic: letters => supplier,
+        // mostly digits => PO number or ASN number.
+        const isNumericish = /^[A-Za-z0-9/\-_]+$/.test(search) && /\d/.test(search)
+        if (isNumericish) {
+          params.set('poNumber', search)
+        } else {
+          params.set('supplier', search)
+        }
+      }
+      const response = await fetch(apiUrl(`asn?${params.toString()}`), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (!response.ok) {
@@ -69,18 +84,30 @@ function ASNDetails() {
         return
       }
       const data = await response.json()
-      setRecords(data)
+      if (Array.isArray(data)) {
+        // Legacy shape (backward-compat)
+        setRecords(data)
+        setTotal(data.length)
+      } else {
+        setRecords(data.items || [])
+        setTotal(Number(data.total) || 0)
+      }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Failed to load ASN'
       toast.current?.show({ severity: 'error', summary: 'Error', detail: msg, life: 5000 })
     } finally {
       setLoading(false)
     }
-  }
+  }, [rows, first, debouncedSearch])
 
   useEffect(() => {
     fetchASN()
-  }, [])
+  }, [fetchASN])
+
+  useEffect(() => {
+    // reset to first page when search changes
+    setFirst(0)
+  }, [debouncedSearch])
 
   const handleExcelUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -143,7 +170,16 @@ function ASNDetails() {
           <div className={styles.expansionCardGrid}>
             <div className={styles.detailItem}>
               <span className={styles.detailLabel}>PO Number</span>
-              <span className={styles.detailValue}>{rowData.po_number ?? '-'}</span>
+              <span className={styles.detailValue}>
+                {rowData.po_pfx ? `${rowData.po_pfx} / ` : ''}
+                {rowData.po_no ?? rowData.po_number ?? '-'}
+              </span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Schedule</span>
+              <span className={styles.detailValue}>
+                {[rowData.schedule_pfx, rowData.schedule_no].filter(Boolean).join(' / ') || '-'}
+              </span>
             </div>
             <div className={styles.detailItem}>
               <span className={styles.detailLabel}>DC No</span>
@@ -170,14 +206,26 @@ function ASNDetails() {
               <span className={styles.detailValue}>{formatDate(rowData.lr_date)}</span>
             </div>
             <div className={styles.detailItem}>
-              <span className={styles.detailLabel}>Doc No / Date</span>
-              <span className={styles.detailValue}>{rowData.doc_no_date ?? '-'}</span>
+              <span className={styles.detailLabel}>GRN Status</span>
+              <span className={styles.detailValue}>{rowData.grn_status ?? '-'}</span>
             </div>
           </div>
         </div>
         <div className={styles.expansionCard}>
-          <h4 className={styles.expansionCardTitle}>Supplier & logistics</h4>
+          <h4 className={styles.expansionCardTitle}>Item & logistics</h4>
           <div className={styles.expansionCardGrid}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Item Code</span>
+              <span className={styles.detailValue}>{rowData.item_code ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Item Desc</span>
+              <span className={styles.detailValue}>{rowData.item_desc ?? '-'}</span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Quantity</span>
+              <span className={styles.detailValue}>{rowData.quantity ?? '-'}</span>
+            </div>
             <div className={styles.detailItem}>
               <span className={styles.detailLabel}>Supplier</span>
               <span className={styles.detailValue}>{rowData.supplier_name ?? rowData.supplier ?? '-'}</span>
@@ -245,10 +293,17 @@ function ASNDetails() {
             <div className="dts-tableWrapper">
               <div className="dts-tableContainer">
                 <DataTable
-                  value={filteredRecords}
+                  value={records}
+                  lazy
                   paginator
-                  rows={10}
-                  rowsPerPageOptions={[10, 25, 50]}
+                  first={first}
+                  rows={rows}
+                  totalRecords={total}
+                  onPage={(e) => {
+                    setFirst(e.first)
+                    setRows(e.rows)
+                  }}
+                  rowsPerPageOptions={[10, 25, 50, 100, 200]}
                   emptyMessage={searchTerm ? 'No matching ASN records' : 'No ASN records found'}
                   stripedRows
                   expandedRows={expandedRows}
@@ -257,14 +312,33 @@ function ASNDetails() {
                   dataKey="id"
                 >
                   <Column expander style={{ width: '3rem' }} />
-                  <Column field="asn_no" header="ASN No" sortable style={{ minWidth: '140px' }} body={(r) => <strong>{r.asn_no ?? '-'}</strong>} />
-                  <Column field="po_number" header="PO Number" sortable style={{ minWidth: '130px' }} body={(r) => r.po_number ?? '-'} />
-                  <Column field="supplier_name" header="Supplier" sortable style={{ minWidth: '200px' }} body={(r) => r.supplier_name ?? r.supplier ?? '-'} />
-                  <Column field="dc_no" header="DC No" sortable style={{ minWidth: '120px' }} body={(r) => r.dc_no ?? '-'} />
-                  <Column field="dc_date" header="DC Date" sortable body={dateBodyTemplate} style={{ minWidth: '120px' }} />
+                  <Column field="asn_no" header="ASN No" style={{ minWidth: '140px' }} body={(r) => <strong>{r.asn_no ?? '-'}</strong>} />
+                  <Column
+                    field="po_number"
+                    header="PO / SCO"
+                    style={{ minWidth: '140px' }}
+                    body={(r: ASNRecord) => {
+                      const pfx = r.po_pfx
+                      const num = r.po_no ?? r.po_number
+                      if (!num) return '-'
+                      return pfx ? (
+                        <span>
+                          <span style={{ fontSize: '0.72rem', color: '#64748b', marginRight: '0.35rem' }}>{pfx}</span>
+                          {num}
+                        </span>
+                      ) : num
+                    }}
+                  />
+                  <Column field="item_code" header="Item" style={{ minWidth: '120px' }} body={(r) => r.item_code ?? '-'} />
+                  <Column field="item_desc" header="Item Desc" style={{ minWidth: '180px' }} body={(r) => r.item_desc ?? '-'} />
+                  <Column field="quantity" header="Qty" style={{ minWidth: '80px' }} body={(r) => (r.quantity != null ? String(r.quantity) : '-')} />
+                  <Column field="supplier_name" header="Supplier" style={{ minWidth: '200px' }} body={(r) => r.supplier_name ?? r.supplier ?? '-'} />
+                  <Column field="dc_no" header="DC No" style={{ minWidth: '120px' }} body={(r) => r.dc_no ?? '-'} />
+                  <Column field="dc_date" header="DC Date" body={dateBodyTemplate} style={{ minWidth: '120px' }} />
                   <Column field="lr_no" header="LR No" style={{ minWidth: '120px' }} body={(r) => r.lr_no ?? '-'} />
                   <Column field="lr_date" header="LR Date" body={lrDateBodyTemplate} style={{ minWidth: '120px' }} />
                   <Column field="transporter" header="Transporter" style={{ minWidth: '140px' }} body={(r) => r.transporter ?? r.transporter_name ?? '-'} />
+                  <Column field="grn_status" header="GRN" style={{ minWidth: '110px' }} body={(r) => r.grn_status ?? '-'} />
                   <Column field="status" header="Status" body={statusBodyTemplate} style={{ minWidth: '120px' }} />
                 </DataTable>
               </div>
