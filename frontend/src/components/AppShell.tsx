@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { useMenuAccess } from '../contexts/MenuAccessContext'
 
 interface NavItem {
   to: string
@@ -29,10 +30,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Workflow',
     items: [
-      { to: '/invoices/validate',          label: 'Invoices',       icon: 'pi-file' },
-      { to: '/invoices/upload',            label: 'Upload invoice', icon: 'pi-upload' },
-      { to: '/payments/approve',           label: 'Payments',       icon: 'pi-wallet' },
-      { to: '/purchase-orders/incomplete', label: 'Incomplete POs', icon: 'pi-exclamation-circle' }
+      { to: '/invoices/validate',          label: 'Invoices',             icon: 'pi-file' },
+      { to: '/invoices/upload',            label: 'Upload invoice',       icon: 'pi-upload' },
+      { to: '/invoices/reconciliation',    label: 'Needs reconciliation', icon: 'pi-sync' },
+      { to: '/payments/approve',           label: 'Payments',             icon: 'pi-wallet' },
+      { to: '/purchase-orders/incomplete', label: 'Incomplete POs',       icon: 'pi-exclamation-circle' }
     ]
   },
   {
@@ -57,9 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { to: '/profile',  label: 'Profile',  icon: 'pi-user-edit' },
-      { to: '/settings', label: 'Settings', icon: 'pi-cog' },
-      { to: '/modules',  label: 'All modules', icon: 'pi-th-large' }
+      { to: '/profile', label: 'Profile', icon: 'pi-user-edit' }
     ]
   }
 ]
@@ -78,6 +78,7 @@ function AppShell({ children }: AppShellProps) {
   const location = useLocation()
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const { allowedPaths, loading: menuLoading } = useMenuAccess()
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
@@ -135,9 +136,15 @@ function AppShell({ children }: AppShellProps) {
 
           <div className="sidebar__nav">
             {NAV_GROUPS.map((group) => {
-              const visibleItems = group.items.filter(
-                (it) => !it.roles || it.roles.includes(role)
-              )
+              // Visibility = role gate (legacy) AND per-user allowlist
+              // (from MenuAccessContext). While the allowlist is loading we
+              // show nothing except role-gated defaults to avoid flashing
+              // restricted items.
+              const visibleItems = group.items.filter((it) => {
+                if (it.roles && !it.roles.includes(role)) return false
+                if (menuLoading) return false
+                return allowedPaths.has(it.to)
+              })
               if (visibleItems.length === 0) return null
               return (
                 <div className="sidebar__group" key={group.label}>
@@ -146,7 +153,10 @@ function AppShell({ children }: AppShellProps) {
                     <NavLink
                       key={item.to}
                       to={item.to}
-                      end={item.to === '/'}
+                      // `end` forces exact-match so a child route like
+                      // /purchase-orders/incomplete doesn't also light up the
+                      // parent /purchase-orders NavLink.
+                      end
                       className={({ isActive }) =>
                         `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
                       }

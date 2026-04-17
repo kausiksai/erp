@@ -79,10 +79,12 @@
   --text-link:      var(--brand-600);
   --text-link-hover: var(--brand-800);
 
-  /* ----- Borders --------------------------------------------------------- */
-  --border-subtle:  rgba(15, 23, 42, 0.06);
-  --border-default: rgba(15, 23, 42, 0.1);
-  --border-strong:  rgba(15, 23, 42, 0.16);
+  /* ----- Borders ---------------------------------------------------------
+     Bumped for light mode so inputs, selects and tables are clearly visible
+     on a white page background. Dark mode still overrides these below. */
+  --border-subtle:  rgba(15, 23, 42, 0.10);
+  --border-default: rgba(15, 23, 42, 0.16);
+  --border-strong:  rgba(15, 23, 42, 0.22);
   --border-focus:   rgba(59, 130, 246, 0.45);
 
   /* ----- Elevation (shadows) -------------------------------------------- */

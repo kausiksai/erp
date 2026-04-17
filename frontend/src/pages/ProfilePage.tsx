@@ -1,12 +1,32 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import PageHero from '../components/PageHero'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 
 function ProfilePage() {
-  const { user } = useAuth()
+  const { user, login, token } = useAuth()
   const { theme, toggleTheme } = useTheme()
-  const [notif, setNotif] = useState({ email: true, inApp: true, dailyDigest: false })
+
+  /* ---------- Edit profile state ---------- */
+  const [fullName, setFullName] = useState(user?.fullName || '')
+  const [email, setEmail] = useState(user?.email || '')
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [profileMsg, setProfileMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+
+  useEffect(() => {
+    setFullName(user?.fullName || '')
+    setEmail(user?.email || '')
+  }, [user?.fullName, user?.email])
+
+  /* ---------- Change password state ---------- */
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showCurrent, setShowCurrent] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [passwordMsg, setPasswordMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
   const initials = (user?.fullName || user?.username || 'U')
     .split(/\s+/)
@@ -14,16 +34,84 @@ function ProfilePage() {
     .map((w) => w[0]?.toUpperCase() || '')
     .join('')
 
+  /* ---------- handlers ---------- */
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setProfileMsg(null)
+    if (!fullName.trim()) {
+      setProfileMsg({ tone: 'danger', text: 'Full name is required.' })
+      return
+    }
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setProfileMsg({ tone: 'danger', text: 'Enter a valid email address.' })
+      return
+    }
+    setSavingProfile(true)
+    try {
+      const res = await apiFetch('auth/me', {
+        method: 'PUT',
+        body: JSON.stringify({ fullName: fullName.trim(), email: email.trim() })
+      })
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Save failed'))
+      const body = await res.json()
+      // Update the auth context so the rest of the app sees the new name/email.
+      if (body.user && token) {
+        login(token, body.user)
+      }
+      setProfileMsg({ tone: 'success', text: 'Profile updated successfully.' })
+    } catch (err) {
+      setProfileMsg({ tone: 'danger', text: getDisplayError(err) })
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPasswordMsg(null)
+    if (!currentPassword) {
+      setPasswordMsg({ tone: 'danger', text: 'Enter your current password.' })
+      return
+    }
+    if (!newPassword || newPassword.length < 8) {
+      setPasswordMsg({ tone: 'danger', text: 'New password must be at least 8 characters.' })
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg({ tone: 'danger', text: 'New password and confirmation do not match.' })
+      return
+    }
+    setChangingPassword(true)
+    try {
+      const res = await apiFetch('auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword })
+      })
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Password change failed'))
+      setPasswordMsg({ tone: 'success', text: 'Password changed successfully.' })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err) {
+      setPasswordMsg({ tone: 'danger', text: getDisplayError(err) })
+    } finally {
+      setChangingPassword(false)
+    }
+  }
+
   return (
     <>
       <PageHero
         eyebrow="My account"
         eyebrowIcon="pi-user"
         title="Profile & preferences"
-        subtitle="Your identity, appearance, notifications and security — all in one place."
+        subtitle="Update your identity, change your password and switch the portal theme."
       />
 
+      {/* ============ Identity + appearance ============ */}
       <div className="grid-charts">
+        {/* Identity card */}
         <section className="glass-card">
           <h3 className="glass-card__title">
             <i className="pi pi-id-card" style={{ color: 'var(--brand-600)' }} /> Identity
@@ -64,6 +152,7 @@ function ProfilePage() {
           </div>
         </section>
 
+        {/* Appearance card */}
         <section className="glass-card">
           <h3 className="glass-card__title">
             <i className="pi pi-palette" style={{ color: 'var(--accent-violet)' }} /> Appearance
@@ -86,52 +175,149 @@ function ProfilePage() {
         </section>
       </div>
 
+      {/* ============ Edit profile ============ */}
       <section className="glass-card">
         <h3 className="glass-card__title">
-          <i className="pi pi-bell" style={{ color: 'var(--accent-amber)' }} /> Notifications
+          <i className="pi pi-pencil" style={{ color: 'var(--accent-emerald)' }} /> Edit profile
         </h3>
-        <div className="glass-card__subtitle">Choose how you want to be alerted about workflow events.</div>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <Toggle
-            label="Email notifications"
-            description="Payment approvals, validation alerts, daily digests"
-            value={notif.email}
-            onChange={(v) => setNotif((n) => ({ ...n, email: v }))}
-          />
-          <Toggle
-            label="In-app notifications"
-            description="Real-time bell badge while you're logged in"
-            value={notif.inApp}
-            onChange={(v) => setNotif((n) => ({ ...n, inApp: v }))}
-          />
-          <Toggle
-            label="Daily digest at 5 pm"
-            description="One email summarising invoices pending attention"
-            value={notif.dailyDigest}
-            onChange={(v) => setNotif((n) => ({ ...n, dailyDigest: v }))}
-          />
-        </div>
+        <div className="glass-card__subtitle">Update your display name and contact email.</div>
+        <form onSubmit={handleSaveProfile}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: '1rem',
+              marginTop: '0.85rem'
+            }}
+          >
+            <TextInput label="Full name *" value={fullName} onChange={setFullName} autoComplete="name" />
+            <TextInput label="Email *"     value={email}    onChange={setEmail} type="email" autoComplete="email" />
+          </div>
+
+          {profileMsg && (
+            <div
+              style={{
+                marginTop: '0.9rem',
+                padding: '0.7rem 0.9rem',
+                borderRadius: 'var(--radius-md)',
+                border: `1px solid var(--status-${profileMsg.tone}-ring)`,
+                background: `var(--status-${profileMsg.tone}-bg)`,
+                color: `var(--status-${profileMsg.tone}-fg)`,
+                fontSize: '0.86rem',
+                fontWeight: 600
+              }}
+            >
+              <i className={`pi ${profileMsg.tone === 'success' ? 'pi-check-circle' : 'pi-exclamation-triangle'}`} /> {profileMsg.text}
+            </div>
+          )}
+
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <button type="submit" className="action-btn" disabled={savingProfile}>
+              {savingProfile
+                ? <><i className="pi pi-spin pi-spinner" /> Saving…</>
+                : <><i className="pi pi-check" /> Save changes</>}
+            </button>
+            <button
+              type="button"
+              className="action-btn action-btn--ghost"
+              onClick={() => {
+                setFullName(user?.fullName || '')
+                setEmail(user?.email || '')
+                setProfileMsg(null)
+              }}
+              disabled={savingProfile}
+            >
+              <i className="pi pi-replay" /> Reset
+            </button>
+          </div>
+        </form>
       </section>
 
+      {/* ============ Change password ============ */}
       <section className="glass-card">
         <h3 className="glass-card__title">
-          <i className="pi pi-shield" style={{ color: 'var(--accent-emerald)' }} /> Security
+          <i className="pi pi-key" style={{ color: 'var(--accent-amber)' }} /> Change password
         </h3>
-        <div className="glass-card__subtitle">Sessions and password — keep your access safe.</div>
-        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-          <button className="action-btn action-btn--ghost"><i className="pi pi-lock" /> Change password</button>
-          <button className="action-btn action-btn--ghost"><i className="pi pi-key" /> Enable 2FA</button>
-          <button className="action-btn action-btn--ghost"><i className="pi pi-sign-out" /> Sign out all devices</button>
-        </div>
+        <div className="glass-card__subtitle">Minimum 8 characters. You'll stay signed in after the change.</div>
+        <form onSubmit={handleChangePassword}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: '1rem',
+              marginTop: '0.85rem'
+            }}
+          >
+            <PasswordInput
+              label="Current password *"
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              show={showCurrent}
+              onToggleShow={() => setShowCurrent((v) => !v)}
+              autoComplete="current-password"
+            />
+            <PasswordInput
+              label="New password *"
+              value={newPassword}
+              onChange={setNewPassword}
+              show={showNew}
+              onToggleShow={() => setShowNew((v) => !v)}
+              autoComplete="new-password"
+            />
+            <PasswordInput
+              label="Confirm new password *"
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+              show={showNew}
+              onToggleShow={() => setShowNew((v) => !v)}
+              autoComplete="new-password"
+            />
+          </div>
+
+          {passwordMsg && (
+            <div
+              style={{
+                marginTop: '0.9rem',
+                padding: '0.7rem 0.9rem',
+                borderRadius: 'var(--radius-md)',
+                border: `1px solid var(--status-${passwordMsg.tone}-ring)`,
+                background: `var(--status-${passwordMsg.tone}-bg)`,
+                color: `var(--status-${passwordMsg.tone}-fg)`,
+                fontSize: '0.86rem',
+                fontWeight: 600
+              }}
+            >
+              <i className={`pi ${passwordMsg.tone === 'success' ? 'pi-check-circle' : 'pi-exclamation-triangle'}`} /> {passwordMsg.text}
+            </div>
+          )}
+
+          <div style={{ marginTop: '1rem' }}>
+            <button type="submit" className="action-btn" disabled={changingPassword}>
+              {changingPassword
+                ? <><i className="pi pi-spin pi-spinner" /> Updating…</>
+                : <><i className="pi pi-lock" /> Change password</>}
+            </button>
+          </div>
+        </form>
       </section>
     </>
   )
 }
 
+/* ==================== small inputs ==================== */
+
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div style={{ fontSize: 'var(--fs-xs)', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: 700 }}>
+      <div
+        style={{
+          fontSize: 'var(--fs-xs)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: 'var(--text-muted)',
+          fontWeight: 700
+        }}
+      >
         {label}
       </div>
       <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-primary)', fontWeight: 600, marginTop: '0.2rem' }}>
@@ -178,63 +364,118 @@ function ThemeSwatch({
   )
 }
 
-function Toggle({
+function TextInput({
   label,
-  description,
   value,
-  onChange
+  onChange,
+  type = 'text',
+  autoComplete
 }: {
   label: string
-  description: string
-  value: boolean
-  onChange: (v: boolean) => void
+  value: string
+  onChange: (v: string) => void
+  type?: string
+  autoComplete?: string
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0.85rem 0',
-        borderBottom: '1px solid var(--border-subtle)',
-        gap: '1rem'
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 'var(--fs-sm)' }}>{label}</div>
-        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{description}</div>
-      </div>
-      <button
-        type="button"
-        onClick={() => onChange(!value)}
-        aria-pressed={value}
+    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+      <span
         style={{
-          width: 46,
-          height: 26,
-          borderRadius: 999,
-          border: 0,
-          background: value ? 'var(--brand-600)' : 'var(--surface-3)',
-          position: 'relative',
-          cursor: 'pointer',
-          transition: 'background 200ms var(--ease-out)'
+          fontSize: '0.72rem',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: 'var(--text-muted)'
         }}
       >
-        <span
+        {label}
+      </span>
+      <input
+        type={type}
+        value={value}
+        autoComplete={autoComplete}
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--brand-500)')}
+        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
+      />
+    </label>
+  )
+}
+
+function PasswordInput({
+  label,
+  value,
+  onChange,
+  show,
+  onToggleShow,
+  autoComplete
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  show: boolean
+  onToggleShow: () => void
+  autoComplete?: string
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+      <span
+        style={{
+          fontSize: '0.72rem',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: 'var(--text-muted)'
+        }}
+      >
+        {label}
+      </span>
+      <div style={{ position: 'relative' }}>
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          autoComplete={autoComplete}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...inputStyle, paddingRight: '2.4rem' }}
+          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--brand-500)')}
+          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
+        />
+        <button
+          type="button"
+          onClick={onToggleShow}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          tabIndex={-1}
           style={{
             position: 'absolute',
-            top: 3,
-            left: value ? 23 : 3,
-            width: 20,
-            height: 20,
-            borderRadius: '50%',
-            background: '#fff',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-            transition: 'left 200ms var(--ease-out)'
+            right: '0.5rem',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            background: 'transparent',
+            border: 0,
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            padding: '0.3rem'
           }}
-        />
-      </button>
-    </div>
+        >
+          <i className={`pi ${show ? 'pi-eye-slash' : 'pi-eye'}`} />
+        </button>
+      </div>
+    </label>
   )
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '0.7rem 0.85rem',
+  borderRadius: 'var(--radius-md)',
+  border: '1.5px solid var(--border-subtle)',
+  background: 'var(--surface-0)',
+  color: 'var(--text-primary)',
+  fontSize: '0.92rem',
+  fontFamily: 'inherit',
+  outline: 'none',
+  transition: 'border-color 160ms var(--ease-out)'
 }
 
 export default ProfilePage

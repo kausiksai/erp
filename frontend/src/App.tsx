@@ -15,6 +15,7 @@ import ReportsHubPage from './pages/ReportsHubPage'
 import InvoicesPage from './pages/InvoicesPage'
 import InvoiceDetailPage from './pages/InvoiceDetailPage'
 import InvoiceUploadPage from './pages/InvoiceUploadPage'
+import NeedsReconciliationPage from './pages/NeedsReconciliationPage'
 import PurchaseOrdersPage from './pages/PurchaseOrdersPage'
 import IncompletePOsPage from './pages/IncompletePOsPage'
 import GRNPage from './pages/GRNPage'
@@ -27,7 +28,6 @@ import SupplierFormPage from './pages/SupplierFormPage'
 import UsersPage from './pages/UsersPage'
 import OwnerPage from './pages/OwnerPage'
 import PaymentsPage from './pages/PaymentsPage'
-import SettingsPage from './pages/SettingsPage'
 import ProfilePage from './pages/ProfilePage'
 
 /** Every authenticated route renders inside the global AppShell. */
@@ -74,9 +74,10 @@ function App() {
         <Route path="/reports"   element={<ShellRoute><ReportsHubPage /></ShellRoute>} />
 
         {/* Workflow — Invoices */}
-        <Route path="/invoices/validate"      element={<ShellRoute><InvoicesPage /></ShellRoute>} />
-        <Route path="/invoices/validate/:id"  element={<ShellRoute><InvoiceDetailPage /></ShellRoute>} />
-        <Route path="/invoices/upload"        element={<ShellRoute><InvoiceUploadPage /></ShellRoute>} />
+        <Route path="/invoices/validate"       element={<ShellRoute><InvoicesPage /></ShellRoute>} />
+        <Route path="/invoices/validate/:id"   element={<ShellRoute><InvoiceDetailPage /></ShellRoute>} />
+        <Route path="/invoices/upload"         element={<ShellRoute><InvoiceUploadPage /></ShellRoute>} />
+        <Route path="/invoices/reconciliation" element={<ShellRoute><NeedsReconciliationPage /></ShellRoute>} />
 
         {/* Workflow — Payments */}
         <Route
@@ -114,8 +115,7 @@ function App() {
         />
 
         {/* System */}
-        <Route path="/settings" element={<ShellRoute><SettingsPage /></ShellRoute>} />
-        <Route path="/profile"  element={<ShellRoute><ProfilePage /></ShellRoute>} />
+        <Route path="/profile" element={<ShellRoute><ProfilePage /></ShellRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

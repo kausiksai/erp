@@ -1,43 +1,74 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import ListPage from '../components/ListPage'
 import type { ListPageColumn, FetchParams, FetchResult } from '../components/ListPage'
 import StatusChip from '../components/StatusChip'
+import PoExpansion from '../components/PoExpansion'
+import ExcelUploadButton from '../components/ExcelUploadButton'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
+import { formatDate, formatInt } from '../utils/format'
 
 interface PurchaseOrder {
   po_id: number
   po_number: string
   supplier_name: string | null
   po_date: string | null
-  po_value: number | null
   status: string | null
-  amendment_no: number | null
-  is_latest_amendment?: boolean
+  amd_no: number | string | null
+  pfx: string | null
+  unit: string | null
+  line_item_count: number | string | null
 }
 
-const INR = (n: number | null | undefined) =>
-  typeof n === 'number' ? n.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'
+interface PoStats {
+  total: number
+  with_amendments: number
+  unique_suppliers: number
+  open_count: number
+  fulfilled_count: number
+  partial_count: number
+  recent_count: number
+}
 
 function PurchaseOrdersPage() {
-  const [total, setTotal] = useState(0)
-  const [withAmend, setWithAmend] = useState(0)
-  const [totalValue, setTotalValue] = useState(0)
+  const [stats, setStats] = useState<PoStats>({
+    total: 0,
+    with_amendments: 0,
+    unique_suppliers: 0,
+    open_count: 0,
+    fulfilled_count: 0,
+    partial_count: 0,
+    recent_count: 0
+  })
+  const [reloadKey, setReloadKey] = useState(0)
+  const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await apiFetch('purchase-orders/stats')
+      if (!res.ok) return
+      const body = await res.json()
+      setStats(body)
+    } catch {
+      /* silent — list still works */
+    }
+  }, [])
+
+  useEffect(() => {
+    loadStats()
+  }, [loadStats, reloadKey])
 
   const fetchData = useCallback(
     async (p: FetchParams): Promise<FetchResult<PurchaseOrder>> => {
       const qs = new URLSearchParams()
       qs.set('limit', String(p.limit))
       qs.set('offset', String(p.offset))
-      if (p.search) qs.set('q', p.search)
+      if (p.search) qs.set('poNumber', p.search)
       if (p.filters.status) qs.set('status', p.filters.status)
       const res = await apiFetch(`purchase-orders?${qs.toString()}`)
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load POs'))
       const body = await res.json()
-      const items: PurchaseOrder[] = body.items || body.purchase_orders || body || []
+      const items: PurchaseOrder[] = body.items || []
       const totalN = body.total ?? items.length
-      setTotal(totalN)
-      setWithAmend(items.filter((i) => (i.amendment_no ?? 0) > 0).length)
-      setTotalValue(items.reduce((s, i) => s + (i.po_value || 0), 0))
       return { items, total: totalN }
     },
     []
@@ -50,16 +81,26 @@ function PurchaseOrdersPage() {
       body: (row) => (
         <div>
           <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{row.po_number}</div>
-          {(row.amendment_no ?? 0) > 0 && (
-            <span style={{
-              display: 'inline-block', marginTop: '0.2rem',
-              padding: '0.1rem 0.5rem', fontSize: '0.7rem', fontWeight: 700,
-              borderRadius: 9999,
-              background: 'var(--status-info-bg)', color: 'var(--status-info-fg)'
-            }}>
-              AMD {row.amendment_no}
-            </span>
-          )}
+          <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.2rem', flexWrap: 'wrap' }}>
+            {Number(row.amd_no || 0) > 0 && (
+              <span style={{
+                padding: '0.1rem 0.5rem', fontSize: '0.7rem', fontWeight: 700,
+                borderRadius: 9999,
+                background: 'var(--status-info-bg)', color: 'var(--status-info-fg)'
+              }}>
+                AMD {row.amd_no}
+              </span>
+            )}
+            {row.pfx && (
+              <span style={{
+                padding: '0.1rem 0.5rem', fontSize: '0.68rem', fontWeight: 700,
+                borderRadius: 9999,
+                background: 'var(--status-muted-bg)', color: 'var(--status-muted-fg)'
+              }}>
+                {row.pfx}
+              </span>
+            )}
+          </div>
         </div>
       )
     },
@@ -68,16 +109,19 @@ function PurchaseOrdersPage() {
       header: 'Supplier',
       body: (row) => row.supplier_name || <span style={{ color: 'var(--text-muted)' }}>—</span>
     },
+    { field: 'po_date', header: 'PO date', body: (row) => formatDate(row.po_date) },
     {
-      field: 'po_date',
-      header: 'PO date',
-      body: (row) => (row.po_date ? new Date(row.po_date).toLocaleDateString('en-IN') : '—')
+      field: 'unit',
+      header: 'Unit',
+      body: (row) => row.unit || <span style={{ color: 'var(--text-muted)' }}>—</span>
     },
     {
-      field: 'po_value',
-      header: 'Value',
+      field: 'line_item_count',
+      header: 'Lines',
       body: (row) => (
-        <div style={{ fontWeight: 700, textAlign: 'right' }}>₹{INR(row.po_value)}</div>
+        <div style={{ textAlign: 'right', fontWeight: 700 }}>
+          {formatInt(row.line_item_count)}
+        </div>
       ),
       style: { textAlign: 'right' }
     },
@@ -93,29 +137,57 @@ function PurchaseOrdersPage() {
       eyebrow="Documents"
       eyebrowIcon="pi-shopping-cart"
       title="Purchase orders"
-      subtitle="Every PO we've ingested — including amended versions. The latest amendment of each base PO drives validation."
+      subtitle="Every PO ingested — click the expander on any row for the full header + line items. Use Upload Excel if email automation missed a batch."
+      headerExtras={
+        <ExcelUploadButton
+          endpoint="purchase-orders/upload-excel"
+          label="Upload PO Excel"
+          onSuccess={(message) => {
+            setBanner({ tone: 'success', text: message })
+            setReloadKey((k) => k + 1)
+          }}
+          onError={(message) => setBanner({ tone: 'danger', text: message })}
+        />
+      }
+      banner={
+        banner ? (
+          <div
+            className="glass-card"
+            style={{
+              borderColor: `var(--status-${banner.tone}-ring)`,
+              color: `var(--status-${banner.tone}-fg)`
+            }}
+          >
+            <i className={`pi ${banner.tone === 'success' ? 'pi-check-circle' : 'pi-exclamation-triangle'}`} /> {banner.text}
+          </div>
+        ) : null
+      }
       kpis={[
-        { label: 'Total POs',        value: total.toLocaleString('en-IN'),     icon: 'pi-shopping-cart', variant: 'brand'   },
-        { label: 'With amendments',  value: withAmend.toLocaleString('en-IN'), icon: 'pi-refresh',       variant: 'amber'   },
-        { label: 'Value on screen',  value: `₹${INR(totalValue)}`,             icon: 'pi-indian-rupee',  variant: 'emerald' }
+        { label: 'Total POs',       value: formatInt(stats.total),            icon: 'pi-shopping-cart', variant: 'brand',   sublabel: 'Across all data' },
+        { label: 'With amendments', value: formatInt(stats.with_amendments),  icon: 'pi-refresh',       variant: 'amber',   sublabel: 'Amended at least once' },
+        { label: 'Suppliers',       value: formatInt(stats.unique_suppliers), icon: 'pi-users',         variant: 'violet',  sublabel: 'Distinct vendors' },
+        { label: 'Open',            value: formatInt(stats.open_count),       icon: 'pi-clock',         variant: 'slate',   sublabel: 'Active / not closed' },
+        { label: 'Fulfilled',       value: formatInt(stats.fulfilled_count),  icon: 'pi-check-circle',  variant: 'emerald', sublabel: 'Completed' }
       ]}
       filters={[
-        { key: 'search', type: 'search', placeholder: 'Search PO #, supplier…' },
+        { key: 'search', type: 'search', placeholder: 'Search by PO number…' },
         {
           key: 'status', type: 'select', placeholder: 'All statuses',
           options: [
-            { label: 'Open', value: 'open' },
+            { label: 'Open',                value: 'open' },
             { label: 'Partially fulfilled', value: 'partially_fulfilled' },
-            { label: 'Fulfilled', value: 'fulfilled' },
-            { label: 'Closed', value: 'closed' }
+            { label: 'Fulfilled',           value: 'fulfilled' },
+            { label: 'Closed',              value: 'closed' }
           ]
         }
       ]}
       columns={columns}
       rowKey="po_id"
       fetchData={fetchData}
+      reloadKey={reloadKey}
+      rowExpansionTemplate={(row) => <PoExpansion po={row} />}
       emptyTitle="No POs ingested yet"
-      emptyBody="Once you drop POs into the email mailbox or upload them via Excel, they'll appear here."
+      emptyBody="Drop POs into the email mailbox or use the Upload PO Excel button above."
     />
   )
 }

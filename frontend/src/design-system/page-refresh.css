@@ -344,3 +344,136 @@
 [class*="pageWrap"] {
   background-image: none !important;
 }
+
+/* ==========================================================================
+   Light-mode visibility — form fields, tables, rows
+   --------------------------------------------------------------------------
+   Pure white page backgrounds need stronger borders than dark mode does.
+   These rules only bite when we're NOT in [data-theme="dark"] so dark mode
+   keeps its subtle gray-on-navy look.
+   ========================================================================== */
+
+/* ---- Text inputs / selects / textareas ---------------------------------- */
+:root:not([data-theme="dark"]) input[type="text"],
+:root:not([data-theme="dark"]) input[type="search"],
+:root:not([data-theme="dark"]) input[type="email"],
+:root:not([data-theme="dark"]) input[type="password"],
+:root:not([data-theme="dark"]) input[type="number"],
+:root:not([data-theme="dark"]) input[type="date"],
+:root:not([data-theme="dark"]) input[type="tel"],
+:root:not([data-theme="dark"]) select,
+:root:not([data-theme="dark"]) textarea {
+  border-color: #cbd5e1 !important;         /* slate-300 — visible on white */
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+:root:not([data-theme="dark"]) input:focus,
+:root:not([data-theme="dark"]) select:focus,
+:root:not([data-theme="dark"]) textarea:focus {
+  border-color: #6366f1 !important;         /* brand-500 */
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18) !important;
+  outline: none !important;
+}
+:root:not([data-theme="dark"]) input::placeholder,
+:root:not([data-theme="dark"]) textarea::placeholder {
+  color: #94a3b8 !important;                /* slate-400 — readable */
+}
+:root:not([data-theme="dark"]) input:disabled,
+:root:not([data-theme="dark"]) select:disabled,
+:root:not([data-theme="dark"]) textarea:disabled {
+  background-color: #f1f5f9 !important;
+  color: #64748b !important;
+}
+
+/* ---- Plain HTML tables (used by expansion panels and some custom pages) -- */
+:root:not([data-theme="dark"]) table {
+  background-color: #ffffff;
+}
+:root:not([data-theme="dark"]) table th {
+  background-color: #f8fafc !important;
+  color: #334155 !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+}
+:root:not([data-theme="dark"]) table td {
+  border-bottom: 1px solid #e2e8f0 !important;
+  color: #0f172a;
+}
+:root:not([data-theme="dark"]) table tbody tr:nth-child(even) td {
+  background-color: #f8fafc;
+}
+:root:not([data-theme="dark"]) table tbody tr:hover td {
+  background-color: #eef2ff;                /* brand-50 — clearly visible */
+}
+
+/* ---- PrimeReact DataTable (used by every ListPage) ---------------------- */
+:root:not([data-theme="dark"]) .p-datatable .p-datatable-thead > tr > th {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+  font-weight: 700;
+}
+:root:not([data-theme="dark"]) .p-datatable .p-datatable-tbody > tr > td {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+}
+:root:not([data-theme="dark"]) .p-datatable .p-datatable-tbody > tr:nth-child(even) > td {
+  background: #f8fafc !important;
+}
+:root:not([data-theme="dark"]) .p-datatable .p-datatable-tbody > tr:hover > td {
+  background: #eef2ff !important;
+}
+:root:not([data-theme="dark"]) .p-datatable .p-datatable-tbody > tr.p-highlight > td,
+:root:not([data-theme="dark"]) .p-datatable .p-datatable-tbody > tr.p-row-expanded > td {
+  background: #e0e7ff !important;
+}
+:root:not([data-theme="dark"]) .p-paginator {
+  background: #f8fafc !important;
+  border-top: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
+}
+:root:not([data-theme="dark"]) .p-paginator .p-paginator-page,
+:root:not([data-theme="dark"]) .p-paginator .p-paginator-first,
+:root:not([data-theme="dark"]) .p-paginator .p-paginator-prev,
+:root:not([data-theme="dark"]) .p-paginator .p-paginator-next,
+:root:not([data-theme="dark"]) .p-paginator .p-paginator-last {
+  color: #334155 !important;
+  border-radius: 6px !important;
+}
+:root:not([data-theme="dark"]) .p-paginator .p-paginator-page.p-highlight {
+  background: #6366f1 !important;
+  color: #fff !important;
+}
+
+/* ---- PrimeReact Dropdown / MultiSelect in light mode -------------------- */
+:root:not([data-theme="dark"]) .p-dropdown,
+:root:not([data-theme="dark"]) .p-multiselect {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+:root:not([data-theme="dark"]) .p-dropdown:not(.p-disabled):hover,
+:root:not([data-theme="dark"]) .p-multiselect:not(.p-disabled):hover {
+  border-color: #94a3b8 !important;
+}
+:root:not([data-theme="dark"]) .p-dropdown-panel,
+:root:not([data-theme="dark"]) .p-multiselect-panel {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15) !important;
+}
+:root:not([data-theme="dark"]) .p-dropdown-items .p-dropdown-item,
+:root:not([data-theme="dark"]) .p-multiselect-items .p-multiselect-item {
+  color: #0f172a !important;
+}
+:root:not([data-theme="dark"]) .p-dropdown-items .p-dropdown-item:not(.p-highlight):hover,
+:root:not([data-theme="dark"]) .p-multiselect-items .p-multiselect-item:not(.p-highlight):hover {
+  background-color: #f1f5f9 !important;
+}
+:root:not([data-theme="dark"]) .p-dropdown-items .p-dropdown-item.p-highlight,
+:root:not([data-theme="dark"]) .p-multiselect-items .p-multiselect-item.p-highlight {
+  background-color: #eef2ff !important;
+  color: #3730a3 !important;
+}

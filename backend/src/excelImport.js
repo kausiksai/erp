@@ -625,3 +625,121 @@ export async function importOpenPoPrefixesExcel (buffer, client) {
 
   return { prefixesInserted, rowsTotal: rows.length, mode: 'overwrite' }
 }
+
+/**
+ * Import Suppliers — upsert by supplier_name (case-insensitive match).
+ * Unlike the other importers, suppliers are master data shared across POs
+ * and invoices, so we NEVER truncate. New rows are inserted, existing rows
+ * are updated column-by-column (NULL values in the sheet do not overwrite
+ * existing non-null values — that way a partial row doesn't wipe banking).
+ *
+ * Recognised columns (case-insensitive, any of these per field):
+ *   supplier_name / Supplier Name / name
+ *   suplr_id / supplier_id / code
+ *   gst_number / gstin / GST
+ *   pan_number / pan / PAN
+ *   supplier_address / address
+ *   city / City
+ *   state_code / state code
+ *   state_name / state / State
+ *   pincode / pin / Pincode
+ *   email / Email
+ *   phone / Phone
+ *   mobile / Mobile
+ *   msme_number / msme / MSME
+ *   bank_account_name / account holder / account name
+ *   bank_account_number / account number / account no
+ *   bank_ifsc_code / ifsc / IFSC
+ *   bank_name / bank
+ *   branch_name / branch
+ *   website / Website
+ *   contact_person / contact / Contact
+ */
+export async function importSuppliersExcel (buffer, client) {
+  const rows = await parseExcelToRows(buffer)
+  if (rows.length === 0) {
+    return { inserted: 0, updated: 0, skipped: 0, rowsTotal: 0, hint: 'No data rows.', mode: 'upsert' }
+  }
+
+  let inserted = 0
+  let updated = 0
+  let skipped = 0
+  const seenNames = new Set()
+
+  for (const row of rows) {
+    const supplier_name = toStr(get(row, 'supplier_name', 'Supplier Name', 'supplier', 'name'))
+    if (!supplier_name) {
+      skipped++
+      continue
+    }
+    const dedupKey = supplier_name.toLowerCase()
+    if (seenNames.has(dedupKey)) {
+      skipped++
+      continue
+    }
+    seenNames.add(dedupKey)
+
+    const suplr_id            = toStr(get(row, 'suplr_id', 'supplier_id', 'code'), 100)
+    const gst_number          = toStr(get(row, 'gst_number', 'gstin', 'GST', 'gst'), 50)
+    const pan_number          = toStr(get(row, 'pan_number', 'pan', 'PAN'), 50)
+    const supplier_address    = toStr(get(row, 'supplier_address', 'address'), 500)
+    const city                = toStr(get(row, 'city'), 100)
+    const state_code          = toStr(get(row, 'state_code', 'state code'), 20)
+    const state_name          = toStr(get(row, 'state_name', 'state', 'State'), 100)
+    const pincode             = toStr(get(row, 'pincode', 'pin'), 20)
+    const email               = toStr(get(row, 'email'), 200)
+    const phone               = toStr(get(row, 'phone'), 50)
+    const mobile              = toStr(get(row, 'mobile'), 50)
+    const msme_number         = toStr(get(row, 'msme_number', 'msme', 'MSME'), 50)
+    const bank_account_name   = toStr(get(row, 'bank_account_name', 'account holder', 'account name'), 200)
+    const bank_account_number = toStr(get(row, 'bank_account_number', 'account number', 'account no'), 50)
+    const bank_ifsc_code      = toStr(get(row, 'bank_ifsc_code', 'ifsc', 'IFSC', 'ifsc code'), 20)
+    const bank_name           = toStr(get(row, 'bank_name', 'bank'), 200)
+    const branch_name         = toStr(get(row, 'branch_name', 'branch'), 200)
+    const website             = toStr(get(row, 'website'), 200)
+    const contact_person      = toStr(get(row, 'contact_person', 'contact', 'Contact'), 200)
+
+    // COALESCE on every field so NULL sheet values don't wipe existing data.
+    const result = await client.query(
+      `INSERT INTO suppliers (
+         supplier_name, suplr_id, gst_number, pan_number, supplier_address,
+         city, state_code, state_name, pincode, email, phone, mobile, msme_number,
+         bank_account_name, bank_account_number, bank_ifsc_code, bank_name, branch_name,
+         website, contact_person
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+       ON CONFLICT (supplier_name) DO UPDATE SET
+         suplr_id            = COALESCE(EXCLUDED.suplr_id,            suppliers.suplr_id),
+         gst_number          = COALESCE(EXCLUDED.gst_number,          suppliers.gst_number),
+         pan_number          = COALESCE(EXCLUDED.pan_number,          suppliers.pan_number),
+         supplier_address    = COALESCE(EXCLUDED.supplier_address,    suppliers.supplier_address),
+         city                = COALESCE(EXCLUDED.city,                suppliers.city),
+         state_code          = COALESCE(EXCLUDED.state_code,          suppliers.state_code),
+         state_name          = COALESCE(EXCLUDED.state_name,          suppliers.state_name),
+         pincode             = COALESCE(EXCLUDED.pincode,             suppliers.pincode),
+         email               = COALESCE(EXCLUDED.email,               suppliers.email),
+         phone               = COALESCE(EXCLUDED.phone,               suppliers.phone),
+         mobile              = COALESCE(EXCLUDED.mobile,              suppliers.mobile),
+         msme_number         = COALESCE(EXCLUDED.msme_number,         suppliers.msme_number),
+         bank_account_name   = COALESCE(EXCLUDED.bank_account_name,   suppliers.bank_account_name),
+         bank_account_number = COALESCE(EXCLUDED.bank_account_number, suppliers.bank_account_number),
+         bank_ifsc_code      = COALESCE(EXCLUDED.bank_ifsc_code,      suppliers.bank_ifsc_code),
+         bank_name           = COALESCE(EXCLUDED.bank_name,           suppliers.bank_name),
+         branch_name         = COALESCE(EXCLUDED.branch_name,         suppliers.branch_name),
+         website             = COALESCE(EXCLUDED.website,             suppliers.website),
+         contact_person      = COALESCE(EXCLUDED.contact_person,      suppliers.contact_person),
+         updated_at          = NOW()
+       RETURNING (xmax = 0) AS inserted`,
+      [
+        supplier_name, suplr_id, gst_number, pan_number, supplier_address,
+        city, state_code, state_name, pincode, email, phone, mobile, msme_number,
+        bank_account_name, bank_account_number, bank_ifsc_code, bank_name, branch_name,
+        website, contact_person
+      ]
+    )
+    if (result.rows[0]?.inserted) inserted++
+    else updated++
+  }
+
+  return { inserted, updated, skipped, rowsTotal: rows.length, mode: 'upsert' }
+}

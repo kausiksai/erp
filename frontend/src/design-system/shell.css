@@ -27,8 +27,22 @@
   grid-template-columns: var(--sidebar-w-collapsed) 1fr;
 }
 
-.shell__topbar   { grid-area: topbar;  position: sticky; top: 0; z-index: 30; }
-.shell__sidebar  { grid-area: sidebar; position: sticky; top: 0; height: 100vh; z-index: 40; }
+.shell__topbar   { grid-area: topbar;  position: sticky; top: 0; z-index: 30; align-self: start; }
+/* Sidebar is position:fixed rather than sticky — sticky inside CSS Grid
+   is unreliable (the grid item stretches to its cell, leaving sticky no
+   room). Grid column 1 still reserves the visual space, so main content
+   renders correctly in column 2 even though the sidebar is out of flow. */
+.shell__sidebar  {
+  grid-area: sidebar;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sidebar-w);
+  height: 100vh;
+  z-index: 40;
+  transition: width var(--dur-base) var(--ease-out);
+}
+.shell--collapsed .shell__sidebar { width: var(--sidebar-w-collapsed); }
 .shell__main     { grid-area: main; min-width: 0; }
 
 @media (max-width: 1024px) {

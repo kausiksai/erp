@@ -189,12 +189,21 @@ class AttachmentLogEntry:
 
 
 def log_attachment(entry: AttachmentLogEntry) -> int:
-    """Insert a row into email_automation_log; return its id, or -1 on dedup.
+    """Upsert a row into email_automation_log; return its id.
 
-    On UniqueViolation (dedup by message_id + sha256) the call is treated as
-    success and returns -1, because the pipeline's dedup logic relies on the
-    same constraint; a double-insert means another run already processed the
-    same attachment.
+    A single attachment walks through multiple statuses in one run:
+        downloaded -> loaded / failed / validated
+    Each transition calls this function. Previously every call was a
+    plain INSERT, so the later transitions hit the partial unique index
+    on (message_id, attachment_sha256) and were silently swallowed,
+    leaving the audit row stuck at 'downloaded' — which made the
+    Dashboard "saved cleanly" count read zero even when all loaders had
+    succeeded. Now the second and later calls UPDATE the same row so
+    status and row counters always reflect the terminal state.
+
+    Entries with NULL message_id or NULL sha256 fall through to a plain
+    INSERT because the partial unique index does not cover them; that
+    preserves the prior behaviour for synthetic / internal entries.
     """
     if entry.status not in VALID_ATTACHMENT_STATUSES:
         raise AuditError(f"Invalid attachment status {entry.status!r}")
@@ -219,6 +228,22 @@ def log_attachment(entry: AttachmentLogEntry) -> int:
                         %s, %s, %s, %s, %s,
                         %s, %s, %s, %s
                     )
+                    ON CONFLICT (message_id, attachment_sha256)
+                    WHERE message_id IS NOT NULL AND attachment_sha256 IS NOT NULL
+                    DO UPDATE SET
+                        run_id            = EXCLUDED.run_id,
+                        status            = EXCLUDED.status,
+                        doc_type          = COALESCE(EXCLUDED.doc_type, email_automation_log.doc_type),
+                        file_path         = COALESCE(EXCLUDED.file_path, email_automation_log.file_path),
+                        error_message     = EXCLUDED.error_message,
+                        invoice_id        = COALESCE(EXCLUDED.invoice_id, email_automation_log.invoice_id),
+                        po_id             = COALESCE(EXCLUDED.po_id, email_automation_log.po_id),
+                        validation_result = COALESCE(EXCLUDED.validation_result, email_automation_log.validation_result),
+                        rows_processed    = COALESCE(EXCLUDED.rows_processed, email_automation_log.rows_processed),
+                        rows_inserted     = COALESCE(EXCLUDED.rows_inserted, email_automation_log.rows_inserted),
+                        rows_updated      = COALESCE(EXCLUDED.rows_updated, email_automation_log.rows_updated),
+                        rows_skipped      = COALESCE(EXCLUDED.rows_skipped, email_automation_log.rows_skipped),
+                        processed_at      = NOW()
                     RETURNING id
                     """,
                     (
@@ -245,13 +270,6 @@ def log_attachment(entry: AttachmentLogEntry) -> int:
                 )
                 row = cur.fetchone()
                 return int(row[0]) if row else -1
-    except psycopg2.errors.UniqueViolation:
-        log.info(
-            "dedup: attachment already logged msg=%s sha=%s",
-            entry.message_id,
-            entry.attachment_sha256,
-        )
-        return -1
     except psycopg2.Error as exc:
         raise AuditError(f"Failed to log attachment: {exc}") from exc
 

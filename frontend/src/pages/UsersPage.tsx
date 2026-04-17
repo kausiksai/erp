@@ -119,6 +119,73 @@ function UsersPage() {
     setEditingId(null)
   }
 
+  /* ---------- menu-access (per-user overrides) ---------- */
+  interface MenuItemRow {
+    menu_item_id: number
+    menu_id: string
+    title: string
+    path: string
+    icon?: string
+    category_id: string
+    category_title?: string
+    display_order?: number
+    has_access?: boolean
+  }
+  const [menuAccessUserId, setMenuAccessUserId] = useState<number | null>(null)
+  const [menuAccessItems, setMenuAccessItems] = useState<MenuItemRow[]>([])
+  const [menuAccessSource, setMenuAccessSource] = useState<'user' | 'role'>('role')
+  const [userMenuIds, setUserMenuIds] = useState<Set<number>>(new Set())
+  const [savingAccess, setSavingAccess] = useState(false)
+
+  const loadMenuAccess = async (userId: number) => {
+    try {
+      const res = await apiFetch(`users/${userId}/menu-access`)
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Load failed'))
+      const body: { source?: 'user' | 'role'; role?: string; items?: MenuItemRow[] } = await res.json()
+      const items = Array.isArray(body.items) ? body.items : []
+      setMenuAccessItems(items)
+      setMenuAccessSource(body.source === 'user' ? 'user' : 'role')
+      setUserMenuIds(new Set(items.filter((m) => m.has_access).map((m) => m.menu_item_id)))
+      setMenuAccessUserId(userId)
+    } catch (err) {
+      setError(getDisplayError(err))
+    }
+  }
+
+  const saveMenuAccess = async (options?: { useRoleDefault?: boolean }) => {
+    if (menuAccessUserId == null) return
+    setSavingAccess(true)
+    try {
+      const payload = options?.useRoleDefault
+        ? { useRoleDefault: true }
+        : { menuItemIds: Array.from(userMenuIds) }
+      const res = await apiFetch(`users/${menuAccessUserId}/menu-access`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      })
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Save failed'))
+      setSuccess(
+        options?.useRoleDefault
+          ? 'Overrides cleared — user now inherits role defaults.'
+          : 'Menu access updated.'
+      )
+      setMenuAccessUserId(null)
+    } catch (err) {
+      setError(getDisplayError(err))
+    } finally {
+      setSavingAccess(false)
+    }
+  }
+
+  const toggleMenuId = (id: number) => {
+    setUserMenuIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   return (
     <>
       <PageHero
@@ -230,6 +297,9 @@ function UsersPage() {
                   <button className="action-btn action-btn--ghost" onClick={() => handleEdit(u)}>
                     <i className="pi pi-pencil" /> Edit
                   </button>
+                  <button className="action-btn action-btn--ghost" onClick={() => loadMenuAccess(u.user_id)} title="Configure menu access">
+                    <i className="pi pi-bars" /> Access
+                  </button>
                   <button className="action-btn action-btn--ghost" onClick={() => handleDelete(u)} style={{ color: 'var(--status-danger-fg)' }}>
                     <i className="pi pi-trash" />
                   </button>
@@ -239,6 +309,102 @@ function UsersPage() {
           </div>
         )}
       </section>
+
+      {/* Per-user menu access overrides */}
+      {menuAccessUserId != null && menuAccessItems.length > 0 && (() => {
+        // Group menu items by their category for a sidebar-like preview.
+        const grouped = menuAccessItems.reduce<Record<string, MenuItemRow[]>>((acc, mi) => {
+          const key = mi.category_title || mi.category_id || 'Other'
+          if (!acc[key]) acc[key] = []
+          acc[key].push(mi)
+          return acc
+        }, {})
+        return (
+          <section className="glass-card">
+            <h3 className="glass-card__title">
+              <i className="pi pi-bars" style={{ color: 'var(--accent-violet)' }} /> Menu access for user #{menuAccessUserId}
+            </h3>
+            <div className="glass-card__subtitle">
+              {menuAccessSource === 'user' ? (
+                <>This user has <strong>per-user overrides</strong> — the sidebar ignores role defaults. Save to keep overriding, or reset to inherit role defaults.</>
+              ) : (
+                <>This user is currently inheriting from their <strong>role defaults</strong>. Toggling anything here writes per-user overrides for them.</>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="action-btn action-btn--ghost"
+                onClick={() => setUserMenuIds(new Set(menuAccessItems.map((m) => m.menu_item_id)))}
+              >
+                <i className="pi pi-check-square" /> Select all
+              </button>
+              <button
+                type="button"
+                className="action-btn action-btn--ghost"
+                onClick={() => setUserMenuIds(new Set())}
+              >
+                <i className="pi pi-stop" /> Clear all
+              </button>
+            </div>
+            <div style={{ marginTop: '0.9rem', display: 'grid', gap: '0.9rem' }}>
+              {Object.entries(grouped).map(([cat, items]) => (
+                <div key={cat}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                    {cat}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.4rem' }}>
+                    {items.map((mi) => {
+                      const on = userMenuIds.has(mi.menu_item_id)
+                      return (
+                        <label
+                          key={mi.menu_item_id}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '0.5rem',
+                            padding: '0.55rem 0.7rem',
+                            borderRadius: 'var(--radius-md)',
+                            border: `1px solid ${on ? 'var(--brand-500)' : 'var(--border-subtle)'}`,
+                            background: on ? 'var(--brand-50)' : 'var(--surface-1)',
+                            cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600,
+                            color: 'var(--text-primary)', userSelect: 'none'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleMenuId(mi.menu_item_id)}
+                            style={{ accentColor: 'var(--brand-600)' }}
+                          />
+                          {mi.icon && <i className={`pi ${mi.icon}`} style={{ color: 'var(--text-muted)' }} />}
+                          <span style={{ flex: 1 }}>{mi.title}</span>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono, monospace)' }}>{mi.path}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+              <button type="button" className="action-btn" onClick={() => saveMenuAccess()} disabled={savingAccess}>
+                {savingAccess ? <><i className="pi pi-spin pi-spinner" /> Saving…</> : <><i className="pi pi-check" /> Save per-user access</>}
+              </button>
+              <button
+                type="button"
+                className="action-btn action-btn--ghost"
+                onClick={() => saveMenuAccess({ useRoleDefault: true })}
+                disabled={savingAccess || menuAccessSource !== 'user'}
+                title="Delete all overrides — user falls back to role defaults"
+              >
+                <i className="pi pi-refresh" /> Reset to role defaults
+              </button>
+              <button type="button" className="action-btn action-btn--ghost" onClick={() => setMenuAccessUserId(null)}>
+                <i className="pi pi-times" /> Cancel
+              </button>
+            </div>
+          </section>
+        )
+      })()}
     </>
   )
 }

@@ -59,11 +59,19 @@ class SweeperReport:
 
 
 def _fetch_pending_ids(limit: Optional[int] = None) -> List[int]:
+    # Skip invoices that still need dual-source reconciliation. Rows with
+    # reconciliation_status='pending_reconciliation' have unresolved
+    # Excel/OCR mismatches — validating them would use stale/ambiguous
+    # values and defeat the reviewer's approval step. Once a reviewer
+    # signs off (manually_approved) or the two sources agree (auto_matched)
+    # they flow through normally. Legacy single-source rows are unaffected.
     with get_conn(readonly=True) as conn:
         with conn.cursor() as cur:
             sql = """
                 SELECT invoice_id FROM invoices
                 WHERE status IN (%s, %s)
+                  AND COALESCE(reconciliation_status, 'single_source')
+                      <> 'pending_reconciliation'
                 ORDER BY invoice_id
             """
             params = (

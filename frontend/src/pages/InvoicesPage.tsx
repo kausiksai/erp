@@ -1,34 +1,66 @@
 import { useNavigate } from 'react-router-dom'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import ListPage from '../components/ListPage'
 import type { ListPageColumn, FetchParams, FetchResult } from '../components/ListPage'
 import StatusChip from '../components/StatusChip'
+import InvoiceExpansion from '../components/InvoiceExpansion'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
+import { formatINRSymbol, formatDate, formatInt } from '../utils/format'
+import { downloadCsv } from '../utils/exportCsv'
 
 interface Invoice {
   invoice_id: number
   invoice_number: string
-  supplier_name: string
+  supplier_name: string | null
   invoice_date: string | null
   po_number: string | null
-  total_amount: number | null
+  total_amount: string | number | null
   status: string | null
-  priority?: string | null
 }
 
-const INR = (n: number | null | undefined) =>
-  typeof n === 'number'
-    ? n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '—'
+interface InvoiceStats {
+  total: number
+  validated: number
+  waiting: number
+  re_validation: number
+  ready_for_payment: number
+  paid: number
+  exception_approval: number
+  debit_note_approval: number
+}
 
 function InvoicesPage() {
   const navigate = useNavigate()
-  const [kpis, setKpis] = useState<{
-    total: number
-    validated: number
-    waiting: number
-    ready: number
-  }>({ total: 0, validated: 0, waiting: 0, ready: 0 })
+
+  // Overall KPIs — fetched once on mount from /invoices/stats. These numbers
+  // reflect the *whole database*, not just the current page.
+  const [stats, setStats] = useState<InvoiceStats>({
+    total: 0,
+    validated: 0,
+    waiting: 0,
+    re_validation: 0,
+    ready_for_payment: 0,
+    paid: 0,
+    exception_approval: 0,
+    debit_note_approval: 0
+  })
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await apiFetch('invoices/stats')
+        if (!res.ok) return
+        const body = await res.json()
+        if (alive) setStats(body)
+      } catch {
+        /* swallow — KPIs fall back to zero, list still works */
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const fetchData = useCallback(
     async (p: FetchParams): Promise<FetchResult<Invoice>> => {
@@ -40,15 +72,9 @@ function InvoicesPage() {
       const res = await apiFetch(`invoices?${qs.toString()}`)
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load invoices'))
       const body = await res.json()
-      const items: Invoice[] = body.items || body.invoices || body || []
-      const total = body.total ?? items.length
-      // derive KPIs from response if available
-      setKpis({
-        total,
-        validated: body.stats?.validated ?? items.filter((i) => i.status === 'validated').length,
-        waiting:   body.stats?.waiting   ?? items.filter((i) => i.status === 'waiting_for_validation').length,
-        ready:     body.stats?.ready     ?? items.filter((i) => i.status === 'ready_for_payment').length
-      })
+      // /invoices now returns { items, total, limit, offset }
+      const items: Invoice[] = Array.isArray(body) ? body : (body.items || [])
+      const total = typeof body.total === 'number' ? body.total : items.length
       return { items, total }
     },
     []
@@ -61,9 +87,7 @@ function InvoicesPage() {
       body: (row) => (
         <div>
           <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{row.invoice_number}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {row.invoice_date ? new Date(row.invoice_date).toLocaleDateString('en-IN') : '—'}
-          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{formatDate(row.invoice_date)}</div>
         </div>
       )
     },
@@ -79,14 +103,17 @@ function InvoicesPage() {
     {
       field: 'po_number',
       header: 'PO',
-      body: (row) => (row.po_number ? <code style={{ fontSize: '0.82rem' }}>{row.po_number}</code> : <span style={{ color: 'var(--text-muted)' }}>—</span>)
+      body: (row) =>
+        row.po_number
+          ? <code style={{ fontSize: '0.82rem' }}>{row.po_number}</code>
+          : <span style={{ color: 'var(--text-muted)' }}>—</span>
     },
     {
       field: 'total_amount',
       header: 'Amount',
       body: (row) => (
         <div style={{ fontWeight: 700, color: 'var(--text-primary)', textAlign: 'right' }}>
-          ₹{INR(row.total_amount)}
+          {formatINRSymbol(row.total_amount)}
         </div>
       ),
       style: { textAlign: 'right' }
@@ -103,13 +130,34 @@ function InvoicesPage() {
       eyebrow="Workflow"
       eyebrowIcon="pi-file"
       title="Invoices"
-      subtitle="Every bill flowing through the portal — validated, pending, paid. Click any row for full details."
+      subtitle="Every bill flowing through the portal. Click the expander on any row to see the full invoice, PO, PO lines, GRN, ASN and validation details inline."
       primaryAction={{ label: 'Upload invoice', icon: 'pi-upload', onClick: () => navigate('/invoices/upload') }}
+      secondaryActions={[{
+        label: 'Export CSV',
+        icon: 'pi-download',
+        variant: 'ghost',
+        onClick: async () => {
+          try {
+            const res = await apiFetch('invoices?limit=50000')
+            if (!res.ok) return
+            const body = await res.json()
+            const rows = (body.items || body || []) as Record<string, unknown>[]
+            downloadCsv(rows, 'invoices-export', [
+              { key: 'invoice_number', header: 'Invoice #' },
+              { key: 'invoice_date',   header: 'Date' },
+              { key: 'supplier_name',  header: 'Supplier' },
+              { key: 'po_number',      header: 'PO' },
+              { key: 'total_amount',   header: 'Amount' },
+              { key: 'status',         header: 'Status' }
+            ])
+          } catch { /* swallow */ }
+        }
+      }]}
       kpis={[
-        { label: 'Total invoices',        value: kpis.total.toLocaleString('en-IN'),     icon: 'pi-file',         variant: 'brand'   },
-        { label: 'Validated',             value: kpis.validated.toLocaleString('en-IN'), icon: 'pi-check-circle', variant: 'emerald' },
-        { label: 'Waiting for validation',value: kpis.waiting.toLocaleString('en-IN'),   icon: 'pi-clock',        variant: 'amber'   },
-        { label: 'Ready for payment',     value: kpis.ready.toLocaleString('en-IN'),     icon: 'pi-wallet',       variant: 'violet'  }
+        { label: 'Total invoices',    value: formatInt(stats.total),              icon: 'pi-file',         variant: 'brand'   },
+        { label: 'Validated',         value: formatInt(stats.validated),          icon: 'pi-check-circle', variant: 'emerald' },
+        { label: 'Waiting',           value: formatInt(stats.waiting),            icon: 'pi-clock',        variant: 'amber'   },
+        { label: 'Ready for payment', value: formatInt(stats.ready_for_payment),  icon: 'pi-wallet',       variant: 'violet'  }
       ]}
       filters={[
         { key: 'search', type: 'search', placeholder: 'Search invoice #, supplier, PO…' },
@@ -131,7 +179,9 @@ function InvoicesPage() {
       columns={columns}
       rowKey="invoice_id"
       fetchData={fetchData}
-      onRowClick={(row) => navigate(`/invoices/validate/${row.invoice_id}`)}
+      rowExpansionTemplate={(row) => (
+        <InvoiceExpansion invoiceId={row.invoice_id} poNumber={row.po_number} />
+      )}
       emptyTitle="No invoices yet"
       emptyBody="Upload your first invoice to start populating this view."
     />

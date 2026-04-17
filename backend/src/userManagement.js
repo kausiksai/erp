@@ -262,43 +262,60 @@ export async function deleteUserRoute(req, res) {
 }
 
 /**
- * Get user's menu access
+ * Effective menu access for a specific user.
+ *
+ * A user can have explicit rows in `user_menu_access`. If any are present,
+ * that is their full effective set. If none exist we fall back to the
+ * role template in `role_menu_access`.
+ *
  * GET /api/users/:id/menu-access
+ * Returns every active menu_item with `has_access` resolved against the
+ * effective set, plus a `source` flag ('user' | 'role') so the UI can
+ * show whether overrides exist.
  */
 export async function getUserMenuAccessRoute(req, res) {
   try {
     const { id } = req.params
-    
-    // Get user role
+
     const userResult = await pool.query(
       'SELECT role FROM users WHERE user_id = $1',
       [id]
     )
-    
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'not_found', message: 'User not found' })
     }
-    
     const userRole = userResult.rows[0].role
-    
-    // Get all menu items with access status for this role
+
+    const overrideCountResult = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM user_menu_access WHERE user_id = $1',
+      [id]
+    )
+    const source = overrideCountResult.rows[0].n > 0 ? 'user' : 'role'
+
     const { rows } = await pool.query(`
-      SELECT 
+      SELECT
         mi.menu_item_id,
         mi.menu_id,
         mi.title,
         mi.path,
+        mi.icon,
         mi.category_id,
         mi.category_title,
-        COALESCE(rma.has_access, FALSE) as has_access
+        mi.display_order,
+        CASE
+          WHEN $1::text = 'user' THEN COALESCE(uma.has_access, FALSE)
+          ELSE COALESCE(rma.has_access, FALSE)
+        END AS has_access
       FROM menu_items mi
-      LEFT JOIN role_menu_access rma ON mi.menu_item_id = rma.menu_item_id 
-        AND rma.role = $1
+      LEFT JOIN user_menu_access uma
+             ON uma.menu_item_id = mi.menu_item_id AND uma.user_id = $2
+      LEFT JOIN role_menu_access rma
+             ON rma.menu_item_id = mi.menu_item_id AND rma.role    = $3
       WHERE mi.is_active = TRUE
       ORDER BY mi.category_id, mi.display_order, mi.title
-    `, [userRole])
-    
-    res.json(rows)
+    `, [source, id, userRole])
+
+    res.json({ source, role: userRole, items: rows })
   } catch (err) {
     console.error('Error fetching user menu access:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
@@ -306,72 +323,122 @@ export async function getUserMenuAccessRoute(req, res) {
 }
 
 /**
- * Update user's menu access (by updating role_menu_access)
+ * Replace a user's explicit menu access with `menuItemIds`.
+ * Sending an empty array removes all overrides and the user falls back to
+ * their role template.
+ *
  * PUT /api/users/:id/menu-access
- * Body: { menuItemIds: [1, 2, 3] } - array of menu_item_ids to grant access
+ * Body: { menuItemIds: [1, 2, 3], useRoleDefault?: boolean }
+ *   useRoleDefault=true clears all overrides (equivalent to menuItemIds=[]).
  */
 export async function updateUserMenuAccessRoute(req, res) {
+  const client = await pool.connect()
   try {
     const { id } = req.params
-    const { menuItemIds } = req.body
-    
-    // Get user role
-    const userResult = await pool.query(
+    const { menuItemIds, useRoleDefault } = req.body || {}
+
+    const userResult = await client.query(
       'SELECT role FROM users WHERE user_id = $1',
       [id]
     )
-    
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'not_found', message: 'User not found' })
     }
-    
-    const userRole = userResult.rows[0].role
-    
-    if (!Array.isArray(menuItemIds)) {
-      return res.status(400).json({ 
-        error: 'validation_error', 
-        message: 'menuItemIds must be an array' 
+
+    if (!useRoleDefault && !Array.isArray(menuItemIds)) {
+      return res.status(400).json({
+        error: 'validation_error',
+        message: 'menuItemIds must be an array (or set useRoleDefault=true)'
       })
     }
-    
-    // Start transaction
-    await pool.query('BEGIN')
-    
-    try {
-      // Remove all existing access for this role
-      await pool.query(
-        'DELETE FROM role_menu_access WHERE role = $1',
-        [userRole]
+
+    await client.query('BEGIN')
+
+    // Wipe any previous per-user overrides for this user.
+    await client.query('DELETE FROM user_menu_access WHERE user_id = $1', [id])
+
+    let inserted = 0
+    if (!useRoleDefault && menuItemIds.length > 0) {
+      // Validate every menu_item_id is real + active, to avoid dangling rows.
+      const { rows: validRows } = await client.query(
+        `SELECT menu_item_id FROM menu_items
+          WHERE is_active = TRUE AND menu_item_id = ANY($1::bigint[])`,
+        [menuItemIds]
       )
-      
-      // Insert new access
-      if (menuItemIds.length > 0) {
-        const values = menuItemIds.map((menuItemId, index) => 
-          `($${index * 2 + 1}, $${index * 2 + 2}, TRUE)`
-        ).join(', ')
-        
-        const params = menuItemIds.flatMap(id => [userRole, id])
-        
-        await pool.query(`
-          INSERT INTO role_menu_access (role, menu_item_id, has_access)
-          VALUES ${values}
-          ON CONFLICT (role, menu_item_id) DO UPDATE SET has_access = TRUE
-        `, params)
+      const validIds = validRows.map((r) => r.menu_item_id)
+      if (validIds.length > 0) {
+        const values = validIds.map((_, i) => `($1, $${i + 3}, TRUE, $2)`).join(', ')
+        const params = [id, req.user?.user_id || null, ...validIds]
+        await client.query(
+          `INSERT INTO user_menu_access (user_id, menu_item_id, has_access, granted_by)
+           VALUES ${values}
+           ON CONFLICT (user_id, menu_item_id) DO UPDATE
+             SET has_access = TRUE,
+                 granted_by = EXCLUDED.granted_by,
+                 updated_at = NOW()`,
+          params
+        )
+        inserted = validIds.length
       }
-      
-      await pool.query('COMMIT')
-      
-      res.json({ 
-        message: 'Menu access updated successfully',
-        role: userRole,
-        menuItemIds 
-      })
-    } catch (err) {
-      await pool.query('ROLLBACK')
-      throw err
     }
+
+    await client.query('COMMIT')
+    res.json({
+      message: 'Menu access updated successfully',
+      user_id: Number(id),
+      source: useRoleDefault || inserted === 0 ? 'role' : 'user',
+      menuItemIds: useRoleDefault ? [] : menuItemIds
+    })
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
     console.error('Error updating user menu access:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+}
+
+/**
+ * Return the authenticated user's effective allowed menu items.
+ * Used by the sidebar to decide what to render.
+ *
+ * GET /api/auth/me/menu-access
+ */
+export async function getMyMenuAccessRoute(req, res) {
+  try {
+    const userId = req.user?.user_id
+    const role = req.user?.role
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' })
+
+    const overrideCount = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM user_menu_access WHERE user_id = $1',
+      [userId]
+    )
+    const source = overrideCount.rows[0].n > 0 ? 'user' : 'role'
+
+    const { rows } = await pool.query(`
+      SELECT
+        mi.menu_item_id,
+        mi.menu_id,
+        mi.title,
+        mi.path,
+        mi.icon,
+        mi.category_id,
+        mi.display_order
+      FROM menu_items mi
+      LEFT JOIN user_menu_access uma
+             ON uma.menu_item_id = mi.menu_item_id AND uma.user_id = $2
+      LEFT JOIN role_menu_access rma
+             ON rma.menu_item_id = mi.menu_item_id AND rma.role    = $3
+      WHERE mi.is_active = TRUE
+        AND CASE WHEN $1::text = 'user' THEN COALESCE(uma.has_access, FALSE)
+                 ELSE COALESCE(rma.has_access, FALSE) END = TRUE
+      ORDER BY mi.category_id, mi.display_order, mi.title
+    `, [source, userId, role])
+
+    res.json({ source, role, items: rows })
+  } catch (err) {
+    console.error('Error fetching my menu access:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
   }
 }

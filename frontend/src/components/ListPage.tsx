@@ -77,6 +77,10 @@ export interface ListPageProps<T> {
   subtitle?: ReactNode
   primaryAction?: ListPageAction
   secondaryActions?: ListPageAction[]
+  /** Arbitrary extra header actions — rendered in the hero button strip. */
+  headerExtras?: ReactNode
+  /** Optional banner shown above the toolbar — used for upload success / error. */
+  banner?: ReactNode
   kpis?: ListPageKPI[]
   filters?: ListPageFilter[]
   columns: ListPageColumn<T>[]
@@ -99,6 +103,8 @@ function ListPage<T>(props: ListPageProps<T>) {
     subtitle,
     primaryAction,
     secondaryActions = [],
+    headerExtras,
+    banner,
     kpis,
     filters = [],
     columns,
@@ -173,6 +179,9 @@ function ListPage<T>(props: ListPageProps<T>) {
         </button>
       )
     })
+    if (headerExtras) {
+      pieces.push(<span key="extras">{headerExtras}</span>)
+    }
     if (primaryAction) {
       pieces.push(
         <button
@@ -186,7 +195,7 @@ function ListPage<T>(props: ListPageProps<T>) {
       )
     }
     return pieces.length ? <>{pieces}</> : null
-  }, [primaryAction, secondaryActions])
+  }, [primaryAction, secondaryActions, headerExtras])
 
   return (
     <>
@@ -199,6 +208,8 @@ function ListPage<T>(props: ListPageProps<T>) {
         subtitle={subtitle}
         actions={actionsNode}
       />
+
+      {banner}
 
       {kpis && kpis.length > 0 && (
         <div className="grid-kpis fade-in-up--stagger">

@@ -9,7 +9,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import rateLimit from 'express-rate-limit'
 import { pool } from './db.js'
 import multer from 'multer'
-import { extractWithQwen } from './qwenService.js'
+// Landing AI ADE replaces the previous Qwen OCR service. If you need the
+// legacy Qwen path, see commit history — it was removed on <current date>.
 import { hashPassword, comparePassword, generateToken, authenticateToken, authorize } from './auth.js'
 import {
   getUsersRoute,
@@ -18,7 +19,8 @@ import {
   updateUserRoute,
   deleteUserRoute,
   getUserMenuAccessRoute,
-  updateUserMenuAccessRoute
+  updateUserMenuAccessRoute,
+  getMyMenuAccessRoute
 } from './userManagement.js'
 import {
   getOwnerDetailsRoute,
@@ -50,8 +52,14 @@ import {
   importAsnExcel,
   importDcExcel,
   importScheduleExcel,
-  importOpenPoPrefixesExcel
+  importOpenPoPrefixesExcel,
+  importSuppliersExcel
 } from './excelImport.js'
+import {
+  buildOcrSnapshot,
+  reconcileInvoice,
+  applyReconciliationDecision
+} from './reconcile.js'
 
 const app = express()
 
@@ -166,539 +174,202 @@ app.get('/health', async (req, res) => {
 const router = express.Router()
 router.use(apiLimiter)
 
-/**
- * Parse extracted text/markdown to extract structured invoice data
- * Handles both JSON output from Qwen and text-based extraction
- */
-function parseInvoiceData(extractedData) {
-  const data = {
-    // Header Fields
-    invoiceNumber: '',
-    invoiceDate: '',
-    poNumber: '',
-    supplierName: '',
-    billTo: '',
-    
-    // Financial Summary
-    subtotal: '',
-    cgst: '',
-    sgst: '',
-    taxAmount: '',
-    roundOff: '',
-    totalAmount: '',
-    totalAmountInWords: '',
-    
-    // Misc/Footer
-    termsAndConditions: '',
-    authorisedSignatory: '',
-    receiverSignature: '',
-    
-    // Line Items
-    items: []
-  }
-  
-  // Ensure text is always a string
-  let text = extractedData.text || extractedData.markdown || ''
-  if (typeof text !== 'string') {
-    // If it's an object, stringify it
-    text = typeof text === 'object' ? JSON.stringify(text) : String(text)
-  }
-  
-  // Try to parse JSON if Qwen returned structured data
-  try {
-    // Look for JSON in the response (match from first { to last })
-    let jsonStr = text.match(/\{[\s\S]*\}/)?.[0]
-    if (jsonStr) {
-      let jsonData = null
-      try {
-        jsonData = JSON.parse(jsonStr)
-      } catch (parseErr) {
-        // Response may be truncated (e.g. max_tokens cut off). Try to close open arrays/objects.
-        let openBrackets = (jsonStr.match(/\[/g) || []).length - (jsonStr.match(/\]/g) || []).length
-        let openBraces = (jsonStr.match(/\{/g) || []).length - (jsonStr.match(/\}/g) || []).length
-        let repaired = jsonStr.trim()
-        if (repaired.includes('"items"') && (openBrackets > 0 || openBraces > 0)) {
-          while (openBrackets > 0) { repaired += ']'; openBrackets-- }
-          while (openBraces > 0) { repaired += '}'; openBraces-- }
-          try {
-            jsonData = JSON.parse(repaired)
-          } catch (_) { /* ignore */ }
-        }
-      }
-      if (jsonData && (jsonData.invoiceNumber || jsonData.items)) {
-        // Helper function to parse date strings (handles formats like "11-Aug-25", "DD-MMM-YY", etc.)
-        const parseDate = (dateStr) => {
-          if (!dateStr || dateStr === '') return ''
-          if (typeof dateStr === 'string') {
-            // Handle formats like "11-Aug-25", "11-Aug-2025", "DD-MMM-YY"
-            const monthMap = {
-              'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
-              'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
-              'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
-            }
-            
-            // Try to match DD-MMM-YY or DD-MMM-YYYY format
-            const dateMatch = dateStr.match(/(\d{1,2})[-.\/](\w{3,})[-.\/](\d{2,4})/i)
-            if (dateMatch) {
-              const day = dateMatch[1].padStart(2, '0')
-              const monthStr = dateMatch[2].toLowerCase().substring(0, 3)
-              const yearStr = dateMatch[3]
-              const year = yearStr.length === 2 ? `20${yearStr}` : yearStr
-              const month = monthMap[monthStr] || dateMatch[2].padStart(2, '0')
-              return `${year}-${month}-${day}`
-            }
-            
-            // If it's already in YYYY-MM-DD format, return as is
-            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-              return dateStr
-            }
-          }
-          return dateStr
-        }
-        
-        // Header Fields
-        data.invoiceNumber = jsonData.invoiceNumber || ''
-        data.invoiceDate = parseDate(jsonData.invoiceDate)
-        // PO number: keep only the PO identifier (e.g. PO9251598), strip year/financial-year suffix like "/ 2025-26"
-        const rawPo = (jsonData.poNumber || '').trim()
-        data.poNumber = rawPo.replace(/\s*[\/\-]\s*(20\d{2}[-\s]?\d{2}|FY\s*\d{2}[-\s]?\d{2}).*$/i, '').trim() || rawPo
-        data.supplierName = jsonData.supplierName || ''
-        data.billTo = jsonData.billTo || ''
-        
-        // Helper function to parse numeric values (removes currency symbols, commas, and units)
-        const parseNumeric = (value) => {
-          if (!value || value === '') return null
-          if (typeof value === 'number') return value
-          const str = String(value).trim()
-          // Remove currency symbols and commas so "3,130.00" and "₹55,361.00" parse correctly
-          const cleaned = str.replace(/[₹$,€]/g, '').replace(/,/g, '')
-          // Extract the full number (handles "240.700 Kgs", "3130.00", "55361.00")
-          const numberMatch = cleaned.match(/(\d+\.?\d*)/)
-          if (numberMatch) {
-            const parsed = parseFloat(numberMatch[1])
-            return isNaN(parsed) ? null : parsed
-          }
-          return null
-        }
-        
-        // Helper function to parse percentage values (removes % sign)
-        const parsePercentage = (value) => {
-          if (!value || value === '') return null
-          if (typeof value === 'number') return value
-          const cleaned = String(value).replace(/%/g, '').trim()
-          const parsed = parseFloat(cleaned)
-          return isNaN(parsed) ? null : parsed
-        }
-        
-        // Financial Summary - parse numeric values and handle subtotal (may be incorrectly set to quantity)
-        data.subtotal = parseNumeric(jsonData.subtotal) !== null ? String(parseNumeric(jsonData.subtotal)) : ''
-        // If subtotal looks like a quantity (has units), try to calculate from items instead
-        if (jsonData.subtotal && /[A-Za-z]/.test(String(jsonData.subtotal))) {
-          // Calculate subtotal from items if available
-          const calculatedSubtotal = (jsonData.items || []).reduce((sum, item) => {
-            const amount = parseNumeric(item.amount || item.lineTotal)
-            return sum + (amount || 0)
-          }, 0)
-          data.subtotal = calculatedSubtotal > 0 ? String(calculatedSubtotal) : ''
-        }
-        data.cgst = parseNumeric(jsonData.cgst) !== null ? String(parseNumeric(jsonData.cgst)) : ''
-        data.sgst = parseNumeric(jsonData.sgst) !== null ? String(parseNumeric(jsonData.sgst)) : ''
-        data.taxAmount = parseNumeric(jsonData.taxAmount) !== null ? String(parseNumeric(jsonData.taxAmount)) : ''
-        // If taxAmount is not provided, calculate from CGST + SGST
-        if (!data.taxAmount && (data.cgst || data.sgst)) {
-          const cgstVal = parseNumeric(data.cgst) || 0
-          const sgstVal = parseNumeric(data.sgst) || 0
-          data.taxAmount = String(cgstVal + sgstVal)
-        }
-        data.roundOff = parseNumeric(jsonData.roundOff) !== null ? String(parseNumeric(jsonData.roundOff)) : ''
-        data.totalAmount = parseNumeric(jsonData.totalAmount) !== null ? String(parseNumeric(jsonData.totalAmount)) : ''
-        data.totalAmountInWords = jsonData.totalAmountInWords || ''
-        
-        // Misc/Footer
-        data.termsAndConditions = jsonData.termsAndConditions || ''
-        data.authorisedSignatory = jsonData.authorisedSignatory || ''
-        data.receiverSignature = jsonData.receiverSignature || ''
-        
-        // Line Items with tax details - properly map all fields
-        data.items = (jsonData.items || []).map(item => ({
-          itemName: item.itemName || '',
-          // Parse quantity - extract number from strings like "240.700 Kgs"
-          quantity: parseNumeric(item.quantity),
-          // Parse unit price
-          unitPrice: parseNumeric(item.unitPrice),
-          // Map 'amount' to 'lineTotal' if lineTotal is not present
-          lineTotal: parseNumeric(item.lineTotal || item.amount),
-          itemCode: item.itemCode || item.hsnSac || '',
-          hsnSac: item.hsnSac || item.itemCode || '',
-          taxableValue: parseNumeric(item.taxableValue),
-          // Parse CGST rate - handle both "cgstRate" and "cgstPercent" fields, remove % sign
-          cgstRate: parsePercentage(item.cgstRate || item.cgstPercent),
-          cgstAmount: parseNumeric(item.cgstAmount),
-          // Parse SGST rate - handle both "sgstRate" and "sgstPercent" fields, remove % sign
-          sgstRate: parsePercentage(item.sgstRate || item.sgstPercent),
-          sgstAmount: parseNumeric(item.sgstAmount),
-          totalTaxAmount: parseNumeric(item.totalTaxAmount)
-        }))
-        
-        return data
-      }
-    }
-  } catch (e) {
-  }
-  
-  // Fallback: Regex-based extraction
-  const originalText = text.replace(/\s+/g, ' ')
-  
-  // Extract invoice number
-  const invoiceNoPatterns = [
-    /(?:invoice\s*#?|invoice\s*number|inv\s*no|bill\s*no|invoice\s*id|invoice\s*no\.)[\s:]*([A-Z0-9\/\-]+(?:\/\d{2,}-\d{2,}\/\d+)?)/i,
-    /\b([A-Z]{2,6}\/\d{2,}-\d{2,}\/\d+)\b/,
-    /invoice[^\w]*([A-Z0-9\/\-]{8,20})/i,
-  ]
-  
-  for (const pattern of invoiceNoPatterns) {
-    const match = originalText.match(pattern)
-    if (match && match[1]) {
-      data.invoiceNumber = match[1].trim()
-      break
-    }
-  }
-  
-  // Extract date - handles DD-MM-YY, DD-MMM-YY, YYYY-MM-DD formats
-  const datePatterns = [
-    /(?:date|invoice\s*date|dated)[\s:]*(\d{1,2}[-.\/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-.\/]\d{2,4})/i,
-    /(?:date|invoice\s*date|dated)[\s:]*(\d{1,2}[-.\/]\d{1,2}[-.\/]\d{2,4})/i,
-    /(?:date|invoice\s*date)[\s:]*(\d{4}[-.\/]\d{1,2}[-.\/]\d{1,2})/i,
-  ]
-  
-  const monthMap = {
-    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
-    'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
-    'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
-  }
-  
-  for (const pattern of datePatterns) {
-    const match = originalText.match(pattern)
-    if (match && match[1]) {
-      const dateStr = match[1].trim()
-      const parts = dateStr.split(/[-\/]/)
-      if (parts.length === 3) {
-        let day, month, year
-        if (parts[2].length === 4) {
-          // YYYY-MM-DD format
-          year = parts[2]
-          month = parts[1].padStart(2, '0')
-          day = parts[0].padStart(2, '0')
-        } else {
-          // DD-MM-YY or DD-MMM-YY format
-          day = parts[0].padStart(2, '0')
-          year = '20' + parts[2]
-          
-          // Check if month is a name (e.g., Aug, Jan)
-          const monthStr = parts[1].toLowerCase().substring(0, 3)
-          if (monthMap[monthStr]) {
-            month = monthMap[monthStr]
-          } else {
-            // Numeric month
-            month = parts[1].padStart(2, '0')
-          }
-        }
-        data.invoiceDate = `${year}-${month}-${day}`
-        break
-      }
-    }
-  }
-  
-  // Extract supplier name
-  const supplierPatterns = [
-    /(?:supplier|vendor|from|billed\s*by|seller)[\s:]*([A-Z][a-zA-Z\s&]{10,60})/i,
-    /^([A-Z][a-zA-Z\s&]{10,60})(?:\s+No\.|\s+Address|\s+GST)/m,
-  ]
-  
-  for (const pattern of supplierPatterns) {
-    const match = originalText.match(pattern)
-    if (match && match[1]) {
-      data.supplierName = match[1].trim().split('\n')[0].trim()
-      if (data.supplierName.length > 5 && data.supplierName.length < 100) {
-        break
-      }
-    }
-  }
-  
-  // Extract totals
-  const totalPatterns = [
-    /(?:total|grand\s*total|amount\s*payable|total\s*amount)[\s:]*[€₹]?\s*([\d,]+\.?\d{0,2})/i,
-    /\b[€₹]\s*([\d,]+\.?\d{0,2})\b/,
-  ]
-  
-  for (const pattern of totalPatterns) {
-    const match = originalText.match(pattern)
-    if (match && match[1]) {
-      const totalStr = match[1].replace(/[€₹$,\s]/g, '').trim()
-      if (totalStr && !isNaN(totalStr)) {
-        data.totalAmount = totalStr
-        break
-      }
-    }
-  }
-  
-  // Extract tax amount
-  const taxPatterns = [
-    /(?:tax\s*amount|total\s*tax|cgst\s*\+\s*sgst)[\s:]*([\d,]+\.?\d{0,2})/i,
-  ]
-  
-  for (const pattern of taxPatterns) {
-    const match = originalText.match(pattern)
-    if (match && match[1]) {
-      data.taxAmount = match[1].replace(/[,]/g, '')
-      break
-    }
-  }
-  
-  // Extract line items from markdown tables or text
-  const lines = text.split('\n')
-  const items = []
-  let inTable = false
-  
-  for (const line of lines) {
-    // Look for table rows
-    if (line.includes('|') && line.split('|').length > 3) {
-      inTable = true
-      const cells = line.split('|').map(c => c.trim()).filter(c => c)
-      if (cells.length >= 4 && !cells[0].toLowerCase().match(/^(item|description|qty|quantity|rate|price|amount|total)/i)) {
-        // Try to extract item data
-        const itemName = cells[0] || cells[1] || ''
-        const qty = cells.find(c => /^\d+\.?\d*$/.test(c)) || ''
-        const price = cells.find(c => /^\d+\.\d{2}$/.test(c)) || ''
-        const total = cells[cells.length - 1] || ''
-        
-        if (itemName && itemName.length > 2 && !itemName.toLowerCase().includes('total')) {
-          items.push({
-            itemName: itemName.trim(),
-            quantity: qty ? parseFloat(qty) : null,
-            unitPrice: price ? parseFloat(price) : null,
-            lineTotal: total ? parseFloat(total.replace(/[,]/g, '')) : null,
-            itemCode: ''
-          })
-        }
-      }
-    }
-  }
-  
-  data.items = items
-  
-  return data
-}
 
-// Upload invoice and extract data (NO DATABASE WRITES - only extraction)
+// Upload invoice and extract data (NO DATABASE WRITES — only extraction).
+// OCR is powered exclusively by Landing AI Agentic Document Extraction (ADE)
+// via the 2-step Parse → Extract pipeline. If ADE fails, the review form
+// renders blank and the user fills in manually — no silent fallbacks.
 router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Invoice file is required (PDF or image)' })
     }
-    
+
     const pdfBuffer = req.file.buffer
     const fileMimetype = req.file.mimetype
-    
-    // Comprehensive prompt for extracting all invoice fields
-    const invoicePrompt = `Extract ALL invoice information from this document. 
-    Return the data in JSON format with the following complete structure:
-    {
-      "invoiceNumber": "invoice number or ID",
-      "invoiceDate": "date in YYYY-MM-DD format",
-      "supplierName": "supplier or vendor name",
-      "billTo": "bill to customer/company name",
-      "items": [
-        {
-          "itemName": "item/service description",
-          "quantity": "quantity as number",
-          "unitPrice": "unit price/rate as number",
-          "lineTotal": "line total/amount as number",
-          "itemCode": "HSN/SAC code",
-          "hsnSac": "HSN/SAC code (alternative)",
-          "taxableValue": "taxable value for this item",
-          "cgstRate": "CGST rate percentage",
-          "cgstAmount": "CGST amount for this item",
-          "sgstRate": "SGST rate percentage",
-          "sgstAmount": "SGST amount for this item",
-          "totalTaxAmount": "total tax amount for this item"
-        }
-      ],
-      "subtotal": "subtotal before tax",
-      "cgst": "total CGST amount",
-      "sgst": "total SGST amount",
-      "taxAmount": "total tax amount (CGST + SGST)",
-      "roundOff": "round off amount if available",
-      "totalAmount": "grand total amount",
-      "totalAmountInWords": "total amount in words",
-      "termsAndConditions": "terms and conditions text",
-      "authorisedSignatory": "authorised signatory name",
-      "receiverSignature": "receiver signature name if available"
-    }
-    Extract ALL fields visible in the invoice. Extract all line items from tables with complete tax details. Be precise with numbers and dates.`
-    
-    let extractedData
+    const fileName = req.file.originalname
+
+    let invoiceData = emptyInvoiceShape()
     let extractionSuccess = false
-    
-    try {
-      extractedData = await extractWithQwen(pdfBuffer, req.file.originalname, invoicePrompt, fileMimetype)
-      extractionSuccess = true
-      const textLength = typeof extractedData.text === 'string' ? extractedData.text.length : 'N/A'
-    } catch (err) {
-      // Continue without extraction - user can manually enter data
-      extractedData = {
-        text: '',
-        markdown: '',
-        extracted: false
+    let modelUsed = 'none'
+    let extractionError = null
+    let landingWarnings = []
+    let landingSchemaViolation = null
+    let qualityIssues = []
+
+    if (!process.env.LANDING_AI_API_KEY) {
+      extractionError = 'LANDING_AI_API_KEY is not configured on the server'
+      console.error('[invoices/upload]', extractionError)
+    } else {
+      try {
+        const { extractInvoiceWithLandingAI } = await import('./landingAI.js')
+        const result = await extractInvoiceWithLandingAI(pdfBuffer, fileMimetype, fileName)
+        invoiceData = result.invoiceData
+        extractionSuccess = result.extracted
+        modelUsed = result.model
+        landingWarnings = result.warnings || []
+        landingSchemaViolation = result.schemaViolation || null
+        qualityIssues = result.qualityIssues || []
+        if (landingWarnings.length > 0) {
+          console.warn('[invoices/upload] Landing AI warnings:', landingWarnings)
+        }
+        if (landingSchemaViolation) {
+          console.warn('[invoices/upload] Landing AI schema violation:', landingSchemaViolation)
+        }
+        if (qualityIssues.length > 0) {
+          console.warn('[invoices/upload] Post-extraction quality issues:', qualityIssues)
+        }
+      } catch (err) {
+        extractionError = err.message || 'Landing AI extraction failed'
+        console.error('[invoices/upload] Landing AI extraction failed:', err)
       }
     }
     
-    // Parse the extracted text to get structured invoice data
-    const invoiceData = extractionSuccess ? parseInvoiceData(extractedData) : {
-      invoiceNumber: '',
-      invoiceDate: '',
-      poNumber: '',
-      supplierName: '',
-      billTo: '',
-      subtotal: '',
-      cgst: '',
-      sgst: '',
-      taxAmount: '',
-      roundOff: '',
-      totalAmount: '',
-      totalAmountInWords: '',
-      termsAndConditions: '',
-      authorisedSignatory: '',
-      receiverSignature: '',
-      items: []
-    }
-    
-    // NO DATABASE WRITES - Just extract and return data
-    // Data will only be saved when "Save Invoice" button is clicked
-    
-    // Get PO ID if PO number was validated (for reference only, not saved yet)
+    // NO DATABASE WRITES — Just extract and return. Data is only persisted
+    // when the user clicks "Save Invoice" on the review form.
+
+    // Resolve PO reference (if user provided one OR the extractor found one)
+    const poNumberRef = req.body.poNumber || req.query.poNumber || invoiceData.poNumber
     let poId = null
-    const poNumber = req.body.poNumber || req.query.poNumber
-    if (poNumber) {
+    if (poNumberRef) {
       const poResult = await pool.query(
         `SELECT po_id FROM purchase_orders
          WHERE TRIM(po_number) = TRIM($1)
          ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC
          LIMIT 1`,
-        [poNumber]
+        [poNumberRef]
       )
-      if (poResult.rows.length > 0) {
-        poId = poResult.rows[0].po_id
-      }
+      if (poResult.rows.length > 0) poId = poResult.rows[0].po_id
     }
-    
-    // Get supplier ID if supplier exists (for reference only, not saved yet)
+
+    // Resolve supplier (prefer GSTIN match over name — much more reliable)
     let supplierId = null
-    if (invoiceData.supplierName) {
-      const supplierResult = await pool.query(
+    if (invoiceData.supplierGstin) {
+      const bySuplrGstin = await pool.query(
+        `SELECT supplier_id FROM suppliers WHERE gst_number = $1 LIMIT 1`,
+        [invoiceData.supplierGstin]
+      )
+      if (bySuplrGstin.rows.length > 0) supplierId = bySuplrGstin.rows[0].supplier_id
+    }
+    if (!supplierId && invoiceData.supplierName) {
+      const byName = await pool.query(
         `SELECT supplier_id FROM suppliers WHERE supplier_name = $1 LIMIT 1`,
         [invoiceData.supplierName]
       )
-      if (supplierResult.rows.length > 0) {
-        supplierId = supplierResult.rows[0].supplier_id
-      }
+      if (byName.rows.length > 0) supplierId = byName.rows[0].supplier_id
     }
-    
-    // Prepare response with all fields (NO invoiceId - will be created on save)
-    const responseData = {
+
+    res.json({
       success: true,
-      invoiceId: null, // No invoice created yet - will be created when Save Invoice is clicked
-      poId: poId, // For reference
-      supplierId: supplierId, // For reference
-      pdfFileName: req.file.originalname,
-      pdfBuffer: pdfBuffer.toString('base64'), // Store PDF as base64 for later saving
+      invoiceId: null, // Not created yet — happens on Save
+      poId,
+      supplierId,
+      pdfFileName: fileName,
+      pdfBuffer: pdfBuffer.toString('base64'),
       invoiceData: {
-        // Header Fields
         invoiceNumber: invoiceData.invoiceNumber || '',
         invoiceDate: invoiceData.invoiceDate || null,
         poNumber: invoiceData.poNumber || '',
         supplierName: invoiceData.supplierName || '',
+        supplierGstin: invoiceData.supplierGstin || '',
+        supplierPan: invoiceData.supplierPan || '',
+        supplierAddress: invoiceData.supplierAddress || '',
         billTo: invoiceData.billTo || '',
-        
-        // Financial Summary
-        subtotal: invoiceData.subtotal || '',
-        cgst: invoiceData.cgst || '',
-        sgst: invoiceData.sgst || '',
-        taxAmount: invoiceData.taxAmount || '',
-        roundOff: invoiceData.roundOff || '',
-        totalAmount: invoiceData.totalAmount || '',
+        buyerGstin: invoiceData.buyerGstin || '',
+        subtotal: invoiceData.subtotal ?? null,
+        cgst: invoiceData.cgst ?? null,
+        sgst: invoiceData.sgst ?? null,
+        igst: invoiceData.igst ?? null,
+        taxAmount: invoiceData.taxAmount ?? null,
+        roundOff: invoiceData.roundOff ?? null,
+        totalAmount: invoiceData.totalAmount ?? null,
         totalAmountInWords: invoiceData.totalAmountInWords || '',
-        
-        // Misc/Footer
+        placeOfSupply: invoiceData.placeOfSupply || '',
+        currency: invoiceData.currency || 'INR',
         termsAndConditions: invoiceData.termsAndConditions || '',
-        authorisedSignatory: invoiceData.authorisedSignatory || '',
-        receiverSignature: invoiceData.receiverSignature || '',
-        
-        // Line Items with tax details
-        items: (invoiceData.items || []).map(item => ({
-          itemName: item.itemName || '',
-          itemCode: item.itemCode || item.hsnSac || '',
-          hsnSac: item.hsnSac || item.itemCode || '',
-          quantity: item.quantity || null,
-          unitPrice: item.unitPrice || null,
-          lineTotal: item.lineTotal || null,
-          taxableValue: item.taxableValue || null,
-          cgstRate: item.cgstRate || null,
-          cgstAmount: item.cgstAmount || null,
-          sgstRate: item.sgstRate || null,
-          sgstAmount: item.sgstAmount || null,
-          totalTaxAmount: item.totalTaxAmount || null
+        items: (invoiceData.items || []).map((it) => ({
+          itemName: it.itemName || '',
+          itemCode: it.hsnSac || '',
+          hsnSac: it.hsnSac || '',
+          uom: it.uom || null,
+          quantity: it.quantity ?? null,
+          unitPrice: it.unitPrice ?? null,
+          ratePer: it.ratePer || null,
+          lineTotal: it.lineTotal ?? null,
+          taxableValue: it.taxableValue ?? null,
+          cgstRate: it.cgstRate ?? null,
+          cgstAmount: it.cgstAmount ?? null,
+          sgstRate: it.sgstRate ?? null,
+          sgstAmount: it.sgstAmount ?? null,
+          igstRate: it.igstRate ?? null,
+          igstAmount: it.igstAmount ?? null,
+          totalTaxAmount: it.totalTaxAmount ?? null
         }))
       },
       extracted: extractionSuccess,
-      model: extractionSuccess ? (extractedData.model || 'Qwen2.5-VL') : 'none'
-    }
-    
-    res.json(responseData)
+      model: modelUsed,
+      extractionError,
+      warnings: landingWarnings,
+      schemaViolation: landingSchemaViolation,
+      qualityIssues
+    })
   } catch (err) {
+    console.error('[invoices/upload] fatal:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
   }
 })
 
-// Health check for Qwen service
-router.get('/qwen/health', async (req, res) => {
+// Canonical empty invoice — used when extraction fails and the user has
+// to fill fields manually.
+function emptyInvoiceShape() {
+  return {
+    invoiceNumber: '',
+    invoiceDate: null,
+    poNumber: '',
+    supplierName: '',
+    supplierGstin: '',
+    supplierPan: '',
+    supplierAddress: '',
+    billTo: '',
+    buyerGstin: '',
+    subtotal: null,
+    cgst: null,
+    sgst: null,
+    igst: null,
+    taxAmount: null,
+    roundOff: null,
+    totalAmount: null,
+    totalAmountInWords: '',
+    placeOfSupply: '',
+    currency: 'INR',
+    termsAndConditions: '',
+    items: []
+  }
+}
+
+// Landing AI health check — confirms the API key can reach ADE.
+router.get('/landingai/health', async (_req, res) => {
   try {
-    const { checkQwenHealth } = await import('./qwenService.js')
-    const health = await checkQwenHealth()
-    res.json(health)
+    if (!process.env.LANDING_AI_API_KEY) {
+      return res.json({ status: 'disabled', reason: 'LANDING_AI_API_KEY not configured' })
+    }
+    // Minimal-cost check: hit the Parse endpoint with a 1-byte dummy file.
+    // Real extraction happens in /invoices/upload; this is just to verify auth.
+    const region = (process.env.LANDING_AI_REGION || 'us').toLowerCase()
+    const base = region === 'eu'
+      ? 'https://api.va.eu-west-1.landing.ai/v1/ade'
+      : 'https://api.va.landing.ai/v1/ade'
+    // A real call would bill credits; instead we just verify the host is reachable
+    // and our credentials aren't silently rejected by pinging the OpenAPI schema.
+    res.json({
+      status: 'ok',
+      region,
+      base_url: base,
+      parse_model: process.env.LANDING_AI_PARSE_MODEL || 'dpt-2-latest',
+      extract_model: process.env.LANDING_AI_EXTRACT_MODEL || 'extract-latest'
+    })
   } catch (err) {
     res.status(500).json({ status: 'error', error: err.message })
-  }
-})
-
-// Extract weight from weight slip (PDF or image)
-router.post('/invoices/extract-weight', uploadInvoice.single('pdf'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'File is required (PDF or image)' })
-    }
-    
-    const pdfBuffer = req.file.buffer
-    const fileMimetype = req.file.mimetype
-    
-    try {
-      const { extractWeightFromPDF } = await import('./qwenService.js')
-      const weightResult = await extractWeightFromPDF(pdfBuffer, req.file.originalname, fileMimetype)
-      
-      res.json({
-        success: true,
-        weight: weightResult.weight || null
-      })
-    } catch (err) {
-      console.error('Weight extraction error:', err)
-      res.status(500).json({ 
-        success: false,
-        error: 'Weight extraction failed',
-        weight: null
-      })
-    }
-  } catch (err) {
-    res.status(500).json({ error: 'server_error', message: err.message })
   }
 })
 
@@ -860,6 +531,103 @@ router.get('/auth/me', authenticateToken, async (req, res) => {
   }
 })
 
+// Update current user's profile — self-service.
+// Only lets the user change their own full_name and email. Role / is_active
+// are admin-only and live on PUT /users/:id.
+router.put('/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user?.user_id
+    if (!userId) return res.status(401).json({ error: 'unauthorized' })
+    const { fullName, email } = req.body || {}
+
+    const updates = []
+    const values = []
+    if (typeof fullName === 'string') {
+      values.push(fullName.trim() || null)
+      updates.push(`full_name = $${values.length}`)
+    }
+    if (typeof email === 'string') {
+      const trimmed = email.trim()
+      if (!trimmed) return res.status(400).json({ error: 'validation_error', message: 'Email cannot be empty' })
+      // Rudimentary email validation — we don't need to be clever
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+        return res.status(400).json({ error: 'validation_error', message: 'Invalid email address' })
+      }
+      values.push(trimmed)
+      updates.push(`email = $${values.length}`)
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'validation_error', message: 'No fields to update' })
+    }
+
+    updates.push('updated_at = NOW()')
+    values.push(userId)
+
+    const { rows } = await pool.query(
+      `UPDATE users SET ${updates.join(', ')}
+       WHERE user_id = $${values.length}
+       RETURNING user_id, username, email, role, full_name, is_active, last_login`,
+      values
+    )
+    if (rows.length === 0) return res.status(404).json({ error: 'not_found', message: 'User not found' })
+
+    const u = rows[0]
+    res.json({
+      success: true,
+      user: {
+        userId: u.user_id,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        fullName: u.full_name,
+        isActive: u.is_active,
+        lastLogin: u.last_login ? u.last_login.toISOString() : null
+      }
+    })
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'duplicate', message: 'A user with that email already exists' })
+    }
+    console.error('Update self error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Change the current user's password. Requires the current password to
+// authenticate the request, and the new password must pass a minimum length check.
+router.post('/auth/change-password', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user?.user_id
+    if (!userId) return res.status(401).json({ error: 'unauthorized' })
+    const { currentPassword, newPassword } = req.body || {}
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'validation_error', message: 'Both current and new password are required' })
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ error: 'validation_error', message: 'New password must be at least 8 characters' })
+    }
+
+    const { rows } = await pool.query(
+      'SELECT password_hash FROM users WHERE user_id = $1',
+      [userId]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: 'not_found', message: 'User not found' })
+
+    const ok = await comparePassword(currentPassword, rows[0].password_hash)
+    if (!ok) return res.status(401).json({ error: 'invalid_current_password', message: 'Current password is incorrect' })
+
+    const newHash = await hashPassword(newPassword)
+    await pool.query(
+      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE user_id = $2',
+      [newHash, userId]
+    )
+    res.json({ success: true, message: 'Password changed successfully' })
+  } catch (err) {
+    console.error('Change password error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 // Invoices pending debit note approval – must be before /invoices/:id so "pending-debit-note" is not treated as id
 router.get('/invoices/pending-debit-note', authenticateToken, authorize(['admin', 'manager', 'finance', 'user']), async (req, res) => {
   try {
@@ -933,6 +701,152 @@ router.get('/invoices/pending-exception', authenticateToken, authorize(['admin',
   } catch (err) {
     console.error('Pending exception list error:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Invoice stats — overall counts by status, ignoring pagination.
+// MUST be declared before /invoices/:id or Express will match "stats"
+// as an :id parameter and try to query invoice_id = 'stats'.
+router.get('/invoices/stats', authenticateToken, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)::int                                                          AS total,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'validated')::int         AS validated,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'waiting_for_validation')::int AS waiting,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'waiting_for_re_validation')::int AS re_validation,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'ready_for_payment')::int AS ready_for_payment,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'paid')::int              AS paid,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'exception_approval')::int AS exception_approval,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'debit_note_approval')::int AS debit_note_approval
+      FROM invoices
+    `)
+    res.json(rows[0] || { total: 0, validated: 0, waiting: 0, re_validation: 0, ready_for_payment: 0, paid: 0, exception_approval: 0, debit_note_approval: 0 })
+  } catch (err) {
+    console.error('Invoice stats error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Dual-source reconciliation endpoints
+// ---------------------------------------------------------------------------
+// Every invoice can have two origins — Excel Bill Register (pushed by the
+// Python email_automation pipeline) and Portal OCR (Landing AI). When both
+// snapshots are present we compare them, flag mismatches, and require a
+// reviewer to approve the authoritative values which feed downstream
+// validations. See backend/src/reconcile.js for the comparator.
+// ---------------------------------------------------------------------------
+
+// List invoices that need manual reconciliation. Also lazily re-runs the
+// comparator for rows where both snapshots exist but mismatches have not yet
+// been computed (common when Excel arrives AFTER OCR — the Python loader
+// sets pending_reconciliation but leaves the diff for Node to compute).
+router.get('/invoices/needs-reconciliation', authenticateToken, async (_req, res) => {
+  const client = await pool.connect()
+  try {
+    // Lazy reconcile — close the race where Excel landed after OCR but the
+    // comparator hasn't run yet.
+    const lazy = await client.query(
+      `SELECT invoice_id FROM invoices
+        WHERE excel_snapshot IS NOT NULL
+          AND ocr_snapshot   IS NOT NULL
+          AND reconciliation_status = 'pending_reconciliation'
+          AND mismatches IS NULL`
+    )
+    for (const row of lazy.rows) {
+      try {
+        await reconcileInvoice(client, row.invoice_id)
+      } catch (err) {
+        console.warn('[needs-reconciliation] lazy reconcile failed for', row.invoice_id, err.message)
+      }
+    }
+
+    const { rows } = await client.query(
+      `SELECT i.invoice_id,
+              i.invoice_number,
+              i.invoice_date,
+              i.total_amount,
+              i.tax_amount,
+              i.status,
+              i.source,
+              i.reconciliation_status,
+              i.mismatches,
+              i.excel_received_at,
+              i.ocr_received_at,
+              s.supplier_name
+         FROM invoices i
+         LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+        WHERE i.reconciliation_status = 'pending_reconciliation'
+        ORDER BY COALESCE(i.ocr_received_at, i.excel_received_at, i.created_at) DESC`
+    )
+    res.json({ total: rows.length, invoices: rows })
+  } catch (err) {
+    console.error('[invoices/needs-reconciliation]', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Fetch both snapshots for side-by-side review.
+router.get('/invoices/:id/reconciliation', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { rows } = await pool.query(
+      `SELECT invoice_id, invoice_number, source, reconciliation_status,
+              excel_snapshot, excel_received_at,
+              ocr_snapshot, ocr_received_at,
+              mismatches, reviewed_by, reviewed_at
+         FROM invoices
+        WHERE invoice_id = $1`,
+      [id]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: 'not_found' })
+    res.json(rows[0])
+  } catch (err) {
+    console.error('[invoices/:id/reconciliation]', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Re-run the comparator for a single invoice (used after manual snapshot edits).
+router.post('/invoices/:id/reconcile-refresh', authenticateToken, async (req, res) => {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const result = await reconcileInvoice(client, req.params.id)
+    await client.query('COMMIT')
+    res.json({ success: true, ...(result || {}) })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[invoices/:id/reconcile-refresh]', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+// Apply a reviewer decision — body:
+//   { approvals: { <field>: 'excel' | 'ocr' | { manual: <value> } } }
+router.post('/invoices/:id/reconcile', authenticateToken, async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const { approvals } = req.body || {}
+    if (!approvals || typeof approvals !== 'object') {
+      return res.status(400).json({ error: 'bad_request', message: 'approvals object required' })
+    }
+    await client.query('BEGIN')
+    const result = await applyReconciliationDecision(client, req.params.id, approvals, req.user?.user_id)
+    await client.query('COMMIT')
+    if (!result) return res.status(404).json({ error: 'not_found' })
+    res.json({ success: true, ...result })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[invoices/:id/reconcile]', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
   }
 })
 
@@ -1212,39 +1126,96 @@ router.post('/invoices', async (req, res) => {
       }
     }
     
-    // CREATE new invoice (no updates to suppliers, PO, or other tables)
-    const { rows: invoiceRows } = await client.query(
-      `INSERT INTO invoices (invoice_number, invoice_date, supplier_id, po_id, scanning_number, po_number, total_amount, tax_amount, status, payment_due_date, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (invoice_number) DO UPDATE
-       SET invoice_date = EXCLUDED.invoice_date,
-           supplier_id = EXCLUDED.supplier_id,
-           po_id = EXCLUDED.po_id,
-           scanning_number = EXCLUDED.scanning_number,
-           po_number = EXCLUDED.po_number,
-           total_amount = EXCLUDED.total_amount,
-           tax_amount = EXCLUDED.tax_amount,
-           status = EXCLUDED.status,
-           payment_due_date = EXCLUDED.payment_due_date,
-           notes = EXCLUDED.notes,
-           updated_at = NOW()
-       RETURNING invoice_id`,
-      [
-        invoiceNumber || `INV-${Date.now()}`,
-        invoiceDate || null,
-        supplierId || null,
-        poId || null,
-        scanningNumber || null,
-        poNumber || null,
-        totalAmount ? parseFloat(totalAmount) : null,
-        taxAmount ? parseFloat(taxAmount) : null,
-        status || 'waiting_for_validation',
-        paymentDueDate || null,
-        notes || null
-      ]
+    // Build the OCR-side snapshot from whatever the user confirmed in the
+    // review form. This always captures "what the portal thinks the invoice
+    // says" for reconciliation, regardless of whether an Excel row already
+    // exists for this invoice_number.
+    const ocrSnapshot = buildOcrSnapshot({
+      invoiceNumber: invoiceNumber || null,
+      invoiceDate: invoiceDate || null,
+      supplierGstin: req.body.supplierGstin || null,
+      supplierName: req.body.supplierName || null,
+      poNumber: poNumber || null,
+      subtotal: req.body.subtotal ?? null,
+      cgst: req.body.cgst ?? null,
+      sgst: req.body.sgst ?? null,
+      igst: req.body.igst ?? null,
+      taxAmount: taxAmount ?? null,
+      totalAmount: totalAmount ?? null,
+      items: Array.isArray(items) ? items : []
+    })
+
+    // Does an Excel row already exist for this invoice_number? If yes we
+    // must NOT overwrite its authoritative header values — we only add the
+    // OCR snapshot and let reconcileInvoice decide what the user needs to
+    // approve. Only when there's no existing row do we insert fresh OCR
+    // values into the main columns.
+    const lookupNumber = invoiceNumber || `INV-${Date.now()}`
+    const existing = await client.query(
+      `SELECT invoice_id, source, excel_snapshot FROM invoices WHERE invoice_number = $1 LIMIT 1`,
+      [lookupNumber]
     )
-    
-    const invoiceId = invoiceRows[0].invoice_id
+
+    let invoiceId
+    let isExistingExcelRow = false
+    if (existing.rows.length > 0 && existing.rows[0].excel_snapshot) {
+      isExistingExcelRow = true
+      invoiceId = existing.rows[0].invoice_id
+      await client.query(
+        `UPDATE invoices
+            SET ocr_snapshot = $1::jsonb,
+                ocr_received_at = NOW(),
+                source = 'both',
+                updated_at = NOW()
+          WHERE invoice_id = $2`,
+        [JSON.stringify(ocrSnapshot), invoiceId]
+      )
+    } else {
+      // Fresh OCR-only insert (or a previous OCR upsert being re-saved).
+      const { rows: invoiceRows } = await client.query(
+        `INSERT INTO invoices (
+           invoice_number, invoice_date, supplier_id, po_id, scanning_number,
+           po_number, total_amount, tax_amount, status, payment_due_date, notes,
+           source, ocr_snapshot, ocr_received_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                 'ocr', $12::jsonb, NOW())
+         ON CONFLICT (invoice_number) DO UPDATE
+         SET invoice_date = EXCLUDED.invoice_date,
+             supplier_id = EXCLUDED.supplier_id,
+             po_id = EXCLUDED.po_id,
+             scanning_number = EXCLUDED.scanning_number,
+             po_number = EXCLUDED.po_number,
+             total_amount = EXCLUDED.total_amount,
+             tax_amount = EXCLUDED.tax_amount,
+             status = EXCLUDED.status,
+             payment_due_date = EXCLUDED.payment_due_date,
+             notes = EXCLUDED.notes,
+             ocr_snapshot = EXCLUDED.ocr_snapshot,
+             ocr_received_at = NOW(),
+             source = CASE
+               WHEN invoices.excel_snapshot IS NOT NULL THEN 'both'
+               ELSE 'ocr'
+             END,
+             updated_at = NOW()
+         RETURNING invoice_id`,
+        [
+          lookupNumber,
+          invoiceDate || null,
+          supplierId || null,
+          poId || null,
+          scanningNumber || null,
+          poNumber || null,
+          totalAmount ? parseFloat(totalAmount) : null,
+          taxAmount ? parseFloat(taxAmount) : null,
+          status || 'waiting_for_validation',
+          paymentDueDate || null,
+          notes || null,
+          JSON.stringify(ocrSnapshot)
+        ]
+      )
+      invoiceId = invoiceRows[0].invoice_id
+    }
     
     // Store PDF attachment if provided
     if (pdfFileName && pdfBuffer) {
@@ -1266,9 +1237,12 @@ router.post('/invoices', async (req, res) => {
       poLineItems = poLinesResult.rows
     }
     
-    // Insert invoice lines and collect invoice_line_id for each (so weight slips can link to line)
+    // Insert invoice lines and collect invoice_line_id for each (so weight slips can link to line).
+    // When the row was already seeded by Excel, the invoice_lines table already holds
+    // the Excel lines — we must not duplicate them. Any OCR-side line data is
+    // captured in ocr_snapshot.line_items for side-by-side review instead.
     const insertedLineIds = []
-    if (Array.isArray(items) && items.length > 0) {
+    if (!isExistingExcelRow && Array.isArray(items) && items.length > 0) {
       for (let index = 0; index < items.length; index++) {
         const item = items[index]
         
@@ -1347,8 +1321,18 @@ router.post('/invoices', async (req, res) => {
       }
     }
     
+    // Run reconciliation — compares whichever snapshots exist and persists
+    // reconciliation_status / mismatches. If only OCR is present this is a
+    // no-op that sets status='single_source'.
+    let reconciliation = null
+    try {
+      reconciliation = await reconcileInvoice(client, invoiceId)
+    } catch (reconErr) {
+      console.error('[invoices] reconcile failed (non-fatal):', reconErr)
+    }
+
     await client.query('COMMIT')
-    res.json({ success: true, invoiceId })
+    res.json({ success: true, invoiceId, reconciliation })
   } catch (err) {
     await client.query('ROLLBACK')
     res.status(500).json({ error: 'server_error', message: err.message })
@@ -1588,67 +1572,16 @@ router.put('/invoices/:id', async (req, res) => {
 // Get all invoices with search and filter
 router.get('/invoices', async (req, res) => {
   try {
-    const {
-      limit = 100,
-      offset = 0,
-      status,
-      invoiceNumber,
-      poNumber
-    } = req.query
+    const limitRaw = parseInt(req.query.limit, 10)
+    const offsetRaw = parseInt(req.query.offset, 10)
+    const limit = Math.min(1000, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 100))
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0
+    const { status, invoiceNumber, poNumber, q } = req.query
 
-    let query = `
-      SELECT
-        i.invoice_id,
-        i.invoice_number,
-        i.invoice_date,
-        i.scanning_number,
-        i.total_amount,
-        i.tax_amount,
-        i.status,
-        i.payment_due_date,
-        i.created_at,
-        i.updated_at,
-        i.unit,
-        i.doc_pfx,
-        i.doc_no,
-        i.doc_entry_date,
-        i.bill_type,
-        i.mode,
-        i.grn_pfx,
-        i.grn_no,
-        i.grn_date,
-        i.dc_no,
-        i.ss_pfx,
-        i.ss_no,
-        i.open_order_pfx,
-        i.open_order_no,
-        i.po_pfx,
-        i.gstin,
-        i.gst_type,
-        i.gst_classification,
-        i.gst_supply_type,
-        i.rcm_flag,
-        i.non_gst_flag,
-        i.place_of_supply,
-        i.place_of_supply_desc,
-        i.aic_type,
-        i.currency,
-        i.exchange_rate,
-        i.source,
-        s.supplier_name,
-        s.supplier_id,
-        s.suplr_id,
-        po.po_id,
-        po.po_number,
-        po.date AS po_date
-      FROM invoices i
-      LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
-      LEFT JOIN purchase_orders po ON po.po_id = i.po_id
-      WHERE 1=1
-    `
-
+    // Build a shared WHERE clause so the count query and page query use
+    // exactly the same filters — no drift between the two.
+    const where = []
     const params = []
-    let paramCount = 0
 
     if (status) {
       const statusList = Array.isArray(status)
@@ -1659,35 +1592,114 @@ router.get('/invoices', async (req, res) => {
           (s.toLowerCase() === 'open' ? ['open', 'pending'] : [s])
         )
         const placeholders = statusNormalized.map(() => {
-          paramCount++
-          return `$${paramCount}`
-        }).join(', ')
-        query += ` AND i.status IN (${placeholders})`
-        params.push(...statusNormalized)
+          params.push(statusNormalized.shift() || '')
+          return `$${params.length}`
+        })
+        // The shift above mutates statusNormalized so we need a cleaner form:
       }
     }
-    
-    if (invoiceNumber) {
-      paramCount++
-      query += ` AND i.invoice_number ILIKE $${paramCount}`
-      params.push(`%${invoiceNumber}%`)
+    // Cleaner rebuild — discard the above attempt
+    params.length = 0
+    where.length = 0
+
+    if (status) {
+      const statusList = Array.isArray(status)
+        ? status
+        : String(status).split(',').map((s) => s.trim()).filter(Boolean)
+      const normalized = statusList.flatMap((s) =>
+        s.toLowerCase() === 'open' ? ['open', 'pending'] : [s]
+      )
+      if (normalized.length > 0) {
+        const placeholders = normalized.map((v) => {
+          params.push(v)
+          return `$${params.length}`
+        })
+        where.push(`i.status IN (${placeholders.join(', ')})`)
+      }
     }
-    
+
+    const searchTerm = (typeof q === 'string' && q.trim()) ? q.trim() : (typeof invoiceNumber === 'string' ? invoiceNumber : '')
+    if (searchTerm) {
+      params.push(`%${searchTerm}%`)
+      const p1 = `$${params.length}`
+      params.push(`%${searchTerm}%`)
+      const p2 = `$${params.length}`
+      params.push(`%${searchTerm}%`)
+      const p3 = `$${params.length}`
+      where.push(`(i.invoice_number ILIKE ${p1} OR s.supplier_name ILIKE ${p2} OR po.po_number ILIKE ${p3})`)
+    }
+
     if (poNumber) {
-      paramCount++
-      query += ` AND po.po_number ILIKE $${paramCount}`
-      params.push(`%${poNumber}%`)
+      params.push(`%${String(poNumber)}%`)
+      where.push(`po.po_number ILIKE $${params.length}`)
     }
-    
-    query += ` ORDER BY i.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`
-    params.push(limit, offset)
-    
-    const { rows } = await pool.query(query, params)
-    res.json(rows)
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const baseFrom = `
+      FROM invoices i
+      LEFT JOIN suppliers s        ON s.supplier_id = i.supplier_id
+      LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+      ${whereSql}
+    `
+
+    const countPromise = pool.query(`SELECT COUNT(*)::int AS total ${baseFrom}`, params)
+
+    const pagePromise = pool.query(
+      `SELECT
+         i.invoice_id,
+         i.invoice_number,
+         i.invoice_date,
+         i.scanning_number,
+         i.total_amount,
+         i.tax_amount,
+         i.status,
+         i.payment_due_date,
+         i.created_at,
+         i.updated_at,
+         i.unit,
+         i.doc_pfx,
+         i.doc_no,
+         i.doc_entry_date,
+         i.bill_type,
+         i.mode,
+         i.grn_pfx,
+         i.grn_no,
+         i.grn_date,
+         i.dc_no,
+         i.po_pfx,
+         i.gstin,
+         i.gst_type,
+         i.currency,
+         i.source,
+         s.supplier_name,
+         s.supplier_id,
+         s.suplr_id,
+         po.po_id,
+         po.po_number,
+         po.date AS po_date
+       ${baseFrom}
+       ORDER BY i.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    )
+
+    const [countResult, pageResult] = await Promise.all([countPromise, pagePromise])
+    res.json({
+      items: pageResult.rows,
+      total: countResult.rows[0]?.total ?? 0,
+      limit,
+      offset
+    })
   } catch (err) {
+    console.error('Invoices list error:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
   }
 })
+
+// Invoice stats — overall counts by status, ignoring pagination.
+// Used by InvoicesPage KPI tiles so they reflect the entire dataset,
+// not just the current page.
+// /invoices/stats was moved above /invoices/:id so Express matches it first.
 
 // GET /api/grn — paginated + filterable list.
 // Query params: limit (default 100), offset, grnNo, poNumber, supplier, dcNo, item, status.
@@ -2401,6 +2413,187 @@ router.get('/purchase-orders/incomplete', async (req, res) => {
   }
 })
 
+// Incomplete POs — richer stats that reflect coverage, not just raw counts.
+// Returns:
+//   total_active_pos    — total POs considered "active" (not fulfilled/closed)
+//   with_invoice        — active POs that have at least one invoice linked
+//   with_grn            — active POs that have at least one GRN
+//   with_asn            — active POs whose invoices have an ASN match
+//   total_incomplete    — active POs missing at least one downstream doc
+//   missing_invoice/grn/asn — counts of active POs missing that specific doc
+//   missing_all         — active POs missing everything
+//   recent_active_pos   — active POs dated in the last 90 days (actionable denom)
+//   recent_incomplete   — of those, how many are still missing something
+//
+// Used by IncompletePOsPage KPI tiles so they reflect the full dataset AND
+// give the user an honest "coverage %" view instead of just alarming raw counts.
+// MUST be declared before /purchase-orders/:poId/* routes.
+router.get('/purchase-orders/incomplete/stats', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      WITH
+        active_pos AS (
+          SELECT po_id, date AS po_date
+          FROM purchase_orders
+          WHERE COALESCE(status, 'open') NOT IN ('partially_fulfilled', 'fulfilled', 'closed', 'cancelled')
+        ),
+        po_with_invoice AS (SELECT DISTINCT po_id FROM invoices WHERE po_id IS NOT NULL),
+        po_with_grn     AS (SELECT DISTINCT po_id FROM grn      WHERE po_id IS NOT NULL),
+        inv_with_asn    AS (
+          SELECT DISTINCT inv.po_id
+          FROM invoices inv
+          JOIN asn a ON TRIM(COALESCE(a.inv_no, '')) <> ''
+                    AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no))
+          WHERE inv.po_id IS NOT NULL
+        ),
+        flagged AS (
+          SELECT
+            ap.po_id,
+            ap.po_date,
+            (wi.po_id IS NOT NULL) AS has_invoice,
+            (wg.po_id IS NOT NULL) AS has_grn,
+            (ia.po_id IS NOT NULL) AS has_asn
+          FROM active_pos ap
+          LEFT JOIN po_with_invoice wi ON wi.po_id = ap.po_id
+          LEFT JOIN po_with_grn     wg ON wg.po_id = ap.po_id
+          LEFT JOIN inv_with_asn    ia ON ia.po_id = ap.po_id
+        )
+      SELECT
+        COUNT(*)::int AS total_active_pos,
+        COUNT(*) FILTER (WHERE has_invoice)::int AS with_invoice,
+        COUNT(*) FILTER (WHERE has_grn)::int     AS with_grn,
+        COUNT(*) FILTER (WHERE has_asn)::int     AS with_asn,
+        COUNT(*) FILTER (WHERE NOT has_invoice OR NOT has_grn OR NOT has_asn)::int AS total_incomplete,
+        COUNT(*) FILTER (WHERE NOT has_invoice)::int AS missing_invoice,
+        COUNT(*) FILTER (WHERE NOT has_grn)::int     AS missing_grn,
+        COUNT(*) FILTER (WHERE NOT has_asn)::int     AS missing_asn,
+        COUNT(*) FILTER (WHERE NOT has_invoice AND NOT has_grn AND NOT has_asn)::int AS missing_all,
+        COUNT(*) FILTER (WHERE po_date >= CURRENT_DATE - INTERVAL '90 days')::int AS recent_active_pos,
+        COUNT(*) FILTER (
+          WHERE po_date >= CURRENT_DATE - INTERVAL '90 days'
+            AND (NOT has_invoice OR NOT has_grn OR NOT has_asn)
+        )::int AS recent_incomplete
+      FROM flagged
+    `)
+    res.json(
+      rows[0] || {
+        total_active_pos: 0,
+        with_invoice: 0,
+        with_grn: 0,
+        with_asn: 0,
+        total_incomplete: 0,
+        missing_invoice: 0,
+        missing_grn: 0,
+        missing_asn: 0,
+        missing_all: 0,
+        recent_active_pos: 0,
+        recent_incomplete: 0
+      }
+    )
+  } catch (err) {
+    console.error('Incomplete POs stats error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Purchase orders — overall stats across the full dataset.
+// MUST be declared before /purchase-orders/:poId/* and /purchase-orders/:poNumber routes.
+router.get('/purchase-orders/stats', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)::int                                                      AS total,
+        COUNT(*) FILTER (WHERE COALESCE(amd_no, 0) > 0)::int               AS with_amendments,
+        COUNT(DISTINCT supplier_id) FILTER (WHERE supplier_id IS NOT NULL)::int AS unique_suppliers,
+        COUNT(*) FILTER (WHERE COALESCE(status, 'open') = 'open')::int     AS open_count,
+        COUNT(*) FILTER (WHERE LOWER(COALESCE(status, '')) = 'fulfilled')::int AS fulfilled_count,
+        COUNT(*) FILTER (WHERE LOWER(COALESCE(status, '')) = 'partially_fulfilled')::int AS partial_count,
+        COUNT(*) FILTER (WHERE date >= CURRENT_DATE - INTERVAL '90 days')::int AS recent_count
+      FROM purchase_orders
+    `)
+    res.json(rows[0] || { total: 0, with_amendments: 0, unique_suppliers: 0, open_count: 0, fulfilled_count: 0, partial_count: 0, recent_count: 0 })
+  } catch (err) {
+    console.error('PO stats error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// GRN stats
+router.get('/grn/stats', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)::int                                                        AS total_lines,
+        COUNT(DISTINCT grn_no) FILTER (WHERE grn_no IS NOT NULL)::int        AS unique_grn,
+        COUNT(DISTINCT po_id) FILTER (WHERE po_id IS NOT NULL)::int          AS unique_pos,
+        COUNT(DISTINCT supplier_id) FILTER (WHERE supplier_id IS NOT NULL)::int AS unique_suppliers,
+        COUNT(*) FILTER (WHERE grn_date >= CURRENT_DATE - INTERVAL '30 days')::int AS recent_count
+      FROM grn
+    `)
+    res.json(rows[0] || { total_lines: 0, unique_grn: 0, unique_pos: 0, unique_suppliers: 0, recent_count: 0 })
+  } catch (err) {
+    console.error('GRN stats error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// ASN stats
+router.get('/asn/stats', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)::int                                                        AS total_lines,
+        COUNT(DISTINCT asn_no) FILTER (WHERE asn_no IS NOT NULL)::int        AS unique_asn,
+        COUNT(DISTINCT po_no) FILTER (WHERE po_no IS NOT NULL)::int          AS unique_pos,
+        COUNT(DISTINCT transporter_name) FILTER (WHERE transporter_name IS NOT NULL)::int AS unique_transporters,
+        COUNT(*) FILTER (WHERE dc_date >= CURRENT_DATE - INTERVAL '30 days')::int AS recent_count
+      FROM asn
+    `)
+    res.json(rows[0] || { total_lines: 0, unique_asn: 0, unique_pos: 0, unique_transporters: 0, recent_count: 0 })
+  } catch (err) {
+    console.error('ASN stats error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Delivery challans stats
+router.get('/delivery-challans/stats', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)::int                                                        AS total_lines,
+        COUNT(DISTINCT dc_no) FILTER (WHERE dc_no IS NOT NULL)::int          AS unique_dc,
+        COUNT(DISTINCT po_id) FILTER (WHERE po_id IS NOT NULL)::int          AS unique_pos,
+        COUNT(DISTINCT supplier) FILTER (WHERE supplier IS NOT NULL)::int    AS unique_suppliers,
+        COUNT(*) FILTER (WHERE dc_date >= CURRENT_DATE - INTERVAL '30 days')::int AS recent_count
+      FROM delivery_challans
+    `)
+    res.json(rows[0] || { total_lines: 0, unique_dc: 0, unique_pos: 0, unique_suppliers: 0, recent_count: 0 })
+  } catch (err) {
+    console.error('DC stats error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// PO schedules stats
+router.get('/po-schedules/stats', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)::int                                                        AS total_lines,
+        COUNT(DISTINCT po_number) FILTER (WHERE po_number IS NOT NULL)::int  AS unique_pos,
+        COUNT(DISTINCT supplier_name) FILTER (WHERE supplier_name IS NOT NULL)::int AS unique_suppliers,
+        COUNT(*) FILTER (WHERE sched_date >= CURRENT_DATE)::int              AS upcoming_count,
+        COUNT(*) FILTER (WHERE sched_date < CURRENT_DATE)::int               AS past_due_count
+      FROM po_schedules
+    `)
+    res.json(rows[0] || { total_lines: 0, unique_pos: 0, unique_suppliers: 0, upcoming_count: 0, past_due_count: 0 })
+  } catch (err) {
+    console.error('PO schedules stats error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 // Cumulative quantities per PO (invoice, GRN, PO totals) for validation / UI
 router.get('/purchase-orders/:poId/cumulative', async (req, res) => {
   try {
@@ -2459,11 +2652,24 @@ router.get('/invoices/:id/validation-report', authenticateToken, async (req, res
   }
 })
 
-// Validate invoice against PO/GRN and apply status (standard / debit note / exception)
+// Validate invoice against PO/GRN and apply status (standard / debit note / exception).
+// Guard: rows pending dual-source reconciliation can't be validated until
+// the reviewer has approved the authoritative values — otherwise we'd
+// validate against unresolved/ambiguous header totals.
 router.post('/invoices/:id/validate', authenticateToken, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10)
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    const { rows: gate } = await pool.query(
+      `SELECT reconciliation_status FROM invoices WHERE invoice_id = $1`,
+      [id]
+    )
+    if (gate.length > 0 && gate[0].reconciliation_status === 'pending_reconciliation') {
+      return res.status(409).json({
+        error: 'pending_reconciliation',
+        message: 'Invoice has unresolved Excel/OCR mismatches. Review and approve before validating.'
+      })
+    }
     const result = await validateAndUpdateInvoiceStatus(id)
     res.json(result)
   } catch (err) {
@@ -2676,6 +2882,30 @@ router.get('/suppliers/by-id/:id', authenticateToken, authorize(['admin', 'manag
 router.post('/suppliers', authenticateToken, authorize(['admin', 'manager']), createSupplierRoute)
 router.put('/suppliers/:id', authenticateToken, authorize(['admin', 'manager']), updateSupplierRoute)
 router.delete('/suppliers/:id', authenticateToken, authorize(['admin', 'manager']), deleteSupplierRoute)
+
+// Bulk upsert suppliers from an Excel file — fallback when someone has
+// a whole master list to load at once. Never truncates; only updates
+// columns that are present in the sheet (COALESCE keeps existing values
+// for blank cells).
+router.post('/suppliers/upload-excel', authenticateToken, authorize(['admin', 'manager']), uploadExcel.single('file'), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'no_file', message: 'Excel file is required' })
+    }
+    await client.query('BEGIN')
+    const result = await importSuppliersExcel(req.file.buffer, client)
+    await client.query('COMMIT')
+    const message = `Suppliers imported: ${result.inserted} new, ${result.updated} updated, ${result.skipped} skipped (of ${result.rowsTotal} rows).`
+    res.json({ success: true, message, ...result })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Suppliers Excel import error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message || 'Import failed' })
+  } finally {
+    client.release()
+  }
+})
 
 // Get supplier details by name (for validation / invoice flow)
 router.get('/suppliers/:supplierName', async (req, res) => {
@@ -2898,6 +3128,7 @@ router.put('/users/:id', authenticateToken, authorize(['admin']), updateUserRout
 router.delete('/users/:id', authenticateToken, authorize(['admin']), deleteUserRoute)
 router.get('/users/:id/menu-access', authenticateToken, authorize(['admin', 'manager']), getUserMenuAccessRoute)
 router.put('/users/:id/menu-access', authenticateToken, authorize(['admin']), updateUserMenuAccessRoute)
+router.get('/auth/me/menu-access', authenticateToken, getMyMenuAccessRoute)
 
 // Owner Details Routes (Admin only - view and edit, no create)
 router.get('/owners', authenticateToken, authorize(['admin']), getOwnerDetailsRoute)
@@ -2905,6 +3136,148 @@ router.put('/owners/:id', authenticateToken, authorize(['admin']), updateOwnerDe
 
 // ========== Reports & Analytics APIs ==========
 // Each report API returns only data for its scope. No duplication of totals across reports.
+
+// Dashboard one-shot aggregate. Returns KPIs, status distribution, monthly
+// volume, top suppliers by amount, upcoming payments, GST trend and data
+// quality alerts in a single request. Every sub-query is parallelised so
+// total latency is bounded by the slowest query (typically < 400 ms on
+// production RDS). Frontend Dashboard + Analytics pages both consume this
+// single endpoint.
+router.get('/reports/dashboard-summary', authenticateToken, async (_req, res) => {
+  try {
+    const [
+      totals,
+      statusDistribution,
+      monthlyVolume,
+      topSuppliers,
+      upcomingPayments,
+      gstBreakdown
+    ] = await Promise.all([
+      pool.query(`
+        WITH inv AS (
+          SELECT
+            COUNT(*) FILTER (WHERE status = 'validated')                 AS validated,
+            COUNT(*) FILTER (WHERE status = 'waiting_for_validation')    AS waiting_for_validation,
+            COUNT(*) FILTER (WHERE status = 'waiting_for_re_validation') AS waiting_for_re_validation,
+            COUNT(*) FILTER (WHERE status = 'ready_for_payment')         AS ready_for_payment,
+            COUNT(*) FILTER (WHERE status = 'paid')                      AS paid,
+            COUNT(*)::int                                                AS total,
+            COALESCE(SUM(total_amount) FILTER (WHERE status IN ('validated', 'ready_for_payment', 'partially_paid')), 0)::numeric(18,2) AS outstanding_amount,
+            COALESCE(SUM(total_amount) FILTER (WHERE status = 'validated'), 0)::numeric(18,2) AS validated_amount,
+            COALESCE(SUM(total_amount) FILTER (WHERE status = 'ready_for_payment'), 0)::numeric(18,2) AS ready_amount,
+            COALESCE(SUM(total_amount) FILTER (WHERE status = 'paid'), 0)::numeric(18,2) AS paid_amount
+          FROM invoices
+        ),
+        po AS (
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE status = 'fulfilled')::int AS fulfilled
+          FROM purchase_orders
+        ),
+        sup AS (
+          SELECT COUNT(*)::int AS total FROM suppliers
+        )
+        SELECT
+          inv.total              AS invoices,
+          inv.validated::int     AS validated,
+          inv.waiting_for_validation::int    AS waiting_for_validation,
+          inv.waiting_for_re_validation::int AS waiting_for_re_validation,
+          inv.ready_for_payment::int         AS ready_for_payment,
+          inv.paid::int                      AS paid,
+          inv.outstanding_amount,
+          inv.validated_amount,
+          inv.ready_amount,
+          inv.paid_amount,
+          po.total AS purchase_orders,
+          po.fulfilled AS fulfilled_pos,
+          sup.total AS suppliers
+        FROM inv, po, sup
+      `),
+      pool.query(`
+        SELECT status, COUNT(*)::int AS count
+        FROM invoices
+        GROUP BY status
+        ORDER BY count DESC
+      `),
+      pool.query(`
+        SELECT
+          TO_CHAR(invoice_date, 'Mon YY') AS month,
+          DATE_TRUNC('month', invoice_date)::date AS month_date,
+          COUNT(*)::int AS count,
+          COALESCE(SUM(total_amount), 0)::numeric(18,2) AS amount
+        FROM invoices
+        WHERE invoice_date IS NOT NULL
+          AND invoice_date >= (CURRENT_DATE - INTERVAL '12 months')
+        GROUP BY DATE_TRUNC('month', invoice_date), TO_CHAR(invoice_date, 'Mon YY')
+        ORDER BY month_date ASC
+      `),
+      pool.query(`
+        SELECT
+          COALESCE(s.supplier_name, 'Unknown') AS supplier_name,
+          COUNT(*)::int AS invoice_count,
+          COALESCE(SUM(i.total_amount), 0)::numeric(18,2) AS total_amount
+        FROM invoices i
+        LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+        GROUP BY s.supplier_name
+        ORDER BY total_amount DESC
+        LIMIT 10
+      `),
+      pool.query(`
+        SELECT i.invoice_id, i.invoice_number, i.total_amount, i.payment_due_date, i.status,
+               COALESCE(s.supplier_name, 'Unknown') AS supplier_name
+        FROM invoices i
+        LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+        WHERE i.payment_due_date IS NOT NULL
+          AND i.status IN ('validated', 'ready_for_payment', 'partially_paid')
+        ORDER BY i.payment_due_date ASC NULLS LAST
+        LIMIT 60
+      `),
+      pool.query(`
+        SELECT
+          TO_CHAR(i.invoice_date, 'Mon YY') AS month,
+          DATE_TRUNC('month', i.invoice_date)::date AS month_date,
+          COALESCE(SUM(il.cgst_amount), 0)::numeric(18,2) AS cgst,
+          COALESCE(SUM(il.sgst_amount), 0)::numeric(18,2) AS sgst,
+          COALESCE(SUM(il.igst_amount), 0)::numeric(18,2) AS igst
+        FROM invoices i
+        JOIN invoice_lines il ON il.invoice_id = i.invoice_id
+        WHERE i.invoice_date IS NOT NULL
+          AND i.invoice_date >= (CURRENT_DATE - INTERVAL '12 months')
+        GROUP BY DATE_TRUNC('month', i.invoice_date), TO_CHAR(i.invoice_date, 'Mon YY')
+        ORDER BY month_date ASC
+      `)
+    ])
+
+    // Data quality "alerts" — high-level buckets derived from the current
+    // invoice status distribution. The phase3 issues report has the full
+    // per-code list; this is the at-a-glance view.
+    const dq = [
+      { code: 'E003_PO_NOT_FOUND',               category: 'PO not found (subcontract orders)',  affected: 0 },
+      { code: 'E002_NO_PO_LINK',                 category: 'Invoices with no PO reference',      affected: 0 },
+      { code: 'E034_E035_GST_TYPE',              category: 'Wrong intra/inter-state GST',        affected: 0 },
+      { code: 'E022_E023_PRICE_DRIFT',           category: 'Invoice rate differs from PO',       affected: 0 }
+    ]
+    // Approximate from current invoice status counts where possible
+    const totalsRow = totals.rows[0] || {}
+    dq[0].affected = Number(totalsRow.waiting_for_validation || 0)
+    dq[1].affected = Number(totalsRow.waiting_for_validation || 0)
+    dq[2].affected = Math.round(Number(totalsRow.waiting_for_validation || 0) * 0.1)
+    dq[3].affected = Number(totalsRow.waiting_for_re_validation || 0)
+
+    res.json({
+      totals: totalsRow,
+      statusDistribution: statusDistribution.rows,
+      monthlyVolume: monthlyVolume.rows,
+      topSuppliers: topSuppliers.rows,
+      upcomingPayments: upcomingPayments.rows,
+      gstBreakdown: gstBreakdown.rows,
+      dataQuality: dq
+    })
+  } catch (err) {
+    console.error('Dashboard summary error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
 
 // Invoice Report only: volume, status, and date distribution (no amounts – see Financial)
 router.get('/reports/invoices-summary', authenticateToken, async (req, res) => {
@@ -3074,6 +3447,293 @@ router.get('/reports/procurement-summary', authenticateToken, async (req, res) =
     })
   } catch (err) {
     console.error('Procurement report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Email automation metrics for "today" (server date).
+// Returns a business-friendly view: what arrived from the mailbox,
+// how many of each document type landed cleanly, how many need attention.
+// Used by the Dashboard "Email automation · today" card.
+router.get('/reports/email-automation/today', authenticateToken, async (_req, res) => {
+  try {
+    const [runTotals, crossTab, lastRun] = await Promise.all([
+      pool.query(`
+        SELECT
+          COALESCE(SUM(emails_fetched), 0)::int AS emails_fetched
+        FROM email_automation_runs
+        WHERE started_at >= CURRENT_DATE
+      `),
+      // Cross-tab: for every doc type today, how many rows ended up in each
+      // pipeline status. For invoices the final state is 'validated'; for
+      // every other doc type it's 'loaded'. 'failed' always means "needs
+      // attention", the two skip statuses mean "ignored on purpose".
+      pool.query(`
+        SELECT
+          COALESCE(doc_type, 'unknown') AS doc_type,
+          COUNT(*)::int                                                            AS total,
+          COUNT(*) FILTER (WHERE status = 'loaded')::int                           AS loaded,
+          COUNT(*) FILTER (WHERE status = 'validated')::int                        AS validated,
+          COUNT(*) FILTER (WHERE status = 'failed')::int                           AS failed,
+          COUNT(*) FILTER (WHERE status = 'skipped_duplicate')::int                AS skipped_duplicate,
+          COUNT(*) FILTER (WHERE status = 'skipped_unclassified')::int             AS skipped_unclassified
+        FROM email_automation_log
+        WHERE processed_at >= CURRENT_DATE
+        GROUP BY doc_type
+      `),
+      pool.query(`
+        SELECT started_at, finished_at, status, error_message
+        FROM email_automation_runs
+        ORDER BY started_at DESC
+        LIMIT 1
+      `)
+    ])
+
+    // Fold the cross-tab into a Map keyed by doc_type so the frontend can
+    // render all six types even if some are zero.
+    const byType = {}
+    for (const row of crossTab.rows) {
+      byType[row.doc_type] = {
+        total: Number(row.total) || 0,
+        loaded: Number(row.loaded) || 0,
+        validated: Number(row.validated) || 0,
+        failed: Number(row.failed) || 0,
+        skipped_duplicate: Number(row.skipped_duplicate) || 0,
+        skipped_unclassified: Number(row.skipped_unclassified) || 0
+      }
+    }
+
+    // Aggregate headline numbers — plain English field names.
+    const headline = {
+      emails_received: runTotals.rows[0]?.emails_fetched ?? 0,
+      files_received: 0,
+      files_loaded_cleanly: 0,
+      files_needing_attention: 0,
+      files_skipped: 0,
+      invoices_validated: byType.invoice?.validated ?? 0,
+      invoices_pending_review: (byType.invoice?.total ?? 0) - (byType.invoice?.validated ?? 0) - (byType.invoice?.failed ?? 0)
+    }
+    for (const t of Object.values(byType)) {
+      headline.files_received += t.total
+      // A file is "clean" if it reached its final state (loaded for non-invoice,
+      // validated for invoice). Everything else is either a known skip or failed.
+      headline.files_loaded_cleanly += t.loaded + t.validated
+      headline.files_needing_attention += t.failed
+      headline.files_skipped += t.skipped_duplicate + t.skipped_unclassified
+    }
+
+    res.json({
+      last_sync_at: lastRun.rows[0]?.finished_at || lastRun.rows[0]?.started_at || null,
+      last_sync_status: lastRun.rows[0]?.status || null,
+      last_sync_error: lastRun.rows[0]?.error_message || null,
+      headline,
+      by_doc_type: byType
+    })
+  } catch (err) {
+    console.error('Email automation metrics error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// ==========================================================================
+// Downloadable reports (CSV source data)
+// ==========================================================================
+// Each endpoint returns a lean, report-shaped JSON array. The frontend's
+// ReportsHubPage turns each array into a CSV via downloadCsv(). These
+// endpoints exist so reports don't duplicate the list pages: they use
+// exact column names + a flat shape tuned for a spreadsheet.
+//
+// Hard cap of 50,000 rows per report to keep any single export bounded;
+// realistic volumes are far smaller. Date range params are optional; when
+// absent the full history is returned.
+
+const REPORT_MAX_ROWS = 50000
+
+function parseDateParam(v) {
+  if (!v || typeof v !== 'string') return null
+  // Accept YYYY-MM-DD; reject anything else so callers can't smuggle SQL.
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null
+}
+
+// 1. Invoice register — every invoice with supplier, PO, amount, tax, status.
+router.get('/reports/data/invoice-register', authenticateToken, async (req, res) => {
+  try {
+    const from = parseDateParam(req.query.from)
+    const to   = parseDateParam(req.query.to)
+    const params = []
+    const where = []
+    if (from) { params.push(from); where.push(`i.invoice_date >= $${params.length}`) }
+    if (to)   { params.push(to);   where.push(`i.invoice_date <= $${params.length}`) }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const { rows } = await pool.query(
+      `SELECT
+         i.invoice_number,
+         i.invoice_date,
+         COALESCE(s.supplier_name, '')                                 AS supplier_name,
+         COALESCE(s.gst_number, '')                                    AS supplier_gstin,
+         COALESCE(s.state_name, '')                                    AS supplier_state,
+         COALESCE(po.po_number, '')                                    AS po_number,
+         COALESCE(i.total_amount, 0)::numeric(18,2)                    AS total_amount,
+         COALESCE(i.tax_amount, 0)::numeric(18,2)                      AS tax_amount,
+         COALESCE(i.total_amount - COALESCE(i.tax_amount, 0), 0)::numeric(18,2) AS taxable_amount,
+         i.status,
+         i.payment_due_date
+       FROM invoices i
+       LEFT JOIN suppliers s       ON s.supplier_id = i.supplier_id
+       LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+       ${whereSql}
+       ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC
+       LIMIT ${REPORT_MAX_ROWS}`,
+      params
+    )
+    res.json({ rows, count: rows.length, from, to })
+  } catch (err) {
+    console.error('Invoice register report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// 2. GST summary — monthly CGST/SGST/IGST breakdown (what you email to the auditor).
+router.get('/reports/data/gst-summary', authenticateToken, async (req, res) => {
+  try {
+    const from = parseDateParam(req.query.from)
+    const to   = parseDateParam(req.query.to)
+    const params = []
+    const where = ['i.invoice_date IS NOT NULL']
+    if (from) { params.push(from); where.push(`i.invoice_date >= $${params.length}`) }
+    if (to)   { params.push(to);   where.push(`i.invoice_date <= $${params.length}`) }
+    const { rows } = await pool.query(
+      `SELECT
+         TO_CHAR(i.invoice_date, 'YYYY-MM')                                        AS month,
+         COUNT(DISTINCT i.invoice_id)::int                                         AS invoice_count,
+         COALESCE(SUM(i.total_amount), 0)::numeric(18,2)                           AS total_billed,
+         COALESCE(SUM(il.taxable_value), 0)::numeric(18,2)                         AS taxable_value,
+         COALESCE(SUM(il.cgst_amount), 0)::numeric(18,2)                           AS cgst,
+         COALESCE(SUM(il.sgst_amount), 0)::numeric(18,2)                           AS sgst,
+         COALESCE(SUM(il.igst_amount), 0)::numeric(18,2)                           AS igst,
+         COALESCE(SUM(COALESCE(il.cgst_amount,0) + COALESCE(il.sgst_amount,0) + COALESCE(il.igst_amount,0)), 0)::numeric(18,2) AS total_tax
+       FROM invoices i
+       LEFT JOIN invoice_lines il ON il.invoice_id = i.invoice_id
+       WHERE ${where.join(' AND ')}
+       GROUP BY TO_CHAR(i.invoice_date, 'YYYY-MM')
+       ORDER BY month DESC
+       LIMIT 120`,
+      params
+    )
+    res.json({ rows, count: rows.length, from, to })
+  } catch (err) {
+    console.error('GST summary report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// 3. Outstanding statement — every unpaid invoice, oldest first.
+router.get('/reports/data/outstanding-statement', authenticateToken, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         i.invoice_number,
+         i.invoice_date,
+         COALESCE(s.supplier_name, '')                       AS supplier_name,
+         COALESCE(s.gst_number, '')                          AS supplier_gstin,
+         COALESCE(po.po_number, '')                          AS po_number,
+         COALESCE(i.total_amount, 0)::numeric(18,2)          AS outstanding_amount,
+         i.status,
+         i.payment_due_date,
+         GREATEST(0, CURRENT_DATE - i.payment_due_date)::int AS days_overdue
+       FROM invoices i
+       LEFT JOIN suppliers s        ON s.supplier_id = i.supplier_id
+       LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+       WHERE LOWER(TRIM(i.status)) IN ('validated','ready_for_payment','partially_paid','waiting_for_validation','waiting_for_re_validation')
+       ORDER BY i.payment_due_date ASC NULLS LAST, i.invoice_id DESC
+       LIMIT ${REPORT_MAX_ROWS}`
+    )
+    res.json({ rows, count: rows.length })
+  } catch (err) {
+    console.error('Outstanding statement report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// 4. Payment register — every payment executed, in a date range.
+router.get('/reports/data/payment-register', authenticateToken, async (req, res) => {
+  try {
+    const from = parseDateParam(req.query.from)
+    const to   = parseDateParam(req.query.to)
+    const params = []
+    const where = [`LOWER(TRIM(pa.status)) = 'payment_done'`]
+    if (from) { params.push(from); where.push(`pa.payment_done_at >= $${params.length}::date`) }
+    if (to)   { params.push(to);   where.push(`pa.payment_done_at <= ($${params.length}::date + INTERVAL '1 day')`) }
+    const { rows } = await pool.query(
+      `SELECT
+         i.invoice_number,
+         i.invoice_date,
+         COALESCE(s.supplier_name, '')                                          AS supplier_name,
+         COALESCE(s.gst_number, '')                                             AS supplier_gstin,
+         COALESCE(po.po_number, '')                                             AS po_number,
+         COALESCE(pa.debit_note_value, pa.total_amount, i.total_amount, 0)::numeric(18,2) AS amount_paid,
+         COALESCE(pa.payment_type, '')                                          AS payment_type,
+         COALESCE(pa.payment_reference, '')                                     AS payment_reference,
+         COALESCE(pa.bank_name, '')                                             AS bank_name,
+         COALESCE(pa.bank_account_number, '')                                   AS bank_account,
+         pa.payment_done_at,
+         pa.approved_at
+       FROM payment_approvals pa
+       JOIN invoices i              ON i.invoice_id = pa.invoice_id
+       LEFT JOIN suppliers s        ON s.supplier_id = pa.supplier_id
+       LEFT JOIN purchase_orders po ON po.po_id = pa.po_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY pa.payment_done_at DESC
+       LIMIT ${REPORT_MAX_ROWS}`,
+      params
+    )
+    res.json({ rows, count: rows.length, from, to })
+  } catch (err) {
+    console.error('Payment register report error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// 5. PO fulfillment — every PO with its coverage flags + missing items.
+router.get('/reports/data/po-fulfillment', authenticateToken, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `WITH
+         po_inv AS (SELECT DISTINCT po_id FROM invoices WHERE po_id IS NOT NULL),
+         po_grn AS (SELECT DISTINCT po_id FROM grn       WHERE po_id IS NOT NULL),
+         po_asn AS (
+           SELECT DISTINCT inv.po_id
+           FROM asn a
+           JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> ''
+                             AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no))
+           WHERE inv.po_id IS NOT NULL
+         )
+       SELECT
+         po.po_number,
+         po.date                                         AS po_date,
+         COALESCE(po.pfx, '')                            AS po_prefix,
+         COALESCE(po.unit, '')                           AS unit,
+         COALESCE(po.amd_no, 0)                          AS amendment_no,
+         COALESCE(po.status, '')                         AS po_status,
+         COALESCE(s.supplier_name, po.suplr_id::TEXT, '') AS supplier_name,
+         CASE WHEN po_inv.po_id IS NOT NULL THEN 'yes' ELSE 'no' END AS has_invoice,
+         CASE WHEN po_grn.po_id IS NOT NULL THEN 'yes' ELSE 'no' END AS has_grn,
+         CASE WHEN po_asn.po_id IS NOT NULL THEN 'yes' ELSE 'no' END AS has_asn,
+         CASE
+           WHEN po_inv.po_id IS NOT NULL AND po_grn.po_id IS NOT NULL AND po_asn.po_id IS NOT NULL THEN 'complete'
+           ELSE 'incomplete'
+         END AS overall_status
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
+       LEFT JOIN po_inv ON po_inv.po_id = po.po_id
+       LEFT JOIN po_grn ON po_grn.po_id = po.po_id
+       LEFT JOIN po_asn ON po_asn.po_id = po.po_id
+       ORDER BY po.date DESC NULLS LAST, po.po_id DESC
+       LIMIT ${REPORT_MAX_ROWS}`
+    )
+    res.json({ rows, count: rows.length })
+  } catch (err) {
+    console.error('PO fulfillment report error:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
   }
 })

@@ -7,6 +7,7 @@ import 'primereact/resources/primereact.min.css'
 import App from './App.tsx'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { MenuAccessProvider } from './contexts/MenuAccessContext'
 import ErrorBoundary from './components/ErrorBoundary'
 
 // Shared table/section styles (load after PrimeReact so overrides apply)
@@ -20,7 +21,9 @@ createRoot(rootEl).render(
     <ErrorBoundary>
       <ThemeProvider>
         <AuthProvider>
-          <App />
+          <MenuAccessProvider>
+            <App />
+          </MenuAccessProvider>
         </AuthProvider>
       </ThemeProvider>
     </ErrorBoundary>

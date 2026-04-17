@@ -1,43 +1,58 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 
 interface Supplier {
   supplier_id?: number
   supplier_name: string
-  supplier_code: string
   suplr_id: string
-  gstin: string
-  pan: string
-  state: string
-  address: string
-  contact_person: string
-  contact_phone: string
+  gst_number: string
+  pan_number: string
+  supplier_address: string
+  city: string
+  state_code: string
+  state_name: string
+  pincode: string
   email: string
+  phone: string
+  mobile: string
+  msme_number: string
+  bank_account_name: string
+  bank_account_number: string
+  bank_ifsc_code: string
   bank_name: string
-  account_number: string
-  ifsc_code: string
+  branch_name: string
+  website: string
+  contact_person: string
 }
 
 const EMPTY: Supplier = {
   supplier_name: '',
-  supplier_code: '',
   suplr_id: '',
-  gstin: '',
-  pan: '',
-  state: '',
-  address: '',
-  contact_person: '',
-  contact_phone: '',
+  gst_number: '',
+  pan_number: '',
+  supplier_address: '',
+  city: '',
+  state_code: '',
+  state_name: '',
+  pincode: '',
   email: '',
+  phone: '',
+  mobile: '',
+  msme_number: '',
+  bank_account_name: '',
+  bank_account_number: '',
+  bank_ifsc_code: '',
   bank_name: '',
-  account_number: '',
-  ifsc_code: ''
+  branch_name: '',
+  website: '',
+  contact_person: ''
 }
 
 function SupplierFormPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [list, setList] = useState<Supplier[]>([])
   const [form, setForm] = useState<Supplier>(EMPTY)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -52,7 +67,7 @@ function SupplierFormPage() {
       const res = await apiFetch('suppliers')
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load suppliers'))
       const body = await res.json()
-      setList(body.items || body.suppliers || body || [])
+      setList(Array.isArray(body) ? body : (body.items || body.suppliers || []))
     } catch (err) {
       setError(getDisplayError(err))
     } finally {
@@ -61,6 +76,17 @@ function SupplierFormPage() {
   }
 
   useEffect(() => { load() }, [])
+
+  // If navigated from SuppliersPage with a supplier in state, pre-populate the form for editing
+  useEffect(() => {
+    const navState = location.state as { supplier?: Supplier } | null
+    if (navState?.supplier?.supplier_id) {
+      setEditingId(navState.supplier.supplier_id)
+      setForm({ ...EMPTY, ...navState.supplier })
+      // Clear the navigation state so a refresh doesn't re-trigger
+      window.history.replaceState({}, '')
+    }
+  }, [location.state])
 
   const onChange = (k: keyof Supplier, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -91,7 +117,7 @@ function SupplierFormPage() {
     }
   }
 
-  const handleEdit = async (row: Supplier) => {
+  const handleEdit = (row: Supplier) => {
     setEditingId(row.supplier_id || null)
     setForm({ ...EMPTY, ...row })
     setError('')
@@ -138,27 +164,38 @@ function SupplierFormPage() {
       <form className="glass-card" onSubmit={handleSave}>
         <h3 className="glass-card__title"><i className="pi pi-id-card" style={{ color: 'var(--brand-600)' }} /> Identity</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginTop: '0.5rem' }}>
-          <Input label="Supplier name *"  value={form.supplier_name}  onChange={(v) => onChange('supplier_name', v)} />
-          <Input label="Supplier code"    value={form.supplier_code}  onChange={(v) => onChange('supplier_code', v)} />
-          <Input label="Supplier ID"      value={form.suplr_id}       onChange={(v) => onChange('suplr_id', v)} />
-          <Input label="GSTIN"            value={form.gstin}          onChange={(v) => onChange('gstin', v.toUpperCase())} />
-          <Input label="PAN"              value={form.pan}            onChange={(v) => onChange('pan', v.toUpperCase())} />
-          <Input label="State"            value={form.state}          onChange={(v) => onChange('state', v)} />
+          <Input label="Supplier name *"  value={form.supplier_name}   onChange={(v) => onChange('supplier_name', v)} />
+          <Input label="Supplier ID"      value={form.suplr_id}        onChange={(v) => onChange('suplr_id', v)} />
+          <Input label="GSTIN"            value={form.gst_number}      onChange={(v) => onChange('gst_number', v.toUpperCase())} />
+          <Input label="PAN"              value={form.pan_number}      onChange={(v) => onChange('pan_number', v.toUpperCase())} />
+          <Input label="MSME number"      value={form.msme_number}     onChange={(v) => onChange('msme_number', v)} />
+          <Input label="Website"          value={form.website}         onChange={(v) => onChange('website', v)} />
         </div>
 
-        <h3 className="glass-card__title" style={{ marginTop: '1.5rem' }}><i className="pi pi-phone" style={{ color: 'var(--accent-violet)' }} /> Contact</h3>
+        <h3 className="glass-card__title" style={{ marginTop: '1.5rem' }}><i className="pi pi-map-marker" style={{ color: 'var(--accent-violet)' }} /> Address</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginTop: '0.5rem' }}>
-          <Input label="Contact person"  value={form.contact_person} onChange={(v) => onChange('contact_person', v)} />
-          <Input label="Phone"           value={form.contact_phone}  onChange={(v) => onChange('contact_phone', v)} />
-          <Input label="Email"           value={form.email}          onChange={(v) => onChange('email', v)} />
-          <Input label="Address"         value={form.address}        onChange={(v) => onChange('address', v)} />
+          <Input label="Address"          value={form.supplier_address} onChange={(v) => onChange('supplier_address', v)} />
+          <Input label="City"             value={form.city}             onChange={(v) => onChange('city', v)} />
+          <Input label="State code"       value={form.state_code}       onChange={(v) => onChange('state_code', v)} />
+          <Input label="State name"       value={form.state_name}       onChange={(v) => onChange('state_name', v)} />
+          <Input label="Pincode"          value={form.pincode}          onChange={(v) => onChange('pincode', v)} />
         </div>
 
-        <h3 className="glass-card__title" style={{ marginTop: '1.5rem' }}><i className="pi pi-credit-card" style={{ color: 'var(--accent-emerald)' }} /> Banking</h3>
+        <h3 className="glass-card__title" style={{ marginTop: '1.5rem' }}><i className="pi pi-phone" style={{ color: 'var(--accent-emerald)' }} /> Contact</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginTop: '0.5rem' }}>
-          <Input label="Bank name"       value={form.bank_name}      onChange={(v) => onChange('bank_name', v)} />
-          <Input label="Account number"  value={form.account_number} onChange={(v) => onChange('account_number', v)} />
-          <Input label="IFSC code"       value={form.ifsc_code}      onChange={(v) => onChange('ifsc_code', v.toUpperCase())} />
+          <Input label="Contact person"  value={form.contact_person}  onChange={(v) => onChange('contact_person', v)} />
+          <Input label="Phone"           value={form.phone}           onChange={(v) => onChange('phone', v)} />
+          <Input label="Mobile"          value={form.mobile}          onChange={(v) => onChange('mobile', v)} />
+          <Input label="Email"           value={form.email}           onChange={(v) => onChange('email', v)} />
+        </div>
+
+        <h3 className="glass-card__title" style={{ marginTop: '1.5rem' }}><i className="pi pi-credit-card" style={{ color: 'var(--accent-amber)' }} /> Banking</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginTop: '0.5rem' }}>
+          <Input label="Account holder"   value={form.bank_account_name}   onChange={(v) => onChange('bank_account_name', v)} />
+          <Input label="Account number"   value={form.bank_account_number} onChange={(v) => onChange('bank_account_number', v)} />
+          <Input label="IFSC code"        value={form.bank_ifsc_code}      onChange={(v) => onChange('bank_ifsc_code', v.toUpperCase())} />
+          <Input label="Bank name"        value={form.bank_name}           onChange={(v) => onChange('bank_name', v)} />
+          <Input label="Branch"           value={form.branch_name}         onChange={(v) => onChange('branch_name', v)} />
         </div>
 
         <div style={{ display: 'flex', gap: '0.7rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
@@ -191,8 +228,8 @@ function SupplierFormPage() {
               }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{s.supplier_name}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    {s.gstin || '—'}{s.state ? ` · ${s.state}` : ''}{s.contact_phone ? ` · ${s.contact_phone}` : ''}
+                  <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                    {[s.gst_number, s.state_name, s.phone || s.mobile].filter(Boolean).join(' · ') || '—'}
                   </div>
                 </div>
                 <button className="action-btn action-btn--ghost" onClick={() => handleEdit(s)}>

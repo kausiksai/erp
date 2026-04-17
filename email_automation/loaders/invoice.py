@@ -17,13 +17,17 @@ Design
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
-from typing import Any, Dict, List, Sequence, Tuple
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from psycopg2.extensions import connection as PGConnection
-from psycopg2.extras import execute_values
+from psycopg2.extras import Json, execute_values
 
 from ._common import LoadResult, POResolver, SupplierResolver
 
@@ -67,6 +71,10 @@ INVOICE_COLS = (
     "po_pfx",
     "gst_type",
     "place_of_supply_desc",
+    # Phase 3 — dual-source reconciliation
+    "excel_snapshot",
+    "excel_received_at",
+    "reconciliation_status",
 )
 
 INVOICE_LINE_COLS = (
@@ -128,6 +136,99 @@ def _invoice_total(lines: Sequence[Dict[str, Any]]) -> Tuple[Any, Any]:
     return total, tax
 
 
+# ----------------------------------------------------------------------------
+# Dual-source reconciliation — excel_snapshot builder.
+# ----------------------------------------------------------------------------
+# Mirrors the shape produced by backend/src/reconcile.js `buildExcelSnapshot`
+# so the Node comparator can treat both JSONB snapshots symmetrically. Kept
+# in lock-step with the JS version; if you add a field there, add it here too.
+# ----------------------------------------------------------------------------
+
+_GSTIN_STRIP = re.compile(r"[^A-Z0-9]")
+
+
+def _norm_id(v: Any) -> Optional[str]:
+    if v is None or v == "":
+        return None
+    s = _GSTIN_STRIP.sub("", str(v).upper())
+    return s or None
+
+
+def _num(v: Any) -> Optional[float]:
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if v == v else None  # NaN check
+    if isinstance(v, Decimal):
+        return float(v)
+    try:
+        return float(str(v).replace(",", "").replace("\u20b9", "").strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _iso_date(v: Any) -> Optional[str]:
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v.date().isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
+    s = str(v).strip()
+    return s[:10] if s else None
+
+
+def _sum_lines(lines: Sequence[Dict[str, Any]], *keys: str) -> Optional[float]:
+    total = 0.0
+    found = False
+    for ln in lines:
+        for k in keys:
+            v = _num(ln.get(k))
+            if v is not None:
+                total += v
+                found = True
+                break
+    return round(total, 2) if found else None
+
+
+def _build_excel_snapshot(
+    header: Dict[str, Any], lines: Sequence[Dict[str, Any]]
+) -> Dict[str, Any]:
+    cgst = _sum_lines(lines, "cgst_amount") or 0.0
+    sgst = _sum_lines(lines, "sgst_amount") or 0.0
+    igst = _sum_lines(lines, "igst_amount") or 0.0
+    tax_total = cgst + sgst + igst
+    return {
+        "invoice_number": header.get("bill_no") or header.get("invoice_number"),
+        "invoice_date": _iso_date(header.get("bill_date") or header.get("invoice_date")),
+        "supplier_gstin": _norm_id(header.get("gstin")),
+        "supplier_name": header.get("supplier_name"),
+        "po_number": header.get("po_no") or header.get("po_number"),
+        "subtotal": _sum_lines(lines, "taxable_value", "assessable_value"),
+        "cgst": round(cgst, 2) if cgst else None,
+        "sgst": round(sgst, 2) if sgst else None,
+        "igst": round(igst, 2) if igst else None,
+        "tax_amount": round(tax_total, 2) if tax_total else None,
+        "total_amount": _sum_lines(lines, "line_total", "net_amount"),
+        "line_items": [
+            {
+                "sequence": i + 1,
+                "item_name": ln.get("item_name"),
+                "hsn_sac": ln.get("hsn_sac"),
+                "quantity": _num(ln.get("billed_qty")),
+                "uom": ln.get("uom"),
+                "rate": _num(ln.get("rate")),
+                "taxable_value": _num(ln.get("taxable_value") or ln.get("assessable_value")),
+                "cgst_amount": _num(ln.get("cgst_amount")),
+                "sgst_amount": _num(ln.get("sgst_amount")),
+                "igst_amount": _num(ln.get("igst_amount")),
+                "line_total": _num(ln.get("line_total") or ln.get("net_amount")),
+            }
+            for i, ln in enumerate(lines)
+        ],
+    }
+
+
 def load(
     conn: PGConnection,
     invoices: Sequence[Dict[str, Any]],
@@ -168,33 +269,65 @@ def load(
         result.duration_seconds = time.time() - t0
         return result
 
-    # -- Step 2: filter invoices already present in DB ------------------------
-    # Use (supplier_id, invoice_number) uniqueness added in phase 2 migration.
+    # -- Step 2: split into (new, ocr-first merge, already-complete) ---------
+    # Dual-source world: a row may already exist because the portal uploaded
+    # an OCR'd PDF before the Excel arrived. For those we must UPDATE the
+    # existing row with excel_snapshot (and flip source to 'both') rather
+    # than skip. Rows that already have excel_snapshot are genuinely done.
     keys = list({(r["supplier_id"], r["header"]["bill_no"]) for r in resolved})
-    existing: set[Tuple[int, str]] = set()
+    existing: Dict[Tuple[int, str], Dict[str, Any]] = {}
     with conn.cursor() as cur:
-        # Postgres does not accept a row-valued ANY array trivially; use a
-        # temp-values approach with VALUES ... JOIN for efficiency.
-        # For typical daily volume (<5k invoices) a simple IN works fine.
-        # We chunk to keep SQL text reasonable.
         chunk = 1000
         for i in range(0, len(keys), chunk):
             sub = keys[i : i + chunk]
             cur.execute(
-                "SELECT supplier_id, invoice_number FROM invoices "
-                "WHERE (supplier_id, invoice_number) IN %s",
+                "SELECT invoice_id, supplier_id, invoice_number, excel_snapshot "
+                "FROM invoices WHERE (supplier_id, invoice_number) IN %s",
                 (tuple(sub),),
             )
-            for sid, num in cur.fetchall():
-                existing.add((sid, num))
+            for inv_id, sid, num, excel_snap in cur.fetchall():
+                existing[(sid, num)] = {
+                    "invoice_id": inv_id,
+                    "has_excel": excel_snap is not None,
+                }
 
-    new_invoices = [
-        r
-        for r in resolved
-        if (r["supplier_id"], r["header"]["bill_no"]) not in existing
-    ]
-    result.rows_skipped = len(resolved) - len(new_invoices)
-    result.extras["already_present"] = result.rows_skipped
+    new_invoices: List[Dict[str, Any]] = []
+    merge_invoices: List[Dict[str, Any]] = []  # OCR-first rows: just add excel_snapshot
+    for r in resolved:
+        key = (r["supplier_id"], r["header"]["bill_no"])
+        meta = existing.get(key)
+        if meta is None:
+            new_invoices.append(r)
+        elif not meta["has_excel"]:
+            r["_existing_invoice_id"] = meta["invoice_id"]
+            merge_invoices.append(r)
+        # else: already has excel_snapshot → genuinely skip
+
+    already_present = sum(1 for r in resolved if existing.get(
+        (r["supplier_id"], r["header"]["bill_no"])
+    ) and existing[(r["supplier_id"], r["header"]["bill_no"])]["has_excel"])
+    result.rows_skipped = already_present
+    result.extras["already_present"] = already_present
+    result.extras["merged_into_ocr_rows"] = len(merge_invoices)
+
+    # -- Step 2a: merge path — update OCR-first rows with excel_snapshot ------
+    if merge_invoices:
+        with conn.cursor() as cur:
+            for r in merge_invoices:
+                snapshot = _build_excel_snapshot(r["header"], r["lines"])
+                cur.execute(
+                    """
+                    UPDATE invoices
+                       SET excel_snapshot        = %s,
+                           excel_received_at     = NOW(),
+                           source                = 'both',
+                           reconciliation_status = 'pending_reconciliation',
+                           bill_register_run_id  = %s,
+                           updated_at            = NOW()
+                     WHERE invoice_id = %s
+                    """,
+                    (Json(snapshot), str(run_id), r["_existing_invoice_id"]),
+                )
 
     if not new_invoices:
         result.duration_seconds = time.time() - t0
@@ -206,6 +339,7 @@ def load(
     for r in new_invoices:
         h = r["header"]
         total_amount, tax_amount = _invoice_total(r["lines"])
+        excel_snapshot = _build_excel_snapshot(h, r["lines"])
         header_rows.append(
             (
                 h["bill_no"],
@@ -235,7 +369,9 @@ def load(
                 h.get("aic_type"),
                 h.get("currency"),
                 h.get("exchange_rate"),
-                "email_automation",
+                # source: 'excel' is the reconciliation vocabulary; legacy
+                # 'email_automation' rows are migrated by migration_invoice_reconciliation.sql.
+                "excel",
                 str(run_id),
                 # Phase 2.2 additions
                 h.get("bill_type"),
@@ -245,6 +381,10 @@ def load(
                 h.get("po_pfx"),
                 h.get("gst_type"),
                 h.get("place_of_supply_desc"),
+                # Phase 3 — dual-source reconciliation
+                Json(excel_snapshot),
+                datetime.utcnow(),
+                "single_source",
             )
         )
 

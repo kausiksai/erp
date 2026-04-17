@@ -388,21 +388,38 @@ CREATE INDEX IF NOT EXISTS idx_asn_inv_no ON asn (inv_no);
 -- Invoices
 -- ============================================
 CREATE TABLE IF NOT EXISTS invoices (
-  invoice_id         BIGSERIAL PRIMARY KEY,
-  invoice_number     TEXT        NOT NULL,
-  invoice_date       DATE,
-  supplier_id        BIGINT      REFERENCES suppliers(supplier_id),
-  po_id              BIGINT      REFERENCES purchase_orders(po_id),
-  scanning_number   TEXT,
-  po_number          TEXT,
-  total_amount       DECIMAL(15, 2),
-  tax_amount         DECIMAL(15, 2),
-  status             TEXT        DEFAULT 'waiting_for_validation',
-  payment_due_date   DATE,
-  debit_note_value   DECIMAL(15, 2),
-  notes              TEXT,
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  invoice_id              BIGSERIAL PRIMARY KEY,
+  invoice_number          TEXT        NOT NULL,
+  invoice_date            DATE,
+  supplier_id             BIGINT      REFERENCES suppliers(supplier_id),
+  po_id                   BIGINT      REFERENCES purchase_orders(po_id),
+  scanning_number         TEXT,
+  po_number               TEXT,
+  total_amount            DECIMAL(15, 2),
+  tax_amount              DECIMAL(15, 2),
+  status                  TEXT        DEFAULT 'waiting_for_validation',
+  payment_due_date        DATE,
+  debit_note_value        DECIMAL(15, 2),
+  notes                   TEXT,
+  -- Dual-source reconciliation (see scripts/migration_invoice_reconciliation.sql)
+  source                  TEXT        DEFAULT 'excel'
+                                      CHECK (source IN ('excel', 'ocr', 'both')),
+  excel_snapshot          JSONB,
+  excel_received_at       TIMESTAMPTZ,
+  ocr_snapshot            JSONB,
+  ocr_received_at         TIMESTAMPTZ,
+  reconciliation_status   TEXT        DEFAULT 'single_source'
+                                      CHECK (reconciliation_status IN (
+                                        'single_source',
+                                        'auto_matched',
+                                        'pending_reconciliation',
+                                        'manually_approved'
+                                      )),
+  mismatches              JSONB,
+  reviewed_by             BIGINT      REFERENCES users(user_id),
+  reviewed_at             TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (invoice_number)
 );
 
@@ -413,6 +430,10 @@ CREATE INDEX IF NOT EXISTS idx_invoices_po ON invoices (po_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_po_number ON invoices (po_number);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices (status);
 CREATE INDEX IF NOT EXISTS idx_invoices_po_status ON invoices (po_id, status);
+CREATE INDEX IF NOT EXISTS idx_invoices_reconciliation_status
+  ON invoices (reconciliation_status)
+  WHERE reconciliation_status = 'pending_reconciliation';
+CREATE INDEX IF NOT EXISTS idx_invoices_source ON invoices (source);
 
 -- ============================================
 -- Invoice Lines
