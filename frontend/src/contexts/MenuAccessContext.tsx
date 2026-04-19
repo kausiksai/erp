@@ -38,6 +38,14 @@ interface MenuAccessState {
 
 const ALWAYS_ALLOWED_PATHS = new Set<string>(['/', '/profile'])
 
+// Tab-sibling groups: routes that share a single menu entry + single page
+// component. Granting any path in the group implicitly grants the others,
+// so the admin toolbar doesn't need three separate permission toggles for
+// "Payments" when the sidebar surfaces only one entry.
+const SIBLING_GROUPS: string[][] = [
+  ['/payments/approve', '/payments/ready', '/payments/history']
+]
+
 const MenuAccessContext = createContext<MenuAccessState>({
   loading: true,
   source: null,
@@ -101,6 +109,12 @@ export function MenuAccessProvider({ children }: { children: ReactNode }) {
       if (!path) return false
       if (ALWAYS_ALLOWED_PATHS.has(path)) return true
       if (allowedPaths.has(path)) return true
+      // Tab-sibling rule — grant all paths in a group if any one is allowed.
+      for (const group of SIBLING_GROUPS) {
+        if (group.includes(path) && group.some((g) => allowedPaths.has(g))) {
+          return true
+        }
+      }
       // Allow child paths when the parent is allowed. e.g. /invoices/validate/42
       // should work when /invoices/validate is allowed.
       for (const p of allowedPaths) {
