@@ -135,7 +135,7 @@ function Login() {
                     autoComplete="username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="sriram"
+                    placeholder="Username or Email"
                     required
                     disabled={loading}
                   />
