@@ -1180,7 +1180,7 @@ router.post('/invoices', async (req, res) => {
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
                  'ocr', $12::jsonb, NOW())
-         ON CONFLICT (invoice_number) DO UPDATE
+         ON CONFLICT ON CONSTRAINT uq_invoices_supplier_number DO UPDATE
          SET invoice_date = EXCLUDED.invoice_date,
              supplier_id = EXCLUDED.supplier_id,
              po_id = EXCLUDED.po_id,

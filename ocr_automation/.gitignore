@@ -1,0 +1,9 @@
+# Runtime artefacts — never commit these
+.env
+.lock
+logs/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
