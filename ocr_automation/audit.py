@@ -31,9 +31,11 @@ LOG_SAVED = "saved"
 LOG_RECONCILED = "reconciled"
 LOG_FAILED = "failed"
 LOG_SKIPPED_DUPLICATE = "skipped_duplicate"
+LOG_PO_CHECK = "po_check"
 VALID_LOG_STATUSES = {
     LOG_DOWNLOADED, LOG_EXTRACTED, LOG_SAVED,
     LOG_RECONCILED, LOG_FAILED, LOG_SKIPPED_DUPLICATE,
+    LOG_PO_CHECK,
 }
 
 # ---- drive_synced_files statuses ------------------------------------------

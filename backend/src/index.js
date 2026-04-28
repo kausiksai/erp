@@ -850,6 +850,57 @@ router.post('/invoices/:id/reconcile', authenticateToken, async (req, res) => {
   }
 })
 
+// List POs flagged by the nightly po_check stage — goods received (GRN exists)
+// but no invoice raised yet (neither Excel nor OCR). Populated by
+// `python -m ocr_automation.po_check`. Sorted oldest-waiting first so finance
+// can chase the most overdue suppliers.
+//
+// Query params:
+//   ?supplier_id=42        — filter to one supplier
+//   ?min_days=14           — only show POs waiting ≥ N days
+//   ?limit=200&offset=0    — pagination (default limit 500)
+router.get('/unraised-invoices', async (req, res) => {
+  try {
+    const supplierId = req.query.supplier_id ? parseInt(req.query.supplier_id, 10) : null
+    const minDays = req.query.min_days ? parseInt(req.query.min_days, 10) : null
+    const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000)
+    const offset = parseInt(req.query.offset, 10) || 0
+
+    const where = []
+    const params = []
+    if (supplierId) { params.push(supplierId); where.push(`supplier_id = $${params.length}`) }
+    if (minDays != null && Number.isFinite(minDays)) {
+      params.push(minDays); where.push(`days_since_grn >= $${params.length}`)
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+
+    const totalQ = `SELECT COUNT(*)::int AS n FROM v_unraised_invoices ${whereSql}`
+    const listQ = `
+      SELECT po_id, po_number, supplier_id, supplier_name,
+             latest_grn_no, latest_grn_date, days_since_grn,
+             expected_amount, first_flagged_at, last_seen_at,
+             terms, po_status
+      FROM v_unraised_invoices
+      ${whereSql}
+      ORDER BY days_since_grn DESC NULLS LAST, latest_grn_date ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `
+    const [{ rows: totals }, { rows }] = await Promise.all([
+      pool.query(totalQ, params),
+      pool.query(listQ, params),
+    ])
+    res.json({
+      total: totals[0]?.n ?? 0,
+      limit,
+      offset,
+      rows,
+    })
+  } catch (err) {
+    console.error('[unraised-invoices]', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 // List invoice attachments (invoice PDF from invoice_attachments + weight slips from invoice_weight_attachments)
 router.get('/invoices/:id/attachments', async (req, res) => {
   try {

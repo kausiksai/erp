@@ -44,15 +44,30 @@ case $EMAIL_EXIT in
 esac
 
 # ---- Phase 2: OCR automation -------------------------------------------------
-echo "[nightly_pipeline] phase 2/2: ocr_automation"
+echo "[nightly_pipeline] phase 2/3: ocr_automation"
 "$PY" -m ocr_automation.run
 OCR_EXIT=$?
 echo "[nightly_pipeline] ocr_automation exit=$OCR_EXIT"
 
+# ---- Phase 3: PO check -------------------------------------------------------
+# Always run, even if OCR was partial — po_check works against whatever the
+# email + OCR phases managed to load. Skip only if OCR failed fatally
+# (exit 40 = all OCR files failed) so we don't flag POs spuriously.
+if [ $OCR_EXIT -eq 40 ] || [ $OCR_EXIT -eq 99 ]; then
+  echo "[nightly_pipeline] OCR phase failed fatally (exit=$OCR_EXIT) — skipping PO check"
+  PO_CHECK_EXIT=0
+else
+  echo "[nightly_pipeline] phase 3/3: po_check"
+  "$PY" -m ocr_automation.po_check
+  PO_CHECK_EXIT=$?
+  echo "[nightly_pipeline] po_check exit=$PO_CHECK_EXIT"
+fi
+
 echo "[nightly_pipeline] finished at $(date '+%Y-%m-%d %H:%M:%S')"
 
-# Surface the worst exit code so cron/systemd can alert on either phase failing.
-if [ $OCR_EXIT -ne 0 ]; then
-  exit $OCR_EXIT
-fi
-exit $EMAIL_EXIT
+# Surface the worst exit code so cron/systemd can alert on any phase failing.
+WORST=0
+[ $EMAIL_EXIT     -ne 0 ] && WORST=$EMAIL_EXIT
+[ $OCR_EXIT       -ne 0 ] && WORST=$OCR_EXIT
+[ $PO_CHECK_EXIT  -ne 0 ] && WORST=$PO_CHECK_EXIT
+exit $WORST
