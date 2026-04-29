@@ -12,11 +12,14 @@ exactly the same way single uploads do, and reconciliation runs server-side.
 
 from __future__ import annotations
 
+import io
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import requests
+from pypdf import PdfReader, PdfWriter
+from pypdf.errors import PdfReadError
 
 from .config import CONFIG
 
@@ -53,6 +56,38 @@ def _auth_headers() -> Dict[str, str]:
     if CONFIG.backend.auth_token:
         return {"Authorization": f"Bearer {CONFIG.backend.auth_token}"}
     return {}
+
+
+def slice_pdf_to_first_n_pages(
+    pdf_bytes: bytes, max_pages: int
+) -> Tuple[bytes, int, int]:
+    """Return (sliced_bytes, original_page_count, kept_page_count).
+
+    If parsing fails or the PDF already has ≤ max_pages, the input is
+    returned unchanged. Used to keep Landing AI Parse fast and cheap on
+    multi-document scans (invoice + GRN + DC bundled in one file).
+    """
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes), strict=False)
+        total = len(reader.pages)
+    except (PdfReadError, Exception) as exc:  # noqa: BLE001
+        log.warning("could not read PDF for slicing (%s) — sending full file", exc)
+        return pdf_bytes, 0, 0
+
+    if total <= max_pages:
+        return pdf_bytes, total, total
+
+    try:
+        writer = PdfWriter()
+        for i in range(max_pages):
+            writer.add_page(reader.pages[i])
+        out = io.BytesIO()
+        writer.write(out)
+        sliced = out.getvalue()
+        return sliced, total, max_pages
+    except Exception as exc:  # noqa: BLE001
+        log.warning("PDF slicing failed (%s) — sending full file", exc)
+        return pdf_bytes, total, total
 
 
 def extract(pdf_bytes: bytes, filename: str, mime_type: str) -> ExtractResult:

@@ -109,6 +109,12 @@ OCR_CONCURRENCY=10
 OCR_REQUEST_TIMEOUT_SECONDS=180
 OCR_MAX_RETRIES=2
 
+# Send only the first N PDF pages to Landing AI (default 2). Multi-doc bundles
+# (invoice + GRN + DC + packing slip in one file) waste credits and confuse
+# the extract model. The full original PDF is still stored in
+# invoice_attachments — we only slice the bytes we send to OCR.
+OCR_MAX_PAGES_FOR_EXTRACTION=2
+
 # Disable IPv4 forcing on AWS (IPv6 works fine there). Locked off on Mac dev.
 OCR_FORCE_IPV4=0
 

@@ -27,6 +27,7 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import logging
 import sys
@@ -50,8 +51,16 @@ from .drive import (
     download_file,
     list_invoice_files,
 )
-from .extractor import ExtractionError, SaveError, extract, save
+from .extractor import (
+    ExtractionError,
+    SaveError,
+    extract,
+    save,
+    slice_pdf_to_first_n_pages,
+)
 from .logger import setup_logging
+
+PDF_MIME = "application/pdf"
 
 log = logging.getLogger("ocr_automation.run")
 
@@ -126,20 +135,51 @@ def _process_one_file(run_id: UUID, f: DriveFile) -> FileOutcome:
     )
 
     try:
-        # 1) Download
+        # 1) Download (full original — this is what we persist to invoice_attachments)
         log.info("download file_id=%s name=%s", f.file_id, f.name)
         data = download_file(f.file_id)
         sha = hashlib.sha256(data).hexdigest()
+        original_b64 = base64.b64encode(data).decode("ascii")
         audit.log_file_event(
             run_id, f.file_id, f.name, audit.LOG_DOWNLOADED,
             duration_ms=int((time.monotonic() - started) * 1000),
             details={"size_bytes": len(data), "sha256": sha},
         )
 
-        # 2) Extract via existing /api/invoices/upload
+        # 1b) Slice PDFs to first N pages for the extraction call. Multi-doc
+        #     bundles (invoice + GRN + DC + packing slip) waste Landing AI
+        #     credits and confuse the extract model. Images are passed through.
+        max_pages = CONFIG.runtime.max_extraction_pages
+        slicing_details = {"sliced": False}
+        if f.mime_type == PDF_MIME:
+            sliced_bytes, total_pages, kept_pages = slice_pdf_to_first_n_pages(
+                data, max_pages
+            )
+            if total_pages > 0 and kept_pages < total_pages:
+                slicing_details = {
+                    "sliced": True,
+                    "original_pages": total_pages,
+                    "sent_pages": kept_pages,
+                    "original_bytes": len(data),
+                    "sliced_bytes": len(sliced_bytes),
+                }
+                log.info(
+                    "slice file_id=%s pages %d → %d (bytes %d → %d)",
+                    f.file_id, total_pages, kept_pages,
+                    len(data), len(sliced_bytes),
+                )
+        else:
+            sliced_bytes = data
+
+        # 2) Extract via existing /api/invoices/upload (using the SLICED bytes)
         t1 = time.monotonic()
         log.info("extract file_id=%s name=%s", f.file_id, f.name)
-        extract_result = extract(data, f.name, f.mime_type)
+        extract_result = extract(sliced_bytes, f.name, f.mime_type)
+        # Always persist the ORIGINAL full file in invoice_attachments — the
+        # backend stores whatever pdfBuffer we hand it, so override the sliced
+        # base64 that came back from /upload with the original.
+        extract_result.pdf_buffer_b64 = original_b64
+        extract_result.pdf_file_name = f.name
         audit.log_file_event(
             run_id, f.file_id, f.name, audit.LOG_EXTRACTED,
             invoice_number=(extract_result.invoice_data or {}).get("invoiceNumber"),
@@ -147,6 +187,7 @@ def _process_one_file(run_id: UUID, f: DriveFile) -> FileOutcome:
             details={
                 "extracted": extract_result.extracted,
                 "extraction_error": extract_result.extraction_error,
+                **slicing_details,
             },
         )
         if not extract_result.extracted:

@@ -104,6 +104,7 @@ class RuntimeConfig:
     log_level: str
     concurrency: int
     max_retries: int
+    max_extraction_pages: int  # how many leading PDF pages to send to OCR
 
 
 @dataclass(frozen=True)
@@ -187,11 +188,17 @@ def load_config() -> AppConfig:
         log_level = _optional("LOG_LEVEL", "INFO").upper()
         if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigError(f"LOG_LEVEL must be a standard logging level, got {log_level!r}")
+        max_pages = _int("OCR_MAX_PAGES_FOR_EXTRACTION", 2)
+        if max_pages < 1 or max_pages > 50:
+            raise ConfigError(
+                f"OCR_MAX_PAGES_FOR_EXTRACTION must be in [1, 50], got {max_pages}"
+            )
         runtime = RuntimeConfig(
             timezone=_optional("TIMEZONE", "Asia/Kolkata"),
             log_level=log_level,
             concurrency=concurrency,
             max_retries=max_retries,
+            max_extraction_pages=max_pages,
         )
 
         paths = _load_paths()
