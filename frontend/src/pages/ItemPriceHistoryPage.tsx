@@ -47,6 +47,7 @@ interface SuggestionItem {
   po_count: number
   latest_unit_cost: number | string | null
   latest_po_date: string | null
+  match_field?: 'item_id' | 'description'
 }
 
 const SLOT_LABELS = ['Latest', 'Previous', 'Earliest']
@@ -233,7 +234,7 @@ export default function ItemPriceHistoryPage() {
           Item price history
         </h1>
         <p style={{ margin: '0.3rem 0 0', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          Type any item code to compare unit cost across the last 3 distinct POs. Spot price drift before approving a new PO.
+          Search by item code <em>or</em> part name (description) to compare unit cost across the last 3 distinct POs. Spot price drift before approving a new PO.
         </p>
       </header>
 
@@ -263,7 +264,7 @@ export default function ItemPriceHistoryPage() {
             onChange={(e) => setItemCode(e.target.value)}
             onFocus={() => itemCode.trim() && setSuggestionsOpen(true)}
             onKeyDown={onKeyDown}
-            placeholder="Start typing… e.g. CS001 or CT036"
+            placeholder="Start typing… item code (CS001) or part name (HYDRAULIC OIL)"
             style={{
               flex: 1,
               border: 'none',
@@ -333,47 +334,76 @@ export default function ItemPriceHistoryPage() {
                 <i className="pi pi-spin pi-spinner" /> Looking up matching items…
               </div>
             )}
-            {suggestions.map((s, i) => (
-              <button
-                key={s.item_id}
-                type="button"
-                role="option"
-                aria-selected={i === highlight}
-                onMouseEnter={() => setHighlight(i)}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  setItemCode(s.item_id)
-                  setSuggestionsOpen(false)
-                  search(s.item_id)
-                }}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(120px, max-content) 1fr auto auto',
-                  alignItems: 'center',
-                  gap: '0.85rem',
-                  padding: '0.55rem 0.85rem',
-                  border: 'none',
-                  background: i === highlight ? 'var(--surface-1)' : 'transparent',
-                  cursor: 'pointer',
-                  borderBottom: '1px solid var(--border-subtle)',
-                }}
-              >
-                <code style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 800, color: 'var(--brand-600)', fontSize: '0.84rem' }}>
-                  {highlightMatch(s.item_id, itemCode)}
-                </code>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.description || ''}>
-                  {s.description || '—'}
-                </span>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                  {s.po_count} PO{s.po_count === 1 ? '' : 's'}
-                </span>
-                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                  {s.latest_unit_cost != null ? formatINRSymbol(s.latest_unit_cost) : ''}
-                </span>
-              </button>
-            ))}
+            {suggestions.map((s, i) => {
+              const matchedOnDesc = s.match_field === 'description'
+              return (
+                <button
+                  key={s.item_id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === highlight}
+                  onMouseEnter={() => setHighlight(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setItemCode(s.item_id)
+                    setSuggestionsOpen(false)
+                    search(s.item_id)
+                  }}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(120px, max-content) 1fr auto auto',
+                    alignItems: 'center',
+                    gap: '0.85rem',
+                    padding: '0.55rem 0.85rem',
+                    border: 'none',
+                    background: i === highlight ? 'var(--surface-1)' : 'transparent',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <code
+                    style={{
+                      fontFamily: 'var(--font-mono, monospace)',
+                      fontWeight: 800,
+                      color: 'var(--brand-600)',
+                      fontSize: '0.84rem',
+                    }}
+                  >
+                    {matchedOnDesc ? s.item_id : highlightMatch(s.item_id, itemCode)}
+                  </code>
+                  <span
+                    style={{
+                      color: matchedOnDesc ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      fontWeight: matchedOnDesc ? 600 : 400,
+                      fontSize: '0.82rem',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={s.description || ''}
+                  >
+                    {matchedOnDesc
+                      ? highlightMatch(s.description || '—', itemCode)
+                      : (s.description || '—')}
+                  </span>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                    {s.po_count} PO{s.po_count === 1 ? '' : 's'}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      color: 'var(--text-primary)',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {s.latest_unit_cost != null ? formatINRSymbol(s.latest_unit_cost) : ''}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

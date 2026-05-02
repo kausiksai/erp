@@ -943,14 +943,21 @@ router.get('/unraised-invoices', async (req, res) => {
   }
 })
 
-// Item code autocomplete — feeds the search box on the Item Price History
-// page. Returns up to 20 item codes that contain the query, ranked so codes
-// that *start* with the query come before codes that merely contain it.
+// Item autocomplete — feeds the search box on the Item Price History page.
+// Matches against BOTH item_id (e.g. "CS001") and description1 (the part
+// name e.g. "HYDRAULIC OIL 68"), ranked:
+//   1. item_id  prefix  ("cs0" → "CS001…")
+//   2. item_id  contains
+//   3. desc     prefix  ("hyd" → "HYDRAULIC OIL…")
+//   4. desc     contains
+// Description matches require q.length >= 2 to keep noise down on
+// single-character queries.
 //
-//   GET /api/items/search?q=cs0  &limit=20
+//   GET /api/items/search?q=hydraulic&limit=20
 //
 // Response: [
-//   { item_id, description, po_count, latest_unit_cost, latest_po_date }
+//   { item_id, description, po_count, latest_unit_cost,
+//     latest_po_date, match_field }
 // ]
 router.get('/items/search', async (req, res) => {
   try {
@@ -958,31 +965,42 @@ router.get('/items/search', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50)
     if (q.length < 1) return res.json([])
     const sql = `
-      WITH match_lines AS (
+      WITH candidates AS (
         SELECT
-          UPPER(TRIM(pol.item_id))                                AS item_id,
-          MAX(pol.description1)                                   AS description,
-          COUNT(DISTINCT pol.po_id)                               AS po_count,
-          MAX(po.date)                                            AS latest_po_date
+          UPPER(TRIM(pol.item_id))                                  AS item_id,
+          pol.description1,
+          po.po_id, po.date,
+          CASE
+            WHEN UPPER(pol.item_id) LIKE UPPER($1) || '%%'                     THEN 1
+            WHEN UPPER(pol.item_id) LIKE '%%' || UPPER($1) || '%%'              THEN 2
+            WHEN LENGTH($1) >= 2
+                 AND UPPER(COALESCE(pol.description1,'')) LIKE UPPER($1) || '%%' THEN 3
+            WHEN LENGTH($1) >= 2
+                 AND UPPER(COALESCE(pol.description1,'')) LIKE '%%' || UPPER($1) || '%%' THEN 4
+            ELSE 99
+          END AS match_rank,
+          CASE
+            WHEN UPPER(pol.item_id) LIKE '%%' || UPPER($1) || '%%' THEN 'item_id'
+            ELSE 'description'
+          END AS match_field
         FROM purchase_order_lines pol
         JOIN purchase_orders po ON po.po_id = pol.po_id
-        WHERE pol.item_id IS NOT NULL
-          AND pol.item_id <> ''
-          AND UPPER(pol.item_id) LIKE UPPER($1) || '%%'
-        GROUP BY UPPER(TRIM(pol.item_id))
-        UNION
-        SELECT
-          UPPER(TRIM(pol.item_id))                                AS item_id,
-          MAX(pol.description1)                                   AS description,
-          COUNT(DISTINCT pol.po_id)                               AS po_count,
-          MAX(po.date)                                            AS latest_po_date
-        FROM purchase_order_lines pol
-        JOIN purchase_orders po ON po.po_id = pol.po_id
-        WHERE pol.item_id IS NOT NULL
-          AND pol.item_id <> ''
-          AND UPPER(pol.item_id) LIKE '%%' || UPPER($1) || '%%'
-          AND UPPER(pol.item_id) NOT LIKE UPPER($1) || '%%'
-        GROUP BY UPPER(TRIM(pol.item_id))
+        WHERE pol.item_id IS NOT NULL AND pol.item_id <> ''
+          AND (
+            UPPER(pol.item_id) LIKE '%%' || UPPER($1) || '%%'
+            OR (LENGTH($1) >= 2 AND UPPER(COALESCE(pol.description1,'')) LIKE '%%' || UPPER($1) || '%%')
+          )
+      ),
+      agg AS (
+        SELECT item_id,
+               MIN(match_rank)                                          AS match_rank,
+               (array_agg(match_field ORDER BY match_rank))[1]          AS match_field,
+               (array_agg(description1 ORDER BY match_rank, po_id DESC))[1] AS description,
+               COUNT(DISTINCT po_id)                                    AS po_count,
+               MAX(date)                                                AS latest_po_date
+        FROM candidates
+        WHERE match_rank < 99
+        GROUP BY item_id
       ),
       latest AS (
         SELECT DISTINCT ON (UPPER(TRIM(pol.item_id)))
@@ -990,20 +1008,19 @@ router.get('/items/search', async (req, res) => {
                pol.unit_cost               AS latest_unit_cost
         FROM purchase_order_lines pol
         JOIN purchase_orders po ON po.po_id = pol.po_id
-        WHERE pol.item_id IS NOT NULL AND pol.item_id <> ''
-          AND UPPER(pol.item_id) LIKE '%%' || UPPER($1) || '%%'
+        WHERE UPPER(TRIM(pol.item_id)) IN (SELECT item_id FROM agg)
         ORDER BY UPPER(TRIM(pol.item_id)), po.date DESC NULLS LAST, pol.po_line_id DESC
       )
       SELECT
-        m.item_id,
-        m.description,
-        m.po_count::int,
+        a.item_id,
+        a.description,
+        a.po_count::int,
         l.latest_unit_cost,
-        m.latest_po_date,
-        CASE WHEN m.item_id LIKE UPPER($1) || '%%' THEN 1 ELSE 2 END AS rank
-      FROM match_lines m
-      LEFT JOIN latest l ON l.item_id = m.item_id
-      ORDER BY rank, m.po_count DESC, m.item_id
+        a.latest_po_date,
+        a.match_field
+      FROM agg a
+      LEFT JOIN latest l ON l.item_id = a.item_id
+      ORDER BY a.match_rank, a.po_count DESC, a.item_id
       LIMIT $2
     `
     const { rows } = await pool.query(sql, [q, limit])
