@@ -110,8 +110,11 @@ class IMAPConfig:
     user: str
     password: str = field(repr=False)
     mailbox: str
-    allowed_sender: str
-    use_ssl: bool
+    # Tuple instead of str so multiple senders can be whitelisted (set
+    # IMAP_ALLOWED_SENDER as a comma-separated list). Frozen dataclass needs
+    # an immutable type, hence tuple rather than list.
+    allowed_senders: tuple = ()
+    use_ssl: bool = True
 
 
 @dataclass(frozen=True)
@@ -211,15 +214,27 @@ def load_config() -> AppConfig:
                 f"PG pool bounds invalid: min={db.min_conn} max={db.max_conn}"
             )
 
+        # IMAP_ALLOWED_SENDER may be a single address or a comma-separated
+        # list. Empty entries are ignored so trailing commas / extra spaces
+        # don't break the search.
+        allowed_raw = _optional(
+            "IMAP_ALLOWED_SENDER", "srimukha.purchase@srimukhagroup.co.in"
+        )
+        allowed_senders = tuple(
+            s.strip() for s in allowed_raw.split(",") if s.strip()
+        )
+        if not allowed_senders:
+            raise ConfigError(
+                "IMAP_ALLOWED_SENDER produced an empty allowlist after parsing"
+            )
+
         imap = IMAPConfig(
             host=_optional("IMAP_HOST", "imap.zoho.in"),
             port=_int("IMAP_PORT", 993),
             user=_optional("IMAP_USER"),
             password=_optional("IMAP_PASSWORD"),
             mailbox=_optional("IMAP_MAILBOX", "INBOX"),
-            allowed_sender=_optional(
-                "IMAP_ALLOWED_SENDER", "srimukha.purchase@srimukhagroup.co.in"
-            ),
+            allowed_senders=allowed_senders,
             use_ssl=_bool("IMAP_SSL", True),
         )
 

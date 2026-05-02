@@ -96,15 +96,28 @@ class ZohoMailSource(MailSource):
         assert self.client is not None
 
         today = datetime.now().strftime("%d-%b-%Y")
-        criteria = f'(UNSEEN FROM "{self.cfg.allowed_sender}" SINCE "{today}")'
-        log.info("IMAP search: %s", criteria)
-        typ, data = self.client.search(None, criteria)
-        if typ != "OK":
-            log.error("IMAP search failed: %s", data)
-            return
-
-        uid_list = data[0].split() if data and data[0] else []
-        log.info("IMAP search returned %d messages", len(uid_list))
+        # One search per allowed sender, then merge UIDs (de-duplicated).
+        # Cleaner and more debuggable than one nested OR clause, and works
+        # the same whether there's one sender or many.
+        seen_uids = set()
+        uid_list: list[bytes] = []
+        for sender in self.cfg.allowed_senders:
+            criteria = f'(UNSEEN FROM "{sender}" SINCE "{today}")'
+            log.info("IMAP search: %s", criteria)
+            typ, data = self.client.search(None, criteria)
+            if typ != "OK":
+                log.error("IMAP search failed for sender=%s: %s", sender, data)
+                continue
+            uids = data[0].split() if data and data[0] else []
+            log.info("IMAP returned %d message(s) from %s", len(uids), sender)
+            for u in uids:
+                if u not in seen_uids:
+                    seen_uids.add(u)
+                    uid_list.append(u)
+        log.info(
+            "IMAP search total %d unique message(s) across %d sender(s)",
+            len(uid_list), len(self.cfg.allowed_senders),
+        )
 
         for uid_bytes in uid_list:
             try:
@@ -236,7 +249,9 @@ class LocalMailSource(MailSource):
             yield FetchedMessage(
                 message_id=f"local-{fname}-{sha[:16]}@local.test",
                 uid=None,
-                sender=CONFIG.imap.allowed_sender,
+                # Use the first whitelisted sender as the synthetic "from"
+                # address for local-fixture messages.
+                sender=CONFIG.imap.allowed_senders[0],
                 subject=subject,
                 received_at=datetime.now(timezone.utc),
                 attachments=[att],

@@ -111,7 +111,7 @@ def step_report_config() -> None:
           f"log_level={CONFIG.runtime.log_level}")
     print(f"  imap     : host={CONFIG.imap.host}:{CONFIG.imap.port} "
           f"user={CONFIG.imap.user or '<not set>'} "
-          f"allowed_sender={CONFIG.imap.allowed_sender}")
+          f"allowed_senders={','.join(CONFIG.imap.allowed_senders)}")
     print(f"  alert    : enabled={CONFIG.alert.enabled} recipient={CONFIG.alert.recipient}")
 
 
