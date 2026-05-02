@@ -668,11 +668,40 @@ export async function applyStandardValidation(client, invoiceId) {
     `UPDATE invoices SET status = $1, payment_due_date = $2, updated_at = NOW() WHERE invoice_id = $3`,
     [INVOICE_STATUS.VALIDATED, paymentDueDate, invoiceId]
   )
-  await client.query(
-    `UPDATE purchase_orders SET status = $1 WHERE po_id = $2`,
-    [PO_STATUS.FULFILLED, po_id]
+  // Mark the PO based on cumulative invoiced qty vs PO total qty.
+  //   cumulative >= total  →  'fulfilled'
+  //   0 < cumulative < total  →  'partially_fulfilled'
+  //   cumulative == 0  →  leave existing status (this case shouldn't reach
+  //                       here since we just validated an invoice, but the
+  //                       guard prevents accidentally clobbering admin-set
+  //                       statuses if data is missing).
+  // The previous code unconditionally set 'fulfilled' which caused status
+  // drift on multi-invoice POs and spurious E006 firings on re-validation.
+  const { rows: statusRows } = await client.query(
+    `WITH po_total AS (
+       SELECT COALESCE(SUM(qty), 0)::numeric AS qty
+       FROM purchase_order_lines WHERE po_id = $1
+     ),
+     invoiced AS (
+       SELECT COALESCE(SUM(il.billed_qty), 0)::numeric AS qty
+       FROM invoice_lines il
+       JOIN invoices i ON i.invoice_id = il.invoice_id
+       WHERE i.po_id = $1 AND i.status = $2
+     )
+     UPDATE purchase_orders po SET status = CASE
+       WHEN (SELECT qty FROM po_total) > 0
+            AND (SELECT qty FROM invoiced) >= (SELECT qty FROM po_total) - 0.001
+         THEN $3
+       WHEN (SELECT qty FROM invoiced) > 0
+         THEN $4
+       ELSE po.status
+     END
+     WHERE po.po_id = $1
+     RETURNING status`,
+    [po_id, INVOICE_STATUS.VALIDATED, PO_STATUS.FULFILLED, PO_STATUS.PARTIALLY_FULFILLED]
   )
-  return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate, poStatus: PO_STATUS.FULFILLED }
+  const newPoStatus = statusRows[0]?.status ?? PO_STATUS.OPEN
+  return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate, poStatus: newPoStatus }
 }
 
 /**

@@ -18,6 +18,7 @@ from psycopg2.extensions import connection as PGConnection
 from .engine import ValidationResult
 from .tolerances import (
     PO_STATUS_FULFILLED,
+    PO_STATUS_PARTIALLY_FULFILLED,
     STATUS_VALIDATED,
 )
 
@@ -68,16 +69,45 @@ def apply_validation_result(conn: PGConnection, result: ValidationResult) -> Non
                 (result.target_status, payment_due_date, result.invoice_id),
             )
 
-            # Mark PO as fulfilled unless it's an Open PO (those stay 'open').
-            # NB: purchase_orders has no updated_at column (checked schema).
+            # Mark PO based on cumulative invoiced qty vs PO total qty:
+            #   cumulative >= PO total  → 'fulfilled'
+            #   0 < cumulative < total  → 'partially_fulfilled'
+            #   else                    → leave the existing status untouched
+            #
+            # Open POs are excluded — they always stay 'open' (handled below).
+            # The previous behaviour marked every successful validation as
+            # 'fulfilled' which caused status drift on multi-invoice POs and
+            # spurious E006 firings on re-validation cycles.
             if result.po_id is not None and not result.is_open_po:
                 cur.execute(
                     """
-                    UPDATE purchase_orders
-                    SET status = %s
-                    WHERE po_id = %s AND status <> %s
+                    WITH po_total AS (
+                        SELECT COALESCE(SUM(qty), 0)::numeric AS qty
+                        FROM purchase_order_lines
+                        WHERE po_id = %s
+                    ),
+                    invoiced AS (
+                        SELECT COALESCE(SUM(il.billed_qty), 0)::numeric AS qty
+                        FROM invoice_lines il
+                        JOIN invoices i ON i.invoice_id = il.invoice_id
+                        WHERE i.po_id = %s AND i.status = 'validated'
+                    )
+                    UPDATE purchase_orders po
+                    SET status = CASE
+                        WHEN (SELECT qty FROM po_total) > 0
+                             AND (SELECT qty FROM invoiced) >= (SELECT qty FROM po_total) - 0.001
+                            THEN %s
+                        WHEN (SELECT qty FROM invoiced) > 0
+                            THEN %s
+                        ELSE po.status
+                    END
+                    WHERE po.po_id = %s
                     """,
-                    (PO_STATUS_FULFILLED, result.po_id, PO_STATUS_FULFILLED),
+                    (
+                        result.po_id, result.po_id,
+                        PO_STATUS_FULFILLED, PO_STATUS_PARTIALLY_FULFILLED,
+                        result.po_id,
+                    ),
                 )
         else:
             # Non-valid outcomes: route to target status, clear payment_due_date
