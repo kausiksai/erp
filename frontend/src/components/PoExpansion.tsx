@@ -750,19 +750,19 @@ function DrillSidePanel({ target, onClose }: { target: DrillTarget; onClose: () 
       break
     case 'grn':
       title = `GRN · ${target.row.grn_no || target.row.id || '—'}`
-      body = <KeyValueGrid data={target.row as Record<string, unknown>} />
+      body = <KeyValueGrid data={target.row as unknown as Record<string, unknown>} />
       break
     case 'asn':
       title = `ASN · ${target.row.asn_no || target.row.asn_id || '—'}`
-      body = <KeyValueGrid data={target.row as Record<string, unknown>} />
+      body = <KeyValueGrid data={target.row as unknown as Record<string, unknown>} />
       break
     case 'dc':
       title = `Delivery challan · ${target.row.dc_no || target.row.id || '—'}`
-      body = <KeyValueGrid data={target.row as Record<string, unknown>} />
+      body = <KeyValueGrid data={target.row as unknown as Record<string, unknown>} />
       break
     case 'schedule':
       title = `Schedule · ${target.row.doc_no || target.row.id || '—'}`
-      body = <KeyValueGrid data={target.row as Record<string, unknown>} />
+      body = <KeyValueGrid data={target.row as unknown as Record<string, unknown>} />
       break
   }
 
