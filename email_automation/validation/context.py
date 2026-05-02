@@ -179,14 +179,28 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             )
             po_row = cur.fetchone()
             if po_row:
+                # Open PO can be tagged at either the PO level
+                # (purchase_orders.pfx) OR at the invoice level
+                # (invoices.open_order_pfx, populated from the supplier's
+                # bill register). Some POs were created in legacy systems
+                # with non-OP prefixes (e.g. STP1) but the supplier still
+                # raises invoices against an Open Order series — so the
+                # invoice carries open_order_pfx even though the PO header
+                # doesn't. Either match enables open-PO logic.
                 cur.execute(
                     """
                     SELECT 1 FROM open_po_prefixes op
                     WHERE TRIM(op.prefix) <> ''
-                      AND UPPER(%s) LIKE UPPER(TRIM(op.prefix)) || '%%'
+                      AND (
+                            UPPER(%s) LIKE UPPER(TRIM(op.prefix)) || '%%'
+                         OR UPPER(%s) LIKE UPPER(TRIM(op.prefix)) || '%%'
+                      )
                     LIMIT 1
                     """,
-                    (po_row.get("pfx") or "",),
+                    (
+                        po_row.get("pfx") or "",
+                        invoice.get("open_order_pfx") or "",
+                    ),
                 )
                 is_open_po = cur.fetchone() is not None
 
