@@ -118,6 +118,44 @@ interface ValidationIssue {
   severity?: string
 }
 
+/**
+ * The backend currently pushes plain strings into validation `errors`/
+ * `warnings` arrays in poInvoiceValidation.js (e.g. `errors.push('Invoice
+ * is not linked to a PO')`), but the UI was designed around objects with
+ * `{ code, message }`. Normalise both shapes here so the UI keeps working
+ * regardless of which side gets cleaned up first. When the backend is
+ * updated to emit real `{code, message}` objects, this still passes them
+ * through unchanged.
+ */
+function normalizeIssue(raw: unknown): ValidationIssue {
+  if (typeof raw === 'string') return { code: '', message: raw }
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    return {
+      code: typeof obj.code === 'string' ? obj.code : '',
+      message:
+        typeof obj.message === 'string'
+          ? obj.message
+          : typeof obj.text === 'string'
+          ? obj.text
+          : JSON.stringify(obj),
+      severity: typeof obj.severity === 'string' ? obj.severity : undefined,
+    }
+  }
+  return { code: '', message: String(raw ?? '') }
+}
+
+function normalizeValidation(raw: unknown): ValidationSummary | null {
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  return {
+    ...(obj as ValidationSummary),
+    errors: Array.isArray(obj.errors) ? obj.errors.map(normalizeIssue) : [],
+    warnings: Array.isArray(obj.warnings) ? obj.warnings.map(normalizeIssue) : [],
+    info: Array.isArray(obj.info) ? obj.info.map(normalizeIssue) : [],
+  }
+}
+
 interface ValidationSummary {
   errors?: ValidationIssue[]
   warnings?: ValidationIssue[]
@@ -254,7 +292,7 @@ export default function InvoiceExpansion({
 
         let validation: ValidationSummary | null = null
         if (vsRes && vsRes.ok) {
-          validation = await vsRes.json()
+          validation = normalizeValidation(await vsRes.json())
         }
 
         // Fetch attachments
