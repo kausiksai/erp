@@ -288,7 +288,15 @@ export async function runFullValidation(invoiceId) {
       [poId]
     ),
     getCumulativeQuantities(poId),
-    pool.query(`SELECT COUNT(*) AS cnt FROM asn a JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> '' AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no)) WHERE inv.po_id = $1`, [poId]),
+    pool.query(
+      `SELECT COUNT(*)::int AS cnt,
+              COALESCE(SUM(COALESCE(a.quantity, 0)), 0)::numeric AS qty_total
+         FROM asn a
+         JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> ''
+                          AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no))
+        WHERE inv.po_id = $1`,
+      [poId]
+    ),
     // DC Excel: ORDER NO. → ord_no + po_id when PO exists; OPEN ORDER NO. → open_order_no. TRANSACTION QTY. → dc_qty (sum).
     // Include rows linked by po_id OR by order / open-order number when po_id was null at import (same idea as schedules).
     pool.query(
@@ -327,6 +335,7 @@ export async function runFullValidation(invoiceId) {
   details.totals.poQty = parseFloat(poQty)
   details.grn.grnQty = parseFloat(grnQty)
   details.asn.asnCount = parseInt(asnRes.rows[0]?.cnt ?? 0, 10)
+  details.asn.asnQty   = parseFloat(asnRes.rows[0]?.qty_total ?? 0)
   const dcCount = parseInt(dcRes.rows[0]?.c ?? 0, 10)
   const scheduleCount = parseInt(schRes.rows[0]?.c ?? 0, 10)
   const sumDcQty = parseFloat(dcSumRes.rows[0]?.total ?? 0)
@@ -437,6 +446,8 @@ export async function runFullValidation(invoiceId) {
   const invMatchesGrnQty = Math.abs(thisInvQty - grnQty) <= TOL_QTY
   details.grn.invLteGrn = openPo ? invMatchesGrnQty : invLteGrn
 
+  const asnQty = details.asn.asnQty || 0
+
   if (!openPo) {
     if (!invMatchesPo) {
       if (thisInvQty < poQty - TOL_QTY) {
@@ -447,16 +458,32 @@ export async function runFullValidation(invoiceId) {
         details.totals.errors.push(`Invoice quantity (${thisInvQty}) does not match PO total (${poQty})`)
       }
     }
-    if (grnQty > 0 && !invLteGrn) {
-      details.grn.errors.push(`GRN total (${grnQty}) is less than invoice quantity (${thisInvQty}). Pay only for what was received.`)
+    // Standard PO: GRN must exist (E051). The previous check only fired when
+    // GRN existed but was short — it silently passed when GRN was missing
+    // entirely, letting un-receipted invoices reach payment.
+    if (grnQty <= TOL_QTY) {
+      details.grn.errors.push(
+        'Standard PO: GRN with quantity is required before this invoice can be validated for payment.'
+      )
+    } else if (!invLteGrn) {
+      details.grn.errors.push(
+        `GRN total (${grnQty}) is less than invoice quantity (${thisInvQty}). Pay only for what was received.`
+      )
+    }
+    // Standard PO: ASN is optional, but when supplied its qty must match.
+    if (details.asn.asnCount > 0 && asnQty > TOL_QTY && Math.abs(thisInvQty - asnQty) > TOL_QTY) {
+      details.asn.errors = details.asn.errors || []
+      details.asn.errors.push(
+        `Standard PO: invoice quantity (${thisInvQty}) does not match ASN total (${asnQty}).`
+      )
     }
   }
   if (invoice.total_amount != null && Math.abs(thisInvAmount - parseFloat(invoice.total_amount)) > TOL_AMOUNT) {
     details.totals.warnings.push(`Sum of line totals (${thisInvAmount.toFixed(2)}) differs from invoice total amount (${invoice.total_amount})`)
   }
-  if (!openPo && details.asn.asnCount === 0 && invLines.length > 0) {
-    details.asn.warnings.push('No ASN found for this PO (informational)')
-  }
+  // Note: the previous "No ASN found for this PO (informational)" warning
+  // for standard PO is intentionally removed — ASN is optional per finance
+  // policy, and we no longer surface absence as a flag.
 
   if (openPo) {
     if (grnQty <= TOL_QTY) {
@@ -466,8 +493,12 @@ export async function runFullValidation(invoiceId) {
         `Open PO: invoice quantity (${thisInvQty}) must match GRN total (${grnQty}).`
       )
     }
-    if (details.asn.asnCount === 0 && invLines.length > 0) {
-      errors.push('Open PO: ASN linked to this PO/invoice is required.')
+    // Open PO: ASN is now optional. Validate qty match only when ASN exists.
+    if (details.asn.asnCount > 0 && asnQty > TOL_QTY && Math.abs(thisInvQty - asnQty) > TOL_QTY) {
+      details.asn.errors = details.asn.errors || []
+      details.asn.errors.push(
+        `Open PO: invoice quantity (${thisInvQty}) must match ASN total (${asnQty}).`
+      )
     }
     if (dcCount === 0 && scheduleCount === 0) {
       errors.push('Open PO: at least one Delivery Challan or Schedule record must exist for this purchase order.')

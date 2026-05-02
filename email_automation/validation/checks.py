@@ -563,6 +563,55 @@ def check_grn_qty(ctx: InvoiceContext) -> List[Finding]:
     return out
 
 
+def check_grn_required_standard(ctx: InvoiceContext) -> List[Finding]:
+    """Standard (non-Open) PO: GRN must exist before payment can be approved.
+
+    Goods receipt is the proof that the supplier delivered. Without it the
+    invoice is held as 'pending receipt' — finance can still see it on the
+    payment-approval queue but cannot release payment until the GRN arrives
+    or a manager creates an exception override.
+    """
+    out: List[Finding] = []
+    if ctx.po is None or ctx.po.is_open_po:
+        return out
+    if ctx.grn_accepted_qty_total <= TOL_QTY:
+        out.append(Finding(
+            "E051_STANDARD_PO_NO_GRN", SEVERITY_ERROR, CAT_GRN,
+            "Standard PO: GRN with quantity is required before this invoice "
+            "can be validated for payment.",
+            data={"asn_count": str(ctx.asn_count)},
+        ))
+    return out
+
+
+def check_asn_qty_match_standard(ctx: InvoiceContext) -> List[Finding]:
+    """Standard PO: if an ASN was sent, its qty must match the invoice qty.
+
+    ASN is optional for standard POs — its absence is silently accepted. But
+    if the supplier did notify a shipment, the qty has to agree with what's
+    on the invoice; otherwise something doesn't add up between dispatch and
+    bill.
+    """
+    out: List[Finding] = []
+    if ctx.po is None or ctx.po.is_open_po:
+        return out
+    if ctx.asn_count == 0:
+        return out  # ASN absent — silently allowed for standard PO
+    if ctx.asn_qty_total <= 0:
+        return out  # ASN exists but qty unknown — can't compare
+    if abs(ctx.this_inv_qty - ctx.asn_qty_total) > TOL_QTY:
+        out.append(Finding(
+            "E052_STANDARD_PO_ASN_QTY_MISMATCH", SEVERITY_ERROR, CAT_GRN,
+            f"Standard PO: invoice qty ({ctx.this_inv_qty}) does not match "
+            f"ASN total ({ctx.asn_qty_total})",
+            data={
+                "invoice_qty": str(ctx.this_inv_qty),
+                "asn_total":   str(ctx.asn_qty_total),
+            },
+        ))
+    return out
+
+
 def check_cumulative(ctx: InvoiceContext) -> List[Finding]:
     """Cumulative qty + amount across all invoices on this PO must not exceed PO limits.
 
@@ -655,12 +704,9 @@ def check_open_po_requirements(ctx: InvoiceContext) -> List[Finding]:
             f"({ctx.grn_accepted_qty_total})",
         ))
 
-    if ctx.asn_count == 0:
-        out.append(Finding(
-            "E072_OPEN_PO_NO_ASN", SEVERITY_ERROR, CAT_OPEN_PO,
-            "Open PO: ASN linked to this invoice is required",
-        ))
-    elif ctx.asn_qty_total > 0 and abs(ctx.this_inv_qty - ctx.asn_qty_total) > TOL_QTY:
+    # ASN is now optional for Open PO. We only validate it WHEN it exists —
+    # absence is silently accepted (no E072). If present, qty must match.
+    if ctx.asn_count > 0 and ctx.asn_qty_total > 0 and abs(ctx.this_inv_qty - ctx.asn_qty_total) > TOL_QTY:
         out.append(Finding(
             "E073_OPEN_PO_ASN_QTY_MISMATCH", SEVERITY_ERROR, CAT_OPEN_PO,
             f"Open PO: invoice qty ({ctx.this_inv_qty}) must match ASN total "
@@ -688,10 +734,8 @@ def check_open_po_requirements(ctx: InvoiceContext) -> List[Finding]:
 
 
 def check_asn_informational(ctx: InvoiceContext) -> List[Finding]:
-    out: List[Finding] = []
-    if ctx.po is not None and not ctx.po.is_open_po and ctx.asn_count == 0 and ctx.lines:
-        out.append(Finding(
-            "W080_NO_ASN_FOUND", SEVERITY_WARNING, CAT_GRN,
-            "No ASN found for this invoice (informational)",
-        ))
-    return out
+    """Standard PO: ASN absence is now silently accepted (no warning) per
+    finance policy — ASN is optional and only validated when present (see
+    check_asn_qty_match_standard). Kept as a no-op for engine compatibility.
+    """
+    return []

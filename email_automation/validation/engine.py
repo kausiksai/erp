@@ -39,11 +39,13 @@ SHORTFALL_CODES = {
     "E041_HEADER_QTY_UNDER_PO",
     "E042_HEADER_AMOUNT_OVER_PO",
     "E050_GRN_LESS_THAN_INVOICE",
+    "E051_STANDARD_PO_NO_GRN",          # NEW: standard PO requires GRN
+    "E052_STANDARD_PO_ASN_QTY_MISMATCH",# NEW: ASN qty must match when ASN exists
     "E060_CUMULATIVE_QTY_OVER_PO",
     "E061_CUMULATIVE_AMOUNT_OVER_PO",
     "E070_OPEN_PO_NO_GRN",
     "E071_OPEN_PO_GRN_QTY_MISMATCH",
-    "E072_OPEN_PO_NO_ASN",
+    # E072_OPEN_PO_NO_ASN removed — ASN is now optional for Open PO
     "E073_OPEN_PO_ASN_QTY_MISMATCH",
     "E074_OPEN_PO_NO_DC_OR_SCHEDULE",
     "E075_OPEN_PO_DC_QTY_MISMATCH",
@@ -126,8 +128,9 @@ def _classify(findings: List[Finding], ctx: InvoiceContext) -> ValidationResult:
     reason = None
     if errors:
         priority_order = [
-            "E050", "E060", "E061", "E040", "E041", "E021", "E023", "E022",
-            "E070", "E071", "E072", "E073", "E074", "E075", "E076",
+            "E051", "E050", "E052",  # standard-PO: missing GRN, short GRN, ASN qty
+            "E060", "E061", "E040", "E041", "E021", "E023", "E022",
+            "E070", "E071", "E073", "E074", "E075", "E076",  # E072 removed
             "E006", "E005", "E020", "E030", "E031", "E032", "E033",
             "E034", "E035", "E002", "E003", "E004", "E010", "E011", "E001",
         ]
@@ -184,10 +187,12 @@ def run_full_validation(conn: PGConnection, invoice_id: int) -> ValidationResult
     findings.extend(checks.check_uom(ctx))
     findings.extend(checks.check_totals(ctx))
     findings.extend(checks.check_grn_qty(ctx))
+    findings.extend(checks.check_grn_required_standard(ctx))   # NEW
+    findings.extend(checks.check_asn_qty_match_standard(ctx))  # NEW
     findings.extend(checks.check_cumulative(ctx))
     findings.extend(checks.check_grn_double_use(ctx))
     findings.extend(checks.check_open_po_requirements(ctx))
-    findings.extend(checks.check_asn_informational(ctx))
+    findings.extend(checks.check_asn_informational(ctx))       # now a no-op
 
     result = _classify(findings, ctx)
     log.debug(result.summary())
