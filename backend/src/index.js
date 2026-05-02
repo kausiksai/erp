@@ -901,6 +901,149 @@ router.get('/unraised-invoices', async (req, res) => {
   }
 })
 
+// Item code autocomplete — feeds the search box on the Item Price History
+// page. Returns up to 20 item codes that contain the query, ranked so codes
+// that *start* with the query come before codes that merely contain it.
+//
+//   GET /api/items/search?q=cs0  &limit=20
+//
+// Response: [
+//   { item_id, description, po_count, latest_unit_cost, latest_po_date }
+// ]
+router.get('/items/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim()
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50)
+    if (q.length < 1) return res.json([])
+    const sql = `
+      WITH match_lines AS (
+        SELECT
+          UPPER(TRIM(pol.item_id))                                AS item_id,
+          MAX(pol.description1)                                   AS description,
+          COUNT(DISTINCT pol.po_id)                               AS po_count,
+          MAX(po.date)                                            AS latest_po_date
+        FROM purchase_order_lines pol
+        JOIN purchase_orders po ON po.po_id = pol.po_id
+        WHERE pol.item_id IS NOT NULL
+          AND pol.item_id <> ''
+          AND UPPER(pol.item_id) LIKE UPPER($1) || '%%'
+        GROUP BY UPPER(TRIM(pol.item_id))
+        UNION
+        SELECT
+          UPPER(TRIM(pol.item_id))                                AS item_id,
+          MAX(pol.description1)                                   AS description,
+          COUNT(DISTINCT pol.po_id)                               AS po_count,
+          MAX(po.date)                                            AS latest_po_date
+        FROM purchase_order_lines pol
+        JOIN purchase_orders po ON po.po_id = pol.po_id
+        WHERE pol.item_id IS NOT NULL
+          AND pol.item_id <> ''
+          AND UPPER(pol.item_id) LIKE '%%' || UPPER($1) || '%%'
+          AND UPPER(pol.item_id) NOT LIKE UPPER($1) || '%%'
+        GROUP BY UPPER(TRIM(pol.item_id))
+      ),
+      latest AS (
+        SELECT DISTINCT ON (UPPER(TRIM(pol.item_id)))
+               UPPER(TRIM(pol.item_id))    AS item_id,
+               pol.unit_cost               AS latest_unit_cost
+        FROM purchase_order_lines pol
+        JOIN purchase_orders po ON po.po_id = pol.po_id
+        WHERE pol.item_id IS NOT NULL AND pol.item_id <> ''
+          AND UPPER(pol.item_id) LIKE '%%' || UPPER($1) || '%%'
+        ORDER BY UPPER(TRIM(pol.item_id)), po.date DESC NULLS LAST, pol.po_line_id DESC
+      )
+      SELECT
+        m.item_id,
+        m.description,
+        m.po_count::int,
+        l.latest_unit_cost,
+        m.latest_po_date,
+        CASE WHEN m.item_id LIKE UPPER($1) || '%%' THEN 1 ELSE 2 END AS rank
+      FROM match_lines m
+      LEFT JOIN latest l ON l.item_id = m.item_id
+      ORDER BY rank, m.po_count DESC, m.item_id
+      LIMIT $2
+    `
+    const { rows } = await pool.query(sql, [q, limit])
+    res.json(rows)
+  } catch (err) {
+    console.error('[items/search]', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Item price history — for the "Item Price Comparison" menu page.
+// Given an item code (matched against purchase_order_lines.item_id), return
+// the last N distinct POs that contain it, with qty / unit_cost / disc%, so
+// procurement can compare price drift across recent POs.
+//
+// Query params:
+//   ?limit=3   (default 3, max 10) — number of recent distinct POs to return
+router.get('/items/:itemCode/po-history', async (req, res) => {
+  try {
+    const itemCode = (req.params.itemCode || '').trim()
+    if (!itemCode) return res.status(400).json({ error: 'item_code_required' })
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 3, 1), 10)
+
+    // One row per distinct PO. If the same PO has multiple lines for this
+    // item, we pick the lowest po_line_id (typically the original line).
+    // Tie-break by po.amd_no DESC so the latest amendment of a PO wins.
+    const sql = `
+      WITH ranked AS (
+        SELECT
+          po.po_id, po.po_number, po.pfx, po.date AS po_date,
+          po.amd_no, po.status AS po_status, po.supplier_id,
+          pol.po_line_id, pol.sequence_number, pol.qty, pol.unit_cost,
+          pol.disc_pct, pol.description1, pol.item_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY po.po_id
+            ORDER BY pol.po_line_id
+          ) AS rn_per_po
+        FROM purchase_order_lines pol
+        JOIN purchase_orders po ON po.po_id = pol.po_id
+        WHERE UPPER(TRIM(pol.item_id)) = UPPER(TRIM($1))
+      )
+      SELECT
+        r.po_id, r.po_number, r.pfx, r.po_date, r.amd_no, r.po_status,
+        s.supplier_id, s.supplier_name, s.gst_number,
+        r.po_line_id, r.sequence_number, r.qty, r.unit_cost, r.disc_pct,
+        r.description1, r.item_id,
+        (r.qty * r.unit_cost * (1 - COALESCE(r.disc_pct, 0) / 100.0))::numeric(15,2) AS line_value
+      FROM ranked r
+      LEFT JOIN suppliers s ON s.supplier_id = r.supplier_id
+      WHERE r.rn_per_po = 1
+      ORDER BY r.po_date DESC NULLS LAST, r.po_id DESC
+      LIMIT $2
+    `
+    const { rows } = await pool.query(sql, [itemCode, limit])
+
+    // Compute price-drift summary for the UI: latest vs previous, and
+    // min/max across the returned set.
+    const prices = rows.map((r) => Number(r.unit_cost) || 0).filter((p) => p > 0)
+    const summary = prices.length === 0 ? null : {
+      latest: prices[0],
+      previous: prices[1] ?? null,
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+      delta_vs_previous: prices.length >= 2 ? prices[0] - prices[1] : null,
+      delta_pct_vs_previous:
+        prices.length >= 2 && prices[1] !== 0
+          ? ((prices[0] - prices[1]) / prices[1]) * 100
+          : null,
+    }
+
+    res.json({
+      item_code: itemCode,
+      count: rows.length,
+      summary,
+      rows,
+    })
+  } catch (err) {
+    console.error('[items/:itemCode/po-history]', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 // List invoice attachments (invoice PDF from invoice_attachments + weight slips from invoice_weight_attachments)
 router.get('/invoices/:id/attachments', async (req, res) => {
   try {

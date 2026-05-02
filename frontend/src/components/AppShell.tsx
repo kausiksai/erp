@@ -22,9 +22,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Overview',
     items: [
-      { to: '/',          label: 'Dashboard',  icon: 'pi-th-large' },
-      { to: '/analytics', label: 'Analytics',  icon: 'pi-chart-line' },
-      { to: '/reports',   label: 'Reports',    icon: 'pi-chart-bar' }
+      { to: '/',                     label: 'Dashboard',          icon: 'pi-th-large' },
+      { to: '/analytics',            label: 'Analytics',          icon: 'pi-chart-line' },
+      { to: '/reports',              label: 'Reports',            icon: 'pi-chart-bar' },
+      { to: '/items/price-history',  label: 'Item price history', icon: 'pi-history' }
     ]
   },
   {

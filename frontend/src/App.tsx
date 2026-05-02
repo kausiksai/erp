@@ -29,6 +29,7 @@ import UsersPage from './pages/UsersPage'
 import OwnerPage from './pages/OwnerPage'
 import PaymentsPage from './pages/PaymentsPage'
 import ProfilePage from './pages/ProfilePage'
+import ItemPriceHistoryPage from './pages/ItemPriceHistoryPage'
 
 /** Every authenticated route renders inside the global AppShell. */
 function ShellRoute({
@@ -98,6 +99,7 @@ function App() {
         <Route path="/delivery-challans"          element={<ShellRoute><DCPage /></ShellRoute>} />
         <Route path="/po-schedules"               element={<ShellRoute><SchedulesPage /></ShellRoute>} />
         <Route path="/open-po-prefixes"           element={<ShellRoute><OpenPoPrefixesPage /></ShellRoute>} />
+        <Route path="/items/price-history"        element={<ShellRoute><ItemPriceHistoryPage /></ShellRoute>} />
 
         {/* Masters */}
         <Route path="/suppliers"              element={<ShellRoute><SuppliersPage /></ShellRoute>} />

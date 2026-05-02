@@ -134,6 +134,17 @@ const allMenuItems: MenuItem[] = [
     allowedRoles: ['admin', 'manager'],
     order: 6
   },
+  {
+    id: 'item-price-history',
+    title: 'Item price history',
+    description: 'Compare item unit cost across the last 3 distinct POs',
+    icon: 'pi pi-history',
+    path: '/items/price-history',
+    color: '#0ea5e9',
+    comingSoon: false,
+    allowedRoles: ['admin', 'manager', 'user', 'finance'],
+    order: 7
+  },
   
   // Master Data (Admin/Manager only)
   {
@@ -267,7 +278,8 @@ export const getMenuCategories = (userRole: UserRole): MenuCategory[] => {
           'asn-details',
           'dc-details',
           'po-schedules',
-          'open-po-prefixes'
+          'open-po-prefixes',
+          'item-price-history'
         )
       )
     },
