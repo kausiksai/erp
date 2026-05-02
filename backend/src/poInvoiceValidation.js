@@ -210,7 +210,8 @@ export async function runFullValidation(invoiceId) {
   }
 
   const invRes = await pool.query(
-    `SELECT invoice_id, invoice_number, invoice_date, supplier_id, po_id, total_amount, po_number
+    `SELECT invoice_id, invoice_number, invoice_date, supplier_id, po_id,
+            total_amount, po_number, open_order_pfx, open_order_no
      FROM invoices WHERE invoice_id = $1`,
     [invoiceId]
   )
@@ -244,7 +245,15 @@ export async function runFullValidation(invoiceId) {
   const po = poRes.rows[0]
   details.header.po = po
 
-  const openPo = await isOpenPoByPfx(po.pfx)
+  // Open PO can be tagged at either the PO level (purchase_orders.pfx) OR
+  // at the invoice level (invoices.open_order_pfx, populated from the
+  // supplier's bill register). Some POs were created in legacy systems
+  // with non-OP prefixes (e.g. STP1) but the supplier still raises invoices
+  // against an Open Order series — so the invoice carries open_order_pfx
+  // even though the PO header doesn't. Either match enables open-PO logic.
+  const openPo =
+    (await isOpenPoByPfx(po.pfx)) ||
+    (await isOpenPoByPfx(invoice.open_order_pfx))
 
   if (po.status === PO_STATUS.FULFILLED && !openPo) {
     return {
@@ -565,13 +574,19 @@ export async function validateInvoiceAgainstPoGrn(invoiceId) {
  */
 export async function applyStandardValidation(client, invoiceId) {
   const inv = await client.query(
-    `SELECT po_id, invoice_date FROM invoices WHERE invoice_id = $1`,
+    `SELECT po_id, invoice_date, open_order_pfx FROM invoices WHERE invoice_id = $1`,
     [invoiceId]
   )
   if (!inv.rows[0]) throw new Error('Invoice not found')
-  const { po_id, invoice_date } = inv.rows[0]
+  const { po_id, invoice_date, open_order_pfx } = inv.rows[0]
   const pfxRow = await client.query(`SELECT pfx FROM purchase_orders WHERE po_id = $1`, [po_id])
-  if (await isOpenPoByPfx(pfxRow.rows[0]?.pfx, client)) {
+  // Defend against direct callers — Open PO can be tagged at PO level OR at
+  // invoice level (legacy POs with non-OP prefixes carry open_order_pfx
+  // from the supplier's bill register).
+  if (
+    (await isOpenPoByPfx(pfxRow.rows[0]?.pfx, client)) ||
+    (await isOpenPoByPfx(open_order_pfx, client))
+  ) {
     throw new Error('Open PO (prefix match) must not use standard validation — use applyOpenPoValidation')
   }
   const po = await getPoForInvoice(po_id, client)
