@@ -253,7 +253,17 @@ def load(
         if supplier_id is None:
             skipped_no_supplier += 1
             continue
-        po_id = po_resolver.resolve(h.get("po_no"))
+        # Prefer open_order_no when it's populated. Open Order series (OP*,
+        # OSC*) PO numbers are the canonical link for those invoices and
+        # avoid accidental po_number collisions with standard POs that share
+        # the same digits (e.g. SC3/32600014 invoice → OSC3/OSC3240010 PO,
+        # not STP3/32600014 standard PO).
+        open_order_no = h.get("open_order_no")
+        po_id = None
+        if open_order_no and str(open_order_no).strip():
+            po_id = po_resolver.resolve(open_order_no)
+        if po_id is None:
+            po_id = po_resolver.resolve(h.get("po_no"))
         resolved.append(
             {
                 "header": h,
