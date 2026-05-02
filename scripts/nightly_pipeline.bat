@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================================
-REM  nightly_pipeline.bat — Windows wrapper for the nightly billing pipeline.
+REM  nightly_pipeline.bat - Windows wrapper for the nightly billing pipeline.
 REM
 REM  Phase 1  email_automation     pulls Excels from Zoho, loads PO/GRN/ASN/
 REM                                DC/Schedule/Invoice into RDS.
@@ -14,8 +14,7 @@ REM  Phase 2 runs only if email exited 0 (success) or 30 (partial success).
 REM  Phase 3 runs unless OCR failed fatally (40 = all files failed, 99 = crash).
 REM
 REM  Logs are written to:
-REM      C:\Users\Administrator\Documents\billing_system\nightly_logs\
-REM      nightly_YYYY-MM-DD_HHMMSS.log
+REM      <PROJECT_DIR>\nightly_logs\nightly_YYYY-MM-DD_HHMMSS.log
 REM
 REM  Edit PROJECT_DIR below if the checkout lives elsewhere.
 REM ============================================================================
@@ -29,9 +28,8 @@ set "LOG_DIR=%PROJECT_DIR%\nightly_logs"
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
-REM Build a sortable timestamp YYYYMMDD_HHMMSS for the log file name.
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set "DT=%%I"
-set "STAMP=%DT:~0,4%-%DT:~4,2%-%DT:~6,2%_%DT:~8,2%%DT:~10,2%%DT:~12,2%"
+REM Build a sortable timestamp via PowerShell (wmic was removed in newer Windows).
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd_HHmmss'"`) do set "STAMP=%%I"
 set "LOG_FILE=%LOG_DIR%\nightly_%STAMP%.log"
 
 cd /d "%PROJECT_DIR%" || (
@@ -39,51 +37,52 @@ cd /d "%PROJECT_DIR%" || (
     exit /b 2
 )
 
-echo [%DATE% %TIME%] starting nightly pipeline > "%LOG_FILE%"
-echo [%DATE% %TIME%] project_dir=%PROJECT_DIR% >> "%LOG_FILE%"
+call :LOG starting nightly pipeline
+call :LOG project_dir=%PROJECT_DIR%
+call :LOG log_file=%LOG_FILE%
 
 REM ---- Phase 1: email_automation -------------------------------------------
-echo. >> "%LOG_FILE%"
-echo [%DATE% %TIME%] phase 1/3: email_automation >> "%LOG_FILE%"
+call :LOG ----
+call :LOG phase 1/3: email_automation
 "%EMAIL_PY%" -m email_automation.run >> "%LOG_FILE%" 2>&1
 set "EMAIL_RC=!ERRORLEVEL!"
-echo [%DATE% %TIME%] email_automation exit=!EMAIL_RC! >> "%LOG_FILE%"
+call :LOG email_automation exit=!EMAIL_RC!
 
 REM Skip OCR if email failed fatally (anything other than 0 or 30).
 if not "!EMAIL_RC!"=="0" if not "!EMAIL_RC!"=="30" (
-    echo [%DATE% %TIME%] email phase failed (exit=!EMAIL_RC!) — skipping OCR + PO check >> "%LOG_FILE%"
+    call :LOG email phase failed exit=!EMAIL_RC!, skipping OCR + PO check
     set "OCR_RC=0"
     set "PO_RC=0"
     goto :summary
 )
 
 REM ---- Phase 2: ocr_automation ---------------------------------------------
-echo. >> "%LOG_FILE%"
-echo [%DATE% %TIME%] phase 2/3: ocr_automation >> "%LOG_FILE%"
+call :LOG ----
+call :LOG phase 2/3: ocr_automation
 "%OCR_PY%" -W ignore -m ocr_automation.run >> "%LOG_FILE%" 2>&1
 set "OCR_RC=!ERRORLEVEL!"
-echo [%DATE% %TIME%] ocr_automation exit=!OCR_RC! >> "%LOG_FILE%"
+call :LOG ocr_automation exit=!OCR_RC!
 
 REM ---- Phase 3: po_check ---------------------------------------------------
 REM Skip only when OCR failed fatally (40=all files failed, 99=crash) so we
-REM don't generate spurious "un-invoiced" flags from half-loaded data.
+REM don't generate spurious un-invoiced flags from half-loaded data.
 if "!OCR_RC!"=="40" goto :skip_po
 if "!OCR_RC!"=="99" goto :skip_po
 
-echo. >> "%LOG_FILE%"
-echo [%DATE% %TIME%] phase 3/3: po_check >> "%LOG_FILE%"
+call :LOG ----
+call :LOG phase 3/3: po_check
 "%OCR_PY%" -W ignore -m ocr_automation.po_check >> "%LOG_FILE%" 2>&1
 set "PO_RC=!ERRORLEVEL!"
-echo [%DATE% %TIME%] po_check exit=!PO_RC! >> "%LOG_FILE%"
+call :LOG po_check exit=!PO_RC!
 goto :summary
 
 :skip_po
-echo [%DATE% %TIME%] OCR failed (exit=!OCR_RC!) — skipping PO check >> "%LOG_FILE%"
+call :LOG OCR failed exit=!OCR_RC!, skipping PO check
 set "PO_RC=0"
 
 :summary
-echo. >> "%LOG_FILE%"
-echo [%DATE% %TIME%] finished email=!EMAIL_RC! ocr=!OCR_RC! po=!PO_RC! >> "%LOG_FILE%"
+call :LOG ----
+call :LOG finished email=!EMAIL_RC! ocr=!OCR_RC! po=!PO_RC!
 
 REM Surface a non-zero exit if any phase failed so Task Scheduler / monitoring
 REM can flag the run.
@@ -93,3 +92,10 @@ if not "!OCR_RC!"=="0"   if not "!OCR_RC!"=="30" set "RC=!OCR_RC!"
 if not "!PO_RC!"=="0"                            set "RC=!PO_RC!"
 
 endlocal & exit /b %RC%
+
+
+:LOG
+REM Subroutine: prepend timestamp and append to log + console.
+echo [%DATE% %TIME%] %*>> "%LOG_FILE%"
+echo [%DATE% %TIME%] %*
+goto :eof
