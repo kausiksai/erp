@@ -177,6 +177,19 @@ export default function ItemPriceHistoryPage() {
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    // If the typed text is a description (a suggestion is visible whose
+    // item_id differs from the typed text), prefer the highlighted
+    // suggestion so clicking the Search button behaves the same as
+    // pressing Enter on the dropdown. Avoids "/items/HYDRAULIC%20OIL/..."
+    // queries that return 0 rows because the lookup keys on item_id.
+    const typed = itemCode.trim().toUpperCase()
+    const pick = suggestions[highlight]
+    if (suggestionsOpen && pick && pick.item_id.toUpperCase() !== typed) {
+      setItemCode(pick.item_id)
+      setSuggestionsOpen(false)
+      search(pick.item_id)
+      return
+    }
     search(itemCode)
   }
 
@@ -439,8 +452,8 @@ export default function ItemPriceHistoryPage() {
             trendDirection={trendDirection}
           />
 
-          {!stable && rows.length > 1 && (
-            <Sparkline rows={sortedAsc} minP={minP} maxP={maxP} />
+          {rows.length > 1 && (
+            <Sparkline rows={sortedAsc} minP={minP} maxP={maxP} stable={stable} />
           )}
 
           <ComparisonTable
@@ -972,7 +985,7 @@ function SectionDivider({ cols }: { cols: number }) {
  *   Sparkline — only when prices vary
  * ========================================================================= */
 
-function Sparkline({ rows, minP, maxP }: { rows: POHistoryRow[]; minP: number; maxP: number }) {
+function Sparkline({ rows, minP, maxP, stable }: { rows: POHistoryRow[]; minP: number; maxP: number; stable: boolean }) {
   const n = rows.length
   const W = 800
   const H = 160
@@ -981,11 +994,14 @@ function Sparkline({ rows, minP, maxP }: { rows: POHistoryRow[]; minP: number; m
   const padBottom = 42
   const range = Math.max(maxP - minP, 0.0001)
   const step = (W - padX * 2) / Math.max(n - 1, 1)
+  // When all prices are equal, draw a centered horizontal line instead of
+  // a degenerate one pinned to the bottom (the default range fallback).
+  const yMid = padTop + (H - padTop - padBottom) / 2
 
   const points = rows.map((r, i) => {
     const x = padX + i * step
     const v = parseAmount(r.unit_cost) ?? 0
-    const y = padTop + (1 - (v - minP) / range) * (H - padTop - padBottom)
+    const y = stable ? yMid : padTop + (1 - (v - minP) / range) * (H - padTop - padBottom)
     return { x, y, v, r }
   })
 
@@ -1012,15 +1028,24 @@ function Sparkline({ rows, minP, maxP }: { rows: POHistoryRow[]; minP: number; m
           <span style={{ color: 'var(--text-muted)', fontWeight: 500, fontSize: '0.78rem' }}>(oldest → newest)</span>
         </div>
         <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-          range: {formatINRSymbol(minP)} – {formatINRSymbol(maxP)}
+          {stable
+            ? <>flat at {formatINRSymbol(minP)}</>
+            : <>range: {formatINRSymbol(minP)} – {formatINRSymbol(maxP)}</>}
         </div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="xMidYMid meet">
-        {/* Y reference lines */}
-        <line x1={padX - 8} x2={W - padX + 8} y1={yMax} y2={yMax} stroke="var(--border-subtle)" strokeDasharray="3 4" />
-        <line x1={padX - 8} x2={W - padX + 8} y1={yMin} y2={yMin} stroke="var(--border-subtle)" strokeDasharray="3 4" />
-        <text x={padX - 12} y={yMax + 4} fill="var(--text-muted)" fontSize={10} textAnchor="end">{formatINRSymbol(maxP)}</text>
-        <text x={padX - 12} y={yMin + 4} fill="var(--text-muted)" fontSize={10} textAnchor="end">{formatINRSymbol(minP)}</text>
+        {/* Y reference lines + min/max labels — only when prices vary */}
+        {!stable && (
+          <>
+            <line x1={padX - 8} x2={W - padX + 8} y1={yMax} y2={yMax} stroke="var(--border-subtle)" strokeDasharray="3 4" />
+            <line x1={padX - 8} x2={W - padX + 8} y1={yMin} y2={yMin} stroke="var(--border-subtle)" strokeDasharray="3 4" />
+            <text x={padX - 12} y={yMax + 4} fill="var(--text-muted)" fontSize={10} textAnchor="end">{formatINRSymbol(maxP)}</text>
+            <text x={padX - 12} y={yMin + 4} fill="var(--text-muted)" fontSize={10} textAnchor="end">{formatINRSymbol(minP)}</text>
+          </>
+        )}
+        {stable && (
+          <line x1={padX - 8} x2={W - padX + 8} y1={yMid} y2={yMid} stroke="var(--border-subtle)" strokeDasharray="3 4" />
+        )}
 
         {/* Area + line */}
         <path d={areaPath} fill="color-mix(in srgb, var(--brand-600) 14%, transparent)" />
