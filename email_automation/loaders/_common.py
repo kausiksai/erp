@@ -300,6 +300,19 @@ class POResolver:
         )
 
     def resolve(self, po_number: Optional[str], amd_no: Optional[int] = None) -> Optional[int]:
+        """Resolve a po_number (and optional amd_no) to a po_id.
+
+        With `amd_no`:
+            1. exact (po_number, amd_no) lookup first
+            2. if that misses, fall back to the latest amendment for the
+               po_number — covers the common case where the supplier's
+               GRN/invoice row carries an amd_no that doesn't match our
+               PO master (e.g. GRN says amd=0, PO is amd=1). Without this
+               fallback, 100+ GRNs orphan even though the PO clearly exists.
+
+        Without `amd_no`: latest amendment.
+        Returns None when nothing matches.
+        """
         if not po_number:
             return None
         po_number = po_number.strip()
@@ -318,14 +331,15 @@ class POResolver:
                 if row:
                     self._by_key[key] = row[0]
                     return row[0]
-            return None
+            # Exact (po_number, amd_no) missed — fall through to latest
+            # amendment lookup so the GRN/invoice still links to the right PO.
         # latest amendment
         if po_number in self._latest:
             return self._latest[po_number]
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT po_id FROM purchase_orders WHERE po_number = %s "
-                "ORDER BY amd_no DESC LIMIT 1",
+                "ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC LIMIT 1",
                 (po_number,),
             )
             row = cur.fetchone()
