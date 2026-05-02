@@ -365,3 +365,92 @@ class POResolver:
                 if pn == po_number and amd == latest_amd:
                     self._latest[po_number] = pid
                     break
+
+    # ------------------------------------------------------------------
+    # Cross-document fallback resolution
+    # ------------------------------------------------------------------
+    def resolve_via_references(
+        self,
+        *,
+        invoice_number: Optional[str],
+        supplier_id: Optional[int],
+        grn_pfx: Optional[str] = None,
+        grn_no: Optional[str] = None,
+    ) -> Optional[int]:
+        """Last-resort PO lookup when neither po_number nor open_order_no resolved.
+
+        Walks invoice → (GRN | ASN) → PO using the supplier-side references the
+        invoice carries. Only returns when *all* candidate paths agree on a single
+        po_id under the same supplier — silent on ambiguity, since picking the
+        wrong PO is worse than leaving the invoice unlinked.
+
+        Resolution order, each gated on supplier_id matching:
+            1. invoice.(grn_pfx, grn_no)        → grn.po_id
+            2. invoice.invoice_number           → grn.supplier_doc_no → grn.po_id
+            3. invoice.invoice_number           → asn.inv_no → asn.(po_pfx,po_no) → po.po_id
+        """
+        if supplier_id is None:
+            return None
+        candidates: set = set()
+
+        with self.conn.cursor() as cur:
+            # Every path requires po.supplier_id = invoice.supplier_id.
+            # Without this the GRN/ASN row may point at a sibling-unit PO
+            # (same parent company, different supplier_id) and the engine will
+            # later fail E005_SUPPLIER_MISMATCH on what looked like a valid
+            # link.
+
+            # Path 1 — invoice's own grn_pfx/grn_no → grn.po_id
+            grn_pfx_t = (grn_pfx or "").strip()
+            grn_no_t = (grn_no or "").strip()
+            if grn_pfx_t and grn_no_t:
+                cur.execute(
+                    """
+                    SELECT DISTINCT g.po_id
+                    FROM grn g
+                    JOIN purchase_orders po ON po.po_id = g.po_id
+                    WHERE g.grn_pfx = %s AND g.grn_no = %s
+                      AND g.supplier_id = %s
+                      AND po.supplier_id = %s
+                      AND g.po_id IS NOT NULL
+                    """,
+                    (grn_pfx_t, grn_no_t, supplier_id, supplier_id),
+                )
+                candidates.update(r[0] for r in cur.fetchall())
+
+            inv_no_t = (invoice_number or "").strip()
+            if inv_no_t:
+                # Path 2 — GRN.supplier_doc_no = invoice_number → grn.po_id
+                cur.execute(
+                    """
+                    SELECT DISTINCT g.po_id
+                    FROM grn g
+                    JOIN purchase_orders po ON po.po_id = g.po_id
+                    WHERE TRIM(g.supplier_doc_no) = %s
+                      AND g.supplier_id = %s
+                      AND po.supplier_id = %s
+                      AND g.po_id IS NOT NULL
+                    """,
+                    (inv_no_t, supplier_id, supplier_id),
+                )
+                candidates.update(r[0] for r in cur.fetchall())
+
+                # Path 3 — ASN.inv_no = invoice_number, ASN→PO via (pfx, no)
+                cur.execute(
+                    """
+                    SELECT DISTINCT po.po_id
+                    FROM asn a
+                    JOIN purchase_orders po
+                      ON TRIM(po.pfx) = TRIM(a.po_pfx)
+                     AND TRIM(po.po_number) = TRIM(a.po_no)
+                     AND po.supplier_id = %s
+                    WHERE TRIM(a.inv_no) = %s
+                    """,
+                    (supplier_id, inv_no_t),
+                )
+                candidates.update(r[0] for r in cur.fetchall())
+
+        if len(candidates) == 1:
+            return next(iter(candidates))
+        # 0 candidates → no fallback hit; >1 → ambiguous, refuse to guess
+        return None

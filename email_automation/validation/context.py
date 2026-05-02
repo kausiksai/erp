@@ -171,6 +171,58 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             if row:
                 po_id = row["po_id"]
 
+        # Last-resort fallback — same logic as POResolver.resolve_via_references
+        # but inlined here so the validation engine can recover invoices that
+        # were loaded before the loader-side fallback existed. Walks
+        # invoice → (GRN | ASN) → PO using the supplier-side references the
+        # invoice carries; only resolves when every path agrees on a single
+        # po_id under the same supplier.
+        # Every path enforces po.supplier_id = invoice.supplier_id so the
+        # engine's E005 check won't immediately reject what we just linked.
+        if po_id is None and invoice.get("supplier_id") is not None:
+            cur.execute(
+                """
+                WITH cand AS (
+                    SELECT g.po_id
+                    FROM grn g JOIN purchase_orders po ON po.po_id = g.po_id
+                    WHERE g.grn_pfx = %s AND g.grn_no = %s
+                      AND g.supplier_id = %s
+                      AND po.supplier_id = %s
+                      AND g.po_id IS NOT NULL
+                    UNION
+                    SELECT g.po_id
+                    FROM grn g JOIN purchase_orders po ON po.po_id = g.po_id
+                    WHERE TRIM(g.supplier_doc_no) = %s
+                      AND g.supplier_id = %s
+                      AND po.supplier_id = %s
+                      AND g.po_id IS NOT NULL
+                    UNION
+                    SELECT po.po_id
+                    FROM asn a
+                    JOIN purchase_orders po
+                      ON TRIM(po.pfx) = TRIM(a.po_pfx)
+                     AND TRIM(po.po_number) = TRIM(a.po_no)
+                     AND po.supplier_id = %s
+                    WHERE TRIM(a.inv_no) = %s
+                )
+                SELECT po_id FROM cand GROUP BY po_id
+                """,
+                (
+                    invoice.get("grn_pfx") or "",
+                    invoice.get("grn_no") or "",
+                    invoice["supplier_id"],
+                    invoice["supplier_id"],
+                    (invoice.get("invoice_number") or "").strip(),
+                    invoice["supplier_id"],
+                    invoice["supplier_id"],
+                    invoice["supplier_id"],
+                    (invoice.get("invoice_number") or "").strip(),
+                ),
+            )
+            cand_rows = cur.fetchall()
+            if len(cand_rows) == 1:
+                po_id = cand_rows[0]["po_id"]
+
         po_value_computed = Decimal(0)
         if po_id is not None:
             cur.execute(

@@ -79,6 +79,11 @@ export const INVOICE_EXTRACTION_SCHEMA = {
       description:
         'The Purchase Order number referenced on the invoice. Labelled PO No., Purchase Order No., Buyer\'s Order No., Ref. Your Order No. Example: "PO2251311", "PO9250648/2025-26", "SS2/SS225.0583".'
     },
+    open_order_number: {
+      type: ['string', 'null'],
+      description:
+        'Open Order / Open Service Contract number when the invoice references a blanket / open PO instead of (or in addition to) a regular PO. Labels include "Open Order No", "Open Order Pfx + No", "OSC No", "Order No" (when an Open Order). Examples: "OP1240119", "OP2240163", "OSC3240010". Distinct from po_number — open orders have prefixes starting with "OP" or "OSC". Leave null when no open-order reference is shown.'
+    },
     subtotal: {
       type: ['number', 'null'],
       description:
@@ -339,6 +344,8 @@ function emptyInvoice() {
     invoiceNumber: '',
     invoiceDate: null,
     poNumber: '',
+    openOrderNo: '',
+    openOrderPfx: '',
     supplierName: '',
     supplierGstin: '',
     supplierPan: '',
@@ -358,6 +365,18 @@ function emptyInvoice() {
     termsAndConditions: '',
     items: []
   }
+}
+
+/**
+ * Derive the OP*/OSC* prefix from an open-order number string.
+ * "OP1240119"  → "OP1"
+ * "OSC3240010" → "OSC3"
+ * Anything else → ''
+ */
+function deriveOpenOrderPfx(openOrderNo) {
+  if (!openOrderNo || typeof openOrderNo !== 'string') return ''
+  const m = openOrderNo.trim().match(/^(OP\d|OSC\d)/i)
+  return m ? m[1].toUpperCase() : ''
 }
 
 function shapeFromStructured(s) {
@@ -383,10 +402,27 @@ function shapeFromStructured(s) {
     ? (s.line_items || s.lineItems || s.items).map(line)
     : []
 
+  // Open-order number: extracted directly when present, otherwise inferred
+  // from po_number when it looks like an Open Order code (OP1*, OSC3* …).
+  // The supplier-side PDF often puts the Open-Order ref in the same place
+  // they'd normally print po_number, so this fallback recovers many cases.
+  const rawPoNumber = s_get(s, 'po_number', 'poNumber') || ''
+  const rawOpenOrderNo =
+    s_get(s, 'open_order_number', 'openOrderNumber', 'open_order_no', 'openOrderNo') || ''
+  const inferredFromPoNumber =
+    !rawOpenOrderNo && /^(OP\d|OSC\d)/i.test(rawPoNumber.trim()) ? rawPoNumber.trim() : ''
+  const openOrderNo = (rawOpenOrderNo || inferredFromPoNumber).trim()
+  const openOrderPfx = deriveOpenOrderPfx(openOrderNo)
+  // If we inferred openOrderNo from po_number, blank po_number out so the
+  // engine doesn't double-link via the standard-PO path too.
+  const poNumber = inferredFromPoNumber ? '' : rawPoNumber
+
   return {
     invoiceNumber: s_get(s, 'invoice_number', 'invoiceNumber') || '',
     invoiceDate: normalizeDate(s_get(s, 'invoice_date', 'invoiceDate')),
-    poNumber: s_get(s, 'po_number', 'poNumber') || '',
+    poNumber,
+    openOrderNo,
+    openOrderPfx,
     supplierName: s_get(s, 'supplier_name', 'supplierName') || '',
     supplierGstin: normalizeId(s_get(s, 'supplier_gstin', 'supplierGstin', 'gstin')) || '',
     supplierPan: normalizeId(s_get(s, 'supplier_pan', 'supplierPan', 'pan')) || '',

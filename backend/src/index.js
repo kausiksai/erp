@@ -228,10 +228,24 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
     // NO DATABASE WRITES — Just extract and return. Data is only persisted
     // when the user clicks "Save Invoice" on the review form.
 
-    // Resolve PO reference (if user provided one OR the extractor found one)
+    // Resolve PO reference. Order:
+    //   1. open_order_no (Open Order series — OP*/OSC*) takes precedence so
+    //      "SC3/32600014" invoices link to OSC3/OSC3240010, not STP3/32600014.
+    //   2. po_number (standard PO).
+    const openOrderRef = invoiceData.openOrderNo
     const poNumberRef = req.body.poNumber || req.query.poNumber || invoiceData.poNumber
     let poId = null
-    if (poNumberRef) {
+    if (openOrderRef) {
+      const r = await pool.query(
+        `SELECT po_id FROM purchase_orders
+         WHERE TRIM(po_number) = TRIM($1)
+         ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC
+         LIMIT 1`,
+        [openOrderRef]
+      )
+      if (r.rows.length > 0) poId = r.rows[0].po_id
+    }
+    if (!poId && poNumberRef) {
       const poResult = await pool.query(
         `SELECT po_id FROM purchase_orders
          WHERE TRIM(po_number) = TRIM($1)
@@ -257,6 +271,34 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
         [invoiceData.supplierName]
       )
       if (byName.rows.length > 0) supplierId = byName.rows[0].supplier_id
+    }
+
+    // Last-resort PO fallback — walk through GRN / ASN references the
+    // supplier printed on the invoice. Every path requires
+    // po.supplier_id = invoice.supplier_id so the engine's later E005 check
+    // doesn't reject the link we just made (some GRNs are booked under a
+    // sibling-unit supplier_id and would otherwise propagate a wrong PO).
+    if (!poId && supplierId) {
+      const fb = await pool.query(
+        `WITH cand AS (
+            SELECT g.po_id
+            FROM grn g JOIN purchase_orders po ON po.po_id = g.po_id
+            WHERE TRIM(g.supplier_doc_no) = TRIM($1)
+              AND g.supplier_id = $2
+              AND po.supplier_id = $2
+              AND g.po_id IS NOT NULL
+            UNION
+            SELECT po.po_id FROM asn a
+            JOIN purchase_orders po
+              ON TRIM(po.pfx) = TRIM(a.po_pfx)
+             AND TRIM(po.po_number) = TRIM(a.po_no)
+             AND po.supplier_id = $2
+            WHERE TRIM(a.inv_no) = TRIM($1)
+         )
+         SELECT po_id FROM cand GROUP BY po_id`,
+        [invoiceData.invoiceNumber || '', supplierId]
+      )
+      if (fb.rows.length === 1) poId = fb.rows[0].po_id
     }
 
     res.json({

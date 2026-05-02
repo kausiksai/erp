@@ -264,6 +264,18 @@ def load(
             po_id = po_resolver.resolve(open_order_no)
         if po_id is None:
             po_id = po_resolver.resolve(h.get("po_no"))
+        # Last-resort fallback: walk through GRN / ASN references the supplier
+        # printed on the invoice. Only applied when the direct PO/Open-Order
+        # lookups failed AND every cross-document path agrees on the same PO
+        # for this supplier. Useful when the supplier's PO number on the
+        # invoice doesn't match our master (e.g. SC* prefix variants).
+        if po_id is None:
+            po_id = po_resolver.resolve_via_references(
+                invoice_number=h.get("invoice_number"),
+                supplier_id=supplier_id,
+                grn_pfx=h.get("grn_pfx"),
+                grn_no=h.get("grn_no"),
+            )
         resolved.append(
             {
                 "header": h,
