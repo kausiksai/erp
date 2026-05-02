@@ -189,12 +189,27 @@ def check_header(ctx: InvoiceContext) -> List[Finding]:
             f"Invoice po_number text ({inv_pon}) differs from PO record ({ctx.po.po_number})",
         ))
 
-    # PO status already fulfilled
+    # PO status already fulfilled — only block when this invoice's qty
+    # ACTUALLY exceeds the remaining capacity on the PO. Otherwise the
+    # PO might just be in 'fulfilled' state because *this very invoice*
+    # was previously validated and bumped the status; a re-validation
+    # cycle (e.g. after a rule change) shouldn't penalise the originator.
     if ctx.po.status == PO_STATUS_FULFILLED and not ctx.po.is_open_po:
-        out.append(Finding(
-            "E006_PO_ALREADY_FULFILLED", SEVERITY_ERROR, CAT_HEADER,
-            "PO is already fulfilled; route to exception approval",
-        ))
+        po_qty = sum((_dec(p.get("qty")) for p in ctx.po.lines), Decimal(0))
+        capacity_used_by_other_invoices = ctx.other_invoices_total_qty
+        remaining_capacity = po_qty - capacity_used_by_other_invoices
+        if ctx.this_inv_qty > remaining_capacity + TOL_QTY:
+            out.append(Finding(
+                "E006_PO_ALREADY_FULFILLED", SEVERITY_ERROR, CAT_HEADER,
+                f"PO is fulfilled and this invoice ({ctx.this_inv_qty}) exceeds "
+                f"remaining capacity ({remaining_capacity}). Route to exception approval.",
+                data={
+                    "this_inv_qty":    str(ctx.this_inv_qty),
+                    "po_qty":          str(po_qty),
+                    "consumed_by_others": str(capacity_used_by_other_invoices),
+                    "remaining":       str(remaining_capacity),
+                },
+            ))
 
     return out
 

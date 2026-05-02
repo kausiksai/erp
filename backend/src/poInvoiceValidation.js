@@ -255,18 +255,11 @@ export async function runFullValidation(invoiceId) {
     (await isOpenPoByPfx(po.pfx)) ||
     (await isOpenPoByPfx(invoice.open_order_pfx))
 
-  if (po.status === PO_STATUS.FULFILLED && !openPo) {
-    return {
-      valid: false,
-      poAlreadyFulfilled: true,
-      isShortfall: false,
-      isOpenPo: false,
-      reason: 'PO already fulfilled; route to exception approval',
-      errors: ['PO already fulfilled; route to exception approval'],
-      warnings: [],
-      details
-    }
-  }
+  // PO fulfilled check is now deferred until AFTER cumulative data is loaded
+  // (see below). This way we can tell whether the PO is *genuinely* used up
+  // by other invoices, vs. just marked fulfilled by this very invoice's
+  // earlier validation cycle (status drift).
+  const poStatusFulfilledBeforeCumulative = po.status === PO_STATUS.FULFILLED && !openPo
 
   const supplierMatch = invoice.supplier_id != null && po.supplier_id != null && Number(invoice.supplier_id) === Number(po.supplier_id)
   details.header.supplierMatch = supplierMatch
@@ -277,7 +270,7 @@ export async function runFullValidation(invoiceId) {
     details.header.warnings.push(`Invoice PO number (${invoice.po_number}) does not match PO (${po.po_number})`)
   }
 
-  const [invLinesRes, poLinesRes, cumul, asnRes, dcRes, schRes, dcSumRes, schSumRes] = await Promise.all([
+  const [invLinesRes, poLinesRes, cumul, asnRes, dcRes, schRes, dcSumRes, schSumRes, otherInvQtyRes] = await Promise.all([
     pool.query(
       `SELECT invoice_line_id, po_line_id, sequence_number, billed_qty, weight, count, rate, line_total, item_name
        FROM invoice_lines WHERE invoice_id = $1 ORDER BY sequence_number NULLS LAST, invoice_line_id`,
@@ -326,6 +319,17 @@ export async function runFullValidation(invoiceId) {
           OR (COALESCE(po_number, '') <> '' AND LOWER(TRIM(po_number)) = LOWER(TRIM($2)))
           OR (COALESCE(doc_no, '') <> '' AND LOWER(TRIM(doc_no)) = LOWER(TRIM($2)))`,
       [poId, po.po_number || '']
+    ),
+    // Sum of billed_qty across OTHER invoices for the same PO — used to
+    // tell apart "PO genuinely consumed by another invoice" from "PO is
+    // marked fulfilled because this invoice's earlier validation drifted
+    // the status".
+    pool.query(
+      `SELECT COALESCE(SUM(il.billed_qty), 0)::numeric AS qty
+         FROM invoice_lines il
+         JOIN invoices i2 ON i2.invoice_id = il.invoice_id
+        WHERE i2.po_id = $1 AND i2.invoice_id <> $2`,
+      [poId, invoiceId]
     )
   ])
 
@@ -336,6 +340,7 @@ export async function runFullValidation(invoiceId) {
   details.grn.grnQty = parseFloat(grnQty)
   details.asn.asnCount = parseInt(asnRes.rows[0]?.cnt ?? 0, 10)
   details.asn.asnQty   = parseFloat(asnRes.rows[0]?.qty_total ?? 0)
+  const otherInvQty = parseFloat(otherInvQtyRes.rows[0]?.qty ?? 0)
   const dcCount = parseInt(dcRes.rows[0]?.c ?? 0, 10)
   const scheduleCount = parseInt(schRes.rows[0]?.c ?? 0, 10)
   const sumDcQty = parseFloat(dcSumRes.rows[0]?.total ?? 0)
@@ -344,6 +349,37 @@ export async function runFullValidation(invoiceId) {
   details.scheduleCount = scheduleCount
   details.sumDcQty = sumDcQty
   details.sumSchedQty = sumSchedQty
+
+  // Pre-compute this invoice's total billed_qty so we can evaluate the
+  // refined "PO already fulfilled" check before the main validation loop.
+  const thisInvQtyTotal = invLines.reduce(
+    (acc, il) => acc + (il.billed_qty != null ? parseFloat(il.billed_qty) : 0),
+    0
+  )
+
+  // Refined PO-fulfilled check: only block when this invoice's qty
+  // ACTUALLY exceeds the PO's remaining capacity (po_qty − qty already
+  // consumed by OTHER validated invoices). If there's room, the PO being
+  // marked 'fulfilled' is just status drift caused by a previous run of
+  // *this same* invoice's validation; allow it through.
+  const poQtyNumeric = parseFloat(poQty)
+  if (poStatusFulfilledBeforeCumulative) {
+    const remainingCapacity = poQtyNumeric - otherInvQty
+    if (thisInvQtyTotal > remainingCapacity + TOL_QTY) {
+      return {
+        valid: false,
+        poAlreadyFulfilled: true,
+        isShortfall: false,
+        isOpenPo: false,
+        reason:
+          `PO already fulfilled and this invoice qty (${thisInvQtyTotal}) exceeds ` +
+          `remaining capacity (${remainingCapacity}). Route to exception approval.`,
+        errors: ['PO already fulfilled; route to exception approval'],
+        warnings: [],
+        details
+      }
+    }
+  }
 
   let thisInvQty = 0
   let thisInvAmount = 0
