@@ -139,7 +139,18 @@ def load(
         values: List[Tuple[Any, ...]] = []
         for r in rows:
             supplier_id = supplier_resolver.resolve(r.get("supplier"), r.get("supplier_name"))
+            # Resolve in this order:
+            #   1. (po_no, amd_no) — standard PO reference
+            #   2. open_order_no   — Open Order series (OP*/OSC*); used by the
+            #                        source whenever the GRN is booked under a
+            #                        blanket contract. Without this fallback
+            #                        ~1,070 GRNs orphan even though their
+            #                        blanket PO sits in our master.
             po_id = po_resolver.resolve(r.get("po_no"), r.get("amd_no"))
+            if po_id is None:
+                open_order_no = r.get("open_order_no")
+                if open_order_no:
+                    po_id = po_resolver.resolve(open_order_no)
             tup = (
                 po_id,
                 supplier_id,

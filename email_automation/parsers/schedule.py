@@ -60,14 +60,22 @@ def parse(source: PathOrBytes) -> List[Dict[str, Any]]:
             tentative = coerce_decimal(raw.get("tentative"))
             closeshort = coerce_decimal(raw.get("closeshort"))
 
+            # Doc Pfx / Doc No on this file ARE the schedule's own SS reference
+            # (e.g. "SS3" / "SS3260042"). Invoices reference schedules via
+            # (ss_pfx, ss_no) and the validation engine matches schedules to
+            # invoices via that pair, so populate both `doc_*` AND `ss_*`
+            # columns from the same source values. The file carries no
+            # explicit PO link — validation resolves po → schedule via the
+            # invoice's ss_pfx/ss_no, not via a po_id stored on the schedule.
+            doc_pfx = coerce_str(raw.get("doc_pfx"), max_len=50)
             rows.append(
                 {
-                    "po_number":    None,  # no PO link in this file
+                    "po_number":    None,
                     "ord_pfx":      None,
                     "ord_no":       None,
                     "schedule_ref": None,
-                    "ss_pfx":       None,
-                    "ss_no":        None,
+                    "ss_pfx":       doc_pfx,
+                    "ss_no":        doc_no,
                     "line_no":      coerce_int(raw.get("line_no")),
                     "item_id":      coerce_str(raw.get("item"), max_len=100),
                     "description":  coerce_str(raw.get("item_desc")),
@@ -85,7 +93,7 @@ def parse(source: PathOrBytes) -> List[Dict[str, Any]]:
                     "firm":         str(firm) if firm is not None else None,
                     "tentative":    str(tentative) if tentative is not None else None,
                     "closeshort":   str(closeshort) if closeshort is not None else None,
-                    "doc_pfx":      coerce_str(raw.get("doc_pfx"), max_len=50),
+                    "doc_pfx":      doc_pfx,
                     "doc_no":       doc_no,
                     "status":       coerce_str(raw.get("status"), max_len=50),
                 }

@@ -355,6 +355,13 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             dc_count = int(row["c"])
             dc_qty_total = _to_decimal(row["q"])
 
+            # The Supplier Schedule export has no PO link — only the
+            # schedule's own (ss_pfx, ss_no) which the invoice mirrors. So
+            # match schedules via the invoice's ss reference (preferred),
+            # falling back to the legacy po_id / po_number / doc_no = po_number
+            # paths for older data.
+            inv_ss_pfx = (invoice.get("ss_pfx") or "").strip()
+            inv_ss_no = (invoice.get("ss_no") or "").strip()
             cur.execute(
                 """
                 SELECT COUNT(*)::int AS c,
@@ -363,8 +370,16 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
                 WHERE po_id = %s
                    OR (COALESCE(po_number, '') <> '' AND LOWER(TRIM(po_number)) = LOWER(TRIM(%s)))
                    OR (COALESCE(doc_no, '') <> '' AND LOWER(TRIM(doc_no)) = LOWER(TRIM(%s)))
+                   OR (
+                        %s <> '' AND %s <> ''
+                        AND LOWER(TRIM(COALESCE(ss_pfx, ''))) = LOWER(%s)
+                        AND LOWER(TRIM(COALESCE(ss_no, '')))  = LOWER(%s)
+                      )
                 """,
-                (po.po_id, po.po_number, po.po_number),
+                (
+                    po.po_id, po.po_number, po.po_number,
+                    inv_ss_pfx, inv_ss_no, inv_ss_pfx, inv_ss_no,
+                ),
             )
             row = cur.fetchone()
             schedule_count = int(row["c"])

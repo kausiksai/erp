@@ -82,7 +82,17 @@ def load(
         values: List[Tuple[Any, ...]] = []
         for r in rows:
             supplier_id = supplier_resolver.resolve(r.get("supplier"), r.get("name"))
+            # Resolve in this order:
+            #   1. ord_no          — DC's own ORDER NO. column
+            #   2. open_order_no   — Open Order series; populated whenever the
+            #                        DC is against a blanket contract. Without
+            #                        this fallback ~581 DCs orphan despite
+            #                        their parent PO being in our master.
             po_id = po_resolver.resolve(r.get("ord_no"))
+            if po_id is None:
+                open_order_no = r.get("open_order_no")
+                if open_order_no:
+                    po_id = po_resolver.resolve(open_order_no)
             values.append(
                 (
                     po_id,
