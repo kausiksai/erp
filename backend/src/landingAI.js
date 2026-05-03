@@ -71,12 +71,22 @@ export async function extractInvoiceWithLandingAI(buffer, mimetype, filename = '
   /* ---------- Step 1: Parse ---------- */
   const rawParse = await callParse({ buffer, mimetype, filename, apiKey, timeoutMs })
 
-  // Pick only the invoice pages — never send GRN / packing-slip markdown to
-  // Extract, those are confusing and often contain competing "invoice #"-
-  // looking references.
+  // Per the supplier-side scanning convention, the invoice is always on
+  // pages 1-2 — selectInvoiceMarkdown concatenates both directly.
   const markdown = selectInvoiceMarkdown(rawParse)
   if (!markdown || markdown.trim().length === 0) {
     throw new Error('Landing AI Parse returned no invoice content')
+  }
+
+  // Score the joined markdown for diagnostics. Doesn't gate anything — but
+  // a low score is a signal that the wrong PDF (e.g. a GRN scanned by
+  // mistake) made it into the Drive folder.
+  const localWarnings = []
+  const invoiceScore = scoreInvoicePage(markdown)
+  if (invoiceScore < 30) {
+    localWarnings.push(
+      `low invoice score (${invoiceScore}) — pages 1-2 don't look like a tax invoice`
+    )
   }
 
   /* ---------- Step 2: Extract ---------- */
@@ -93,7 +103,7 @@ export async function extractInvoiceWithLandingAI(buffer, mimetype, filename = '
     rawExtract,
     model: 'landing-ai-ade',
     extracted: hasUsefulExtraction(invoiceData),
-    warnings: rawExtract?.metadata?.warnings || [],
+    warnings: [...localWarnings, ...(rawExtract?.metadata?.warnings || [])],
     schemaViolation: rawExtract?.metadata?.schema_violation_error || null,
     qualityIssues
   }
@@ -122,39 +132,29 @@ async function callParse({ buffer, mimetype, filename, apiKey, timeoutMs }) {
 }
 
 /**
- * Given a Parse response, return the markdown of the pages that actually
- * contain the tax invoice. Scored by Indian-invoice cues — we want this to
- * work even when the PDF has 5 pages (invoice on page 1, GRN on 2, packing
- * slip on 3, etc.).
+ * Build the markdown that gets sent to /extract.
+ *
+ * Per the supplier-side scanning convention: every PDF in the pipeline has
+ * the tax invoice on **pages 1-2** (slice_pdf_to_first_n_pages already
+ * truncates at 2). So we just concatenate the first two split markdowns
+ * and feed them to extract, which gets us totals/signatures from page 2
+ * that the previous score-based selector sometimes dropped.
+ *
+ * If parse for some reason returns only one split or none, we fall back to
+ * the whole-document markdown. Page scoring is still computed for logging
+ * so we can flag PDFs that don't look like invoices, but it no longer
+ * gates which pages reach extract.
  */
 function selectInvoiceMarkdown(parseResponse) {
   const splits = Array.isArray(parseResponse?.splits) ? parseResponse.splits : []
   if (splits.length === 0) {
-    // No split → fall back to whole markdown
     return parseResponse?.markdown || ''
   }
   if (splits.length === 1) {
     return splits[0].markdown || parseResponse?.markdown || ''
   }
-
-  // Score each split; keep the top-scoring one PLUS any that also score
-  // meaningfully (covers 2-page invoice continuations).
-  const scored = splits.map((s) => ({
-    split: s,
-    score: scoreInvoicePage(s.markdown || '')
-  }))
-  scored.sort((a, b) => b.score - a.score)
-  const topScore = scored[0].score
-
-  // Keep all splits that are within 40% of the top score (usually just the
-  // top one for standard invoices; allows 2-page invoices to keep both).
-  const kept = scored.filter((s) => s.score > 0 && s.score >= topScore * 0.6)
-  if (kept.length === 0) {
-    // Nothing looked like an invoice — fall back to whole markdown so Extract
-    // still has something to work with. User will edit in UI.
-    return parseResponse?.markdown || ''
-  }
-  return kept.map((k) => k.split.markdown).filter(Boolean).join('\n\n---\n\n')
+  const firstTwo = splits.slice(0, 2).map((s) => s.markdown || '').filter(Boolean)
+  return firstTwo.join('\n\n---\n\n') || parseResponse?.markdown || ''
 }
 
 /** Heuristic score 0..100 for "does this page look like a tax invoice?" */
