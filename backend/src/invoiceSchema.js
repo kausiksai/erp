@@ -367,12 +367,10 @@ function emptyInvoice() {
   }
 }
 
-/**
- * Derive the OP*/OSC* prefix from an open-order number string.
- * "OP1240119"  → "OP1"
- * "OSC3240010" → "OSC3"
- * Anything else → ''
- */
+// Derive the (OP|OSC)\d prefix from an open-order number.
+//   "OP1240119"  -> "OP1"
+//   "OSC3240010" -> "OSC3"
+//   anything else -> ''
 function deriveOpenOrderPfx(openOrderNo) {
   if (!openOrderNo || typeof openOrderNo !== 'string') return ''
   const m = openOrderNo.trim().match(/^(OP\d|OSC\d)/i)

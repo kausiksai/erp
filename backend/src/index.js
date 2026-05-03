@@ -229,7 +229,7 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
     // when the user clicks "Save Invoice" on the review form.
 
     // Resolve PO reference. Order:
-    //   1. open_order_no (Open Order series — OP*/OSC*) takes precedence so
+    //   1. open_order_no (Open Order series, OP* or OSC*) takes precedence so
     //      "SC3/32600014" invoices link to OSC3/OSC3240010, not STP3/32600014.
     //   2. po_number (standard PO).
     const openOrderRef = invoiceData.openOrderNo
