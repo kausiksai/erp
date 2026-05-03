@@ -234,7 +234,21 @@ async function fetchJson(url, apiKey, form, timeoutMs, label) {
       )
     }
 
-    return await res.json()
+    // Read as text first so we can echo the body when JSON parsing fails.
+    // Without this, a non-JSON 200 response (HTML error page, SSE stream,
+    // CDN interstitial) surfaces only as a useless "Unexpected identifier
+    // 'X' in JSON" with no clue what the actual body said.
+    const raw = await res.text()
+    try {
+      return JSON.parse(raw)
+    } catch (parseErr) {
+      const ct = res.headers.get('content-type') || 'unknown'
+      throw new Error(
+        `Landing AI ${label} returned 200 but body is not JSON ` +
+        `(content-type=${ct}, len=${raw.length}). ` +
+        `First 400 chars: ${raw.slice(0, 400)}`
+      )
+    }
   } catch (err) {
     clearTimeout(timer)
     if (err?.name === 'AbortError' || isTransient(err)) err.retryable = true
