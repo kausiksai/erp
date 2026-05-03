@@ -312,6 +312,8 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
         invoiceNumber: invoiceData.invoiceNumber || '',
         invoiceDate: invoiceData.invoiceDate || null,
         poNumber: invoiceData.poNumber || '',
+        openOrderNo: invoiceData.openOrderNo || '',
+        openOrderPfx: invoiceData.openOrderPfx || '',
         supplierName: invoiceData.supplierName || '',
         supplierGstin: invoiceData.supplierGstin || '',
         supplierPan: invoiceData.supplierPan || '',
