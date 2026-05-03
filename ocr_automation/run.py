@@ -34,7 +34,6 @@ import sys
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -58,6 +57,7 @@ from .extractor import (
     save,
     slice_pdf_to_first_n_pages,
 )
+from .lockfile import FileLock, LockError
 from .logger import setup_logging
 
 PDF_MIME = "application/pdf"
@@ -83,34 +83,10 @@ class FileOutcome:
     skipped_duplicate: bool = False
 
 
-# ---------------------------------------------------------------------------
-# File lock
-# ---------------------------------------------------------------------------
-@contextmanager
-def acquire_lock(path: Path):
-    """Best-effort file lock: refuses to start if another run is in progress.
-    On Windows we can't use fcntl, so we rely on a stale-PID check.
-    """
-    if path.exists():
-        try:
-            existing = path.read_text().strip()
-        except OSError:
-            existing = "?"
-        raise RuntimeError(
-            f"Lock file {path} already exists (pid={existing}). "
-            "Another run may be in progress; if not, delete the file."
-        )
-    try:
-        path.write_text(str(__import__("os").getpid()))
-    except OSError as exc:
-        raise RuntimeError(f"Cannot create lock file {path}: {exc}") from exc
-    try:
-        yield
-    finally:
-        try:
-            path.unlink()
-        except OSError as exc:
-            log.warning("could not remove lock file %s: %s", path, exc)
+# File-lock helper now lives in `ocr_automation.lockfile`. It does a
+# stale-PID check (Win32 OpenProcess on Windows, os.kill(0) on POSIX) so
+# a process that died without releasing the lock no longer wedges
+# subsequent runs.
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +284,7 @@ def main(argv=None) -> int:
         return EXIT_CONFIG
 
     try:
-        with acquire_lock(CONFIG.paths.lock_file):
+        with FileLock(CONFIG.paths.lock_file):
             run_id = audit.start_run(args.folder_id or CONFIG.drive.folder_id)
             try:
                 return _execute(run_id, args)
@@ -319,8 +295,8 @@ def main(argv=None) -> int:
                     error_message=f"{type(exc).__name__}: {exc}",
                 )
                 return EXIT_FATAL
-    except RuntimeError as exc:
-        log.error("lock/config error: %s", exc)
+    except LockError as exc:
+        log.error("lock error: %s", exc)
         return EXIT_CONFIG
     finally:
         close_pool()

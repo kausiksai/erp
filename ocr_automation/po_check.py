@@ -28,7 +28,6 @@ import argparse
 import logging
 import os
 import sys
-from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -37,6 +36,7 @@ import psycopg2
 from . import audit
 from .config import CONFIG
 from .db import close_pool, get_conn, ping
+from .lockfile import FileLock, LockError
 from .logger import setup_logging
 
 log = logging.getLogger("ocr_automation.po_check")
@@ -44,30 +44,6 @@ log = logging.getLogger("ocr_automation.po_check")
 EXIT_OK = 0
 EXIT_CONFIG = 10
 EXIT_FATAL = 99
-
-
-@contextmanager
-def acquire_lock(path: Path):
-    if path.exists():
-        try:
-            existing = path.read_text().strip()
-        except OSError:
-            existing = "?"
-        raise RuntimeError(
-            f"Lock file {path} already exists (pid={existing}). "
-            "Another po_check run may be in progress."
-        )
-    try:
-        path.write_text(str(os.getpid()))
-    except OSError as exc:
-        raise RuntimeError(f"Cannot create lock file {path}: {exc}") from exc
-    try:
-        yield
-    finally:
-        try:
-            path.unlink()
-        except OSError as exc:
-            log.warning("could not remove lock file %s: %s", path, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +190,7 @@ def main(argv=None) -> int:
 
     lock_path = CONFIG.paths.root / ".lock.po_check"
     try:
-        with acquire_lock(lock_path):
+        with FileLock(lock_path):
             run_id = audit.start_run(
                 drive_folder_id=f"po_check(grace_days={args.grace_days})"
             )
@@ -238,7 +214,7 @@ def main(argv=None) -> int:
                     error_message=f"{type(exc).__name__}: {exc}",
                 )
                 return EXIT_FATAL
-    except RuntimeError as exc:
+    except LockError as exc:
         log.error("lock error: %s", exc)
         return EXIT_CONFIG
     finally:
