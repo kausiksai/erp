@@ -1486,38 +1486,80 @@ router.post('/invoices', async (req, res) => {
       items: Array.isArray(items) ? items : []
     })
 
-    // Does an Excel row already exist for THIS supplier's invoice_number?
-    // The match key is (invoice_number, supplier_id) — never invoice_number
-    // alone. Many Indian suppliers number invoices with small generic
-    // values ("63", "1160", "1161") and matching by number alone produces
-    // false pairings across totally different suppliers (caught in
-    // production: 4 cross-supplier collisions on 2026-05-04).
+    // Does a row already exist for THIS supplier's invoice_number?
     //
-    // If we don't know the OCR-side supplier yet (supplierId IS NULL),
-    // we deliberately skip the merge lookup — picking ANY Excel row with
-    // the same invoice_number would be a guess. Falling through to insert
-    // creates a new row; if a manual reviewer later fills in the supplier
-    // and an existing Excel match shows up, that's a reconciliation
-    // workflow concern, not a loader concern.
+    // Two layers of dedup:
+    //
+    // (a) supplier_id resolved → match on (invoice_number, supplier_id).
+    //     Catches Excel↔OCR pairs and OCR↔OCR pairs whenever the supplier
+    //     was identifiable. The DB unique constraint
+    //     uq_invoices_supplier_number backs this up.
+    //
+    // (b) supplier_id NULL but OCR snapshot has supplier_gstin or
+    //     supplier_name → fall back to identifying the row by OCR-extracted
+    //     supplier identity. The unique constraint allows multiple NULL
+    //     supplier_id rows, so without this fallback two parallel scans of
+    //     the same physical invoice with no resolvable supplier produce
+    //     duplicates (caught in production on 2026-05-04: 3 pairs).
+    //
+    // Cross-supplier matching by invoice_number alone is still avoided —
+    // generic numbers like "1161" or "63" would otherwise glue unrelated
+    // suppliers together.
     const lookupNumber = invoiceNumber || `INV-${Date.now()}`
-    const existing = supplierId
-      ? await client.query(
-          `SELECT invoice_id, source, excel_snapshot FROM invoices
-             WHERE invoice_number = $1 AND supplier_id = $2 LIMIT 1`,
-          [lookupNumber, supplierId]
-        )
-      : { rows: [] }
+    const ocrSupplierGstin = String(req.body.supplierGstin || '').trim()
+    const ocrSupplierName = String(req.body.supplierName || '').trim()
+
+    let existing = { rows: [] }
+    if (supplierId) {
+      existing = await client.query(
+        `SELECT invoice_id, source, excel_snapshot FROM invoices
+           WHERE invoice_number = $1 AND supplier_id = $2 LIMIT 1`,
+        [lookupNumber, supplierId]
+      )
+    } else if (ocrSupplierGstin || ocrSupplierName) {
+      existing = await client.query(
+        `SELECT invoice_id, source, excel_snapshot FROM invoices
+           WHERE invoice_number = $1
+             AND supplier_id IS NULL
+             AND excel_snapshot IS NULL
+             AND (
+               ($2 <> '' AND ocr_snapshot->>'supplier_gstin' = $2)
+               OR ($3 <> '' AND
+                   LOWER(REGEXP_REPLACE(TRIM(COALESCE(ocr_snapshot->>'supplier_name','')),'\s+',' ','g'))
+                 = LOWER(REGEXP_REPLACE(TRIM($3),'\s+',' ','g')))
+             )
+           LIMIT 1`,
+        [lookupNumber, ocrSupplierGstin, ocrSupplierName]
+      )
+    }
 
     let invoiceId
-    let isExistingExcelRow = false
+    // True whenever we matched an existing row (Excel or OCR). Used later
+    // to skip re-inserting invoice_lines — those already exist on the
+    // matched row and re-inserting would duplicate them.
+    let isExistingRow = false
     if (existing.rows.length > 0 && existing.rows[0].excel_snapshot) {
-      isExistingExcelRow = true
+      // (a) Excel row already there — patch OCR snapshot, mark as 'both'.
+      isExistingRow = true
       invoiceId = existing.rows[0].invoice_id
       await client.query(
         `UPDATE invoices
             SET ocr_snapshot = $1::jsonb,
                 ocr_received_at = NOW(),
                 source = 'both',
+                updated_at = NOW()
+          WHERE invoice_id = $2`,
+        [JSON.stringify(ocrSnapshot), invoiceId]
+      )
+    } else if (existing.rows.length > 0) {
+      // (b) Pre-existing OCR-only row for the same logical invoice — refresh
+      // its snapshot in place rather than inserting a duplicate row.
+      isExistingRow = true
+      invoiceId = existing.rows[0].invoice_id
+      await client.query(
+        `UPDATE invoices
+            SET ocr_snapshot = $1::jsonb,
+                ocr_received_at = NOW(),
                 updated_at = NOW()
           WHERE invoice_id = $2`,
         [JSON.stringify(ocrSnapshot), invoiceId]
@@ -1594,7 +1636,7 @@ router.post('/invoices', async (req, res) => {
     // the Excel lines — we must not duplicate them. Any OCR-side line data is
     // captured in ocr_snapshot.line_items for side-by-side review instead.
     const insertedLineIds = []
-    if (!isExistingExcelRow && Array.isArray(items) && items.length > 0) {
+    if (!isExistingRow && Array.isArray(items) && items.length > 0) {
       for (let index = 0; index < items.length; index++) {
         const item = items[index]
         
