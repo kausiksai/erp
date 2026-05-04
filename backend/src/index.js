@@ -1400,16 +1400,27 @@ router.post('/invoices', async (req, res) => {
       items: Array.isArray(items) ? items : []
     })
 
-    // Does an Excel row already exist for this invoice_number? If yes we
-    // must NOT overwrite its authoritative header values — we only add the
-    // OCR snapshot and let reconcileInvoice decide what the user needs to
-    // approve. Only when there's no existing row do we insert fresh OCR
-    // values into the main columns.
+    // Does an Excel row already exist for THIS supplier's invoice_number?
+    // The match key is (invoice_number, supplier_id) — never invoice_number
+    // alone. Many Indian suppliers number invoices with small generic
+    // values ("63", "1160", "1161") and matching by number alone produces
+    // false pairings across totally different suppliers (caught in
+    // production: 4 cross-supplier collisions on 2026-05-04).
+    //
+    // If we don't know the OCR-side supplier yet (supplierId IS NULL),
+    // we deliberately skip the merge lookup — picking ANY Excel row with
+    // the same invoice_number would be a guess. Falling through to insert
+    // creates a new row; if a manual reviewer later fills in the supplier
+    // and an existing Excel match shows up, that's a reconciliation
+    // workflow concern, not a loader concern.
     const lookupNumber = invoiceNumber || `INV-${Date.now()}`
-    const existing = await client.query(
-      `SELECT invoice_id, source, excel_snapshot FROM invoices WHERE invoice_number = $1 LIMIT 1`,
-      [lookupNumber]
-    )
+    const existing = supplierId
+      ? await client.query(
+          `SELECT invoice_id, source, excel_snapshot FROM invoices
+             WHERE invoice_number = $1 AND supplier_id = $2 LIMIT 1`,
+          [lookupNumber, supplierId]
+        )
+      : { rows: [] }
 
     let invoiceId
     let isExistingExcelRow = false
