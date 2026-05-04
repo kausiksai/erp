@@ -175,6 +175,65 @@ const router = express.Router()
 router.use(apiLimiter)
 
 
+// Generate likely PO-number variants for the given raw text. Suppliers
+// print PO references in inconsistent formats — a single OCR-extracted
+// string can be all of these and we want a master hit on any variant:
+//
+//   "PO9/PO9251807"      -> ["PO9/PO9251807", "PO9251807"]
+//   "PO9250648/2025-26"  -> ["PO9250648/2025-26", "PO9250648"]
+//   "SC5/52500996/2025-26" -> [".../...-..", "52500996/2025-26", "52500996"]
+//   "OP2/OP2240163"      -> ["OP2/OP2240163", "OP2240163"]
+//
+// Order matters: the raw form is tried first, so a master with the exact
+// printed form (rare but possible) still wins. Returns deduped variants.
+function poNumberCandidates(raw) {
+  if (!raw) return []
+  const s = String(raw).trim()
+  if (!s) return []
+  const out = new Set([s])
+
+  // strip leading "PFX/" duplication where PFX looks like a code (alpha
+  // optional digit, e.g. PO9, OSC3, SC5, STP3, MTS9)
+  const stripLeadingPfx = (v) => {
+    const m = v.match(/^[A-Z]+\d?\/(.+)$/i)
+    return m ? m[1].trim() : null
+  }
+  // strip trailing "/YYYY-YY" or "/YYYY-YYYY" date suffix
+  const stripTrailingDate = (v) => {
+    const m = v.match(/^(.+?)\/\d{4}-\d{2,4}$/)
+    return m ? m[1].trim() : null
+  }
+
+  let v
+  if ((v = stripLeadingPfx(s))) out.add(v)
+  if ((v = stripTrailingDate(s))) out.add(v)
+  // combined: prefix-strip then date-strip
+  const afterPfx = stripLeadingPfx(s)
+  if (afterPfx && (v = stripTrailingDate(afterPfx))) out.add(v)
+  // combined: date-strip then prefix-strip
+  const afterDate = stripTrailingDate(s)
+  if (afterDate && (v = stripLeadingPfx(afterDate))) out.add(v)
+
+  return Array.from(out).filter(Boolean)
+}
+
+// Resolve the first matching po_id by trying each variant against
+// purchase_orders.po_number, preferring the latest amendment.
+async function resolvePoIdByCandidates(pool, candidates) {
+  for (const c of candidates) {
+    const r = await pool.query(
+      `SELECT po_id FROM purchase_orders
+       WHERE TRIM(po_number) = TRIM($1)
+       ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC
+       LIMIT 1`,
+      [c]
+    )
+    if (r.rows.length > 0) return r.rows[0].po_id
+  }
+  return null
+}
+
+
 // Upload invoice and extract data (NO DATABASE WRITES — only extraction).
 // OCR is powered exclusively by Landing AI Agentic Document Extraction (ADE)
 // via the 2-step Parse → Extract pipeline. If ADE fails, the review form
@@ -232,28 +291,19 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
     //   1. open_order_no (Open Order series, OP* or OSC*) takes precedence so
     //      "SC3/32600014" invoices link to OSC3/OSC3240010, not STP3/32600014.
     //   2. po_number (standard PO).
+    //
+    // For each, try every poNumberCandidates() variant. Suppliers print PO
+    // numbers as e.g. "PO9/PO9251807" or "PO9250648/2025-26" while master
+    // stores "PO9251807" / "PO9250648" — the variants strip prefix
+    // duplications and date suffixes so we still hit the master.
     const openOrderRef = invoiceData.openOrderNo
     const poNumberRef = req.body.poNumber || req.query.poNumber || invoiceData.poNumber
     let poId = null
     if (openOrderRef) {
-      const r = await pool.query(
-        `SELECT po_id FROM purchase_orders
-         WHERE TRIM(po_number) = TRIM($1)
-         ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC
-         LIMIT 1`,
-        [openOrderRef]
-      )
-      if (r.rows.length > 0) poId = r.rows[0].po_id
+      poId = await resolvePoIdByCandidates(pool, poNumberCandidates(openOrderRef))
     }
     if (!poId && poNumberRef) {
-      const poResult = await pool.query(
-        `SELECT po_id FROM purchase_orders
-         WHERE TRIM(po_number) = TRIM($1)
-         ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC
-         LIMIT 1`,
-        [poNumberRef]
-      )
-      if (poResult.rows.length > 0) poId = poResult.rows[0].po_id
+      poId = await resolvePoIdByCandidates(pool, poNumberCandidates(poNumberRef))
     }
 
     // Resolve supplier (prefer GSTIN match over name — much more reliable)
