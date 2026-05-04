@@ -176,45 +176,83 @@ router.use(apiLimiter)
 
 
 // Generate likely PO-number variants for the given raw text. Suppliers
-// print PO references in inconsistent formats — a single OCR-extracted
-// string can be all of these and we want a master hit on any variant:
+// print PO references in many inconsistent formats — a single OCR-extracted
+// string might be any of these and we want a master hit on any variant:
 //
-//   "PO9/PO9251807"      -> ["PO9/PO9251807", "PO9251807"]
-//   "PO9250648/2025-26"  -> ["PO9250648/2025-26", "PO9250648"]
-//   "SC5/52500996/2025-26" -> [".../...-..", "52500996/2025-26", "52500996"]
-//   "OP2/OP2240163"      -> ["OP2/OP2240163", "OP2240163"]
+//   "PO9/PO9251807"        -> ["PO9251807"]
+//   "PO9250648/2025-26"    -> ["PO9250648"]
+//   "SC5/52500996/2025-26" -> ["52500996", ...]
+//   "OP2/OP2240163"        -> ["OP2240163"]
+//   "PO9251770 / 2025-26"  -> ["PO9251770"]                 (whitespace around /)
+//   "PO6 - PO6250901"      -> ["PO6250901"]                 (hyphen separator)
+//   "PO3-PO3250556"        -> ["PO3250556"]
+//   "OP2\OP2240192 SS2/..." -> ["OP2240192"]                (backslash + extras)
+//   "5250378"              -> ["PO5250378", "OSC5250378",...] (bare digits)
+//   "7240007"              -> ["OSC7240007", ...]
 //
 // Order matters: the raw form is tried first, so a master with the exact
-// printed form (rare but possible) still wins. Returns deduped variants.
+// printed form still wins. Returns deduped variants.
 function poNumberCandidates(raw) {
   if (!raw) return []
-  const s = String(raw).trim()
-  if (!s) return []
-  const out = new Set([s])
+  const orig = String(raw).trim()
+  if (!orig) return []
+  const out = new Set([orig])
 
-  // strip leading "PFX/" duplication where PFX looks like a code (alpha
-  // optional digit, e.g. PO9, OSC3, SC5, STP3, MTS9)
+  // (1) Collapse whitespace around / \ - so "PO6 - PO6250901" / "PO9 / 2025"
+  //     normalise to "PO6-PO6250901" / "PO9/2025" before pattern matching.
+  const collapsed = orig.replace(/\s*([/\\\-])\s*/g, "$1")
+  if (collapsed !== orig) out.add(collapsed)
+
+  // Strip leading "PFX[separator]" duplication. Separator can be / \ -
   const stripLeadingPfx = (v) => {
-    const m = v.match(/^[A-Z]+\d?\/(.+)$/i)
+    const m = v.match(/^[A-Z]+\d?[/\\\-](.+)$/i)
     return m ? m[1].trim() : null
   }
-  // strip trailing "/YYYY-YY" or "/YYYY-YYYY" date suffix
+  // Strip trailing date suffix in any of these forms:
+  //   /YYYY-YY[YY]   (e.g. "/2025-26", "/2025-2026")
+  //   /YY-YY         (e.g. "/25-26")
+  //   /DD.MM.YYYY    (e.g. "/05.02.2026")
+  //   /DD.MM.YY      (e.g. "/30.12.26")
   const stripTrailingDate = (v) => {
-    const m = v.match(/^(.+?)\/\d{4}-\d{2,4}$/)
-    return m ? m[1].trim() : null
+    let m = v.match(/^(.+?)[/\\]\d{4}-\d{2,4}$/)
+    if (m) return m[1].trim()
+    m = v.match(/^(.+?)[/\\]\d{2}-\d{2}$/)
+    if (m) return m[1].trim()
+    m = v.match(/^(.+?)[/\\]\d{2}\.\d{2}\.\d{2,4}$/)
+    if (m) return m[1].trim()
+    return null
+  }
+  const firstWord = (v) => v.trim().split(/\s+/)[0]
+
+  // (2) Generate variants from both orig and collapsed bases
+  for (const base of new Set([orig, collapsed])) {
+    let v = stripLeadingPfx(base)
+    if (v) {
+      out.add(v)
+      out.add(firstWord(v))
+      const v2 = stripTrailingDate(firstWord(v))
+      if (v2) out.add(v2)
+    }
+    v = stripTrailingDate(base)
+    if (v) {
+      out.add(v)
+      out.add(firstWord(v))
+      const v2 = stripLeadingPfx(firstWord(v))
+      if (v2) out.add(v2)
+    }
+    out.add(firstWord(base))
   }
 
-  let v
-  if ((v = stripLeadingPfx(s))) out.add(v)
-  if ((v = stripTrailingDate(s))) out.add(v)
-  // combined: prefix-strip then date-strip
-  const afterPfx = stripLeadingPfx(s)
-  if (afterPfx && (v = stripTrailingDate(afterPfx))) out.add(v)
-  // combined: date-strip then prefix-strip
-  const afterDate = stripTrailingDate(s)
-  if (afterDate && (v = stripLeadingPfx(afterDate))) out.add(v)
+  // (3) Bare-digit references (e.g. "5250378", "7240007") — supplier dropped
+  //     the prefix entirely. Try the common master prefixes.
+  if (/^\d{6,}$/.test(orig)) {
+    for (const pfx of ["PO", "OSC", "OP", "MTS", "STP"]) {
+      out.add(pfx + orig)
+    }
+  }
 
-  return Array.from(out).filter(Boolean)
+  // Filter out empties and any single-char garbage that the regex tolerates
+  return Array.from(out).filter((v) => v && v.length >= 3)
 }
 
 // Resolve the first matching po_id by trying each variant against
