@@ -4,15 +4,25 @@ source (portal or email_automation).
 
 Per invoice, each validation runs in its own transaction so a failure on
 one invoice does not roll back the rest of the sweep.
+
+Can also be invoked standalone:
+    python -m email_automation.validation.sweeper
+
+This entry point is what scripts/nightly_pipeline.bat phase 4 calls
+after OCR finishes — pre/post sweeps inside email_automation.run only
+cover invoices that already exist when email_automation starts, so OCR
+additions need a separate sweep at the end of the night.
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 import time
 import traceback
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 from uuid import UUID
 
@@ -20,7 +30,10 @@ import psycopg2
 from psycopg2.extensions import connection as PGConnection
 
 from ..audit import AttachmentLogEntry, STATUS_VALIDATED, log_attachment
-from ..db import get_conn
+from ..config import CONFIG
+from ..db import close_pool, get_conn, ping
+from ..logger import setup_logging
+from ..mailbox.lockfile import FileLock, LockError
 from .context import ContextError
 from .engine import ValidationResult, run_full_validation
 from .status_writer import apply_validation_result
@@ -163,3 +176,58 @@ def revalidate_pending(
     report.duration_seconds = time.time() - t0
     log.info("sweeper complete: %s", report.summary())
     return report
+
+
+# ----------------------------------------------------------------------------
+# Standalone CLI — runs only the validation sweep with its own lock file, no
+# IMAP / Excel reload. Used by scripts/nightly_pipeline.bat phase 4 so OCR
+# additions get validated the same night they land.
+# ----------------------------------------------------------------------------
+EXIT_OK = 0
+EXIT_CONFIG = 10
+EXIT_FATAL = 99
+
+
+def main() -> int:
+    setup_logging()
+    log.info("sweeper CLI starting")
+
+    if not ping():
+        log.error("DB ping failed; aborting")
+        return EXIT_CONFIG
+
+    # Separate lock from email_automation.run so they don't block each other —
+    # phase 1 and phase 4 are sequential in the bat, but a manual sweep should
+    # also be safe to run while a phase-1 email pipeline is finishing up. The
+    # locks only need to fence concurrent sweepers.
+    lock_path: Path = CONFIG.paths.lock_file.parent / ".lock.sweeper"
+    try:
+        with FileLock(lock_path):
+            try:
+                report = revalidate_pending(run_id=None, log_to_audit=False)
+                log.info(
+                    "sweeper exit: evaluated=%d validated=%d re_validation=%d "
+                    "exception=%d still_waiting=%d load_errors=%d "
+                    "top_codes=%s",
+                    report.invoices_evaluated,
+                    report.validated,
+                    report.waiting_for_re_validation,
+                    report.exception_approval,
+                    report.still_waiting,
+                    report.load_errors,
+                    list(report.error_code_histogram.items())[:8],
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.exception("sweeper failed: %s", exc)
+                return EXIT_FATAL
+    except LockError as exc:
+        log.error("lock error: %s", exc)
+        return EXIT_CONFIG
+    finally:
+        close_pool()
+
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

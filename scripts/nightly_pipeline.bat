@@ -3,15 +3,24 @@ REM ============================================================================
 REM  nightly_pipeline.bat - Windows wrapper for the nightly billing pipeline.
 REM
 REM  Phase 1  email_automation     pulls Excels from Zoho, loads PO/GRN/ASN/
-REM                                DC/Schedule/Invoice into RDS.
+REM                                DC/Schedule/Invoice into RDS, runs the
+REM                                pre/post validation sweeps over Excel
+REM                                invoices.
 REM  Phase 2  ocr_automation       pulls PDFs from Drive, extracts via Landing
 REM                                AI, writes ocr_snapshot, server-side
 REM                                reconcile fires per invoice.
 REM  Phase 3  ocr_automation.po_check
 REM                                flags POs with GRN but no invoice raised.
+REM  Phase 4  email_automation.validation.sweeper
+REM                                final validation pass — picks up the OCR
+REM                                invoices that landed AFTER phase 1's sweep.
+REM                                Without this they sit in waiting_for_validation
+REM                                until the next morning.
 REM
 REM  Phase 2 runs only if email exited 0 (success) or 30 (partial success).
 REM  Phase 3 runs unless OCR failed fatally (40 = all files failed, 99 = crash).
+REM  Phase 4 runs as long as we've successfully reached this far — it's safe
+REM  to run even if no new invoices were loaded.
 REM
 REM  Logs are written to:
 REM      <PROJECT_DIR>\nightly_logs\nightly_YYYY-MM-DD_HHMMSS.log
@@ -43,22 +52,23 @@ call :LOG log_file=%LOG_FILE%
 
 REM ---- Phase 1: email_automation -------------------------------------------
 call :LOG ----
-call :LOG phase 1/3: email_automation
+call :LOG phase 1/4: email_automation
 "%EMAIL_PY%" -m email_automation.run >> "%LOG_FILE%" 2>&1
 set "EMAIL_RC=!ERRORLEVEL!"
 call :LOG email_automation exit=!EMAIL_RC!
 
 REM Skip OCR if email failed fatally (anything other than 0 or 30).
 if not "!EMAIL_RC!"=="0" if not "!EMAIL_RC!"=="30" (
-    call :LOG email phase failed exit=!EMAIL_RC!, skipping OCR + PO check
+    call :LOG email phase failed exit=!EMAIL_RC!, skipping OCR + PO check + sweep
     set "OCR_RC=0"
     set "PO_RC=0"
+    set "SWEEP_RC=0"
     goto :summary
 )
 
 REM ---- Phase 2: ocr_automation ---------------------------------------------
 call :LOG ----
-call :LOG phase 2/3: ocr_automation
+call :LOG phase 2/4: ocr_automation
 "%OCR_PY%" -W ignore -m ocr_automation.run >> "%LOG_FILE%" 2>&1
 set "OCR_RC=!ERRORLEVEL!"
 call :LOG ocr_automation exit=!OCR_RC!
@@ -70,26 +80,39 @@ if "!OCR_RC!"=="40" goto :skip_po
 if "!OCR_RC!"=="99" goto :skip_po
 
 call :LOG ----
-call :LOG phase 3/3: po_check
+call :LOG phase 3/4: po_check
 "%OCR_PY%" -W ignore -m ocr_automation.po_check >> "%LOG_FILE%" 2>&1
 set "PO_RC=!ERRORLEVEL!"
 call :LOG po_check exit=!PO_RC!
-goto :summary
+goto :phase4
 
 :skip_po
 call :LOG OCR failed exit=!OCR_RC!, skipping PO check
 set "PO_RC=0"
 
+:phase4
+REM ---- Phase 4: post-OCR validation sweep ---------------------------------
+REM Phase 1's post-sweep ran before OCR loaded its invoices, so OCR additions
+REM sit in waiting_for_validation until tomorrow morning unless we sweep
+REM again here. Cheap (~1 minute) and idempotent — re-running over already-
+REM validated invoices is a no-op.
+call :LOG ----
+call :LOG phase 4/4: post-OCR validation sweep
+"%EMAIL_PY%" -m email_automation.validation.sweeper >> "%LOG_FILE%" 2>&1
+set "SWEEP_RC=!ERRORLEVEL!"
+call :LOG sweeper exit=!SWEEP_RC!
+
 :summary
 call :LOG ----
-call :LOG finished email=!EMAIL_RC! ocr=!OCR_RC! po=!PO_RC!
+call :LOG finished email=!EMAIL_RC! ocr=!OCR_RC! po=!PO_RC! sweep=!SWEEP_RC!
 
 REM Surface a non-zero exit if any phase failed so Task Scheduler / monitoring
 REM can flag the run.
 set "RC=0"
-if not "!EMAIL_RC!"=="0" if not "!EMAIL_RC!"=="30" set "RC=!EMAIL_RC!"
-if not "!OCR_RC!"=="0"   if not "!OCR_RC!"=="30" set "RC=!OCR_RC!"
-if not "!PO_RC!"=="0"                            set "RC=!PO_RC!"
+if not "!EMAIL_RC!"=="0"  if not "!EMAIL_RC!"=="30" set "RC=!EMAIL_RC!"
+if not "!OCR_RC!"=="0"    if not "!OCR_RC!"=="30"   set "RC=!OCR_RC!"
+if not "!PO_RC!"=="0"                               set "RC=!PO_RC!"
+if not "!SWEEP_RC!"=="0"                            set "RC=!SWEEP_RC!"
 
 endlocal & exit /b %RC%
 
