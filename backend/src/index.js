@@ -316,10 +316,46 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
       if (bySuplrGstin.rows.length > 0) supplierId = bySuplrGstin.rows[0].supplier_id
     }
     if (!supplierId && invoiceData.supplierName) {
-      const byName = await pool.query(
+      // Try in order:
+      //   (a) exact match (legacy)
+      //   (b) case + whitespace-insensitive match — handles "Bhandari Metal
+      //       Enterprises" vs "BHANDARI METAL ENTERPRISES" and trailing
+      //       whitespace from OCR
+      //   (c) prefix match on the first 4 words of the OCR name — handles
+      //       suffixes that suppliers add inconsistently
+      //       ("PRECISION WIRES INDIA LIMITED" vs "PRECISION WIRES INDIA
+      //       LIMITED-UNIT 2"). Only resolves when the prefix is unique
+      //       across the suppliers master.
+      const rawName = String(invoiceData.supplierName).trim()
+      const normName = rawName.replace(/\s+/g, ' ').toLowerCase()
+      const firstWords = rawName.split(/\s+/).slice(0, 4).join(' ').toLowerCase()
+
+      let byName = await pool.query(
         `SELECT supplier_id FROM suppliers WHERE supplier_name = $1 LIMIT 1`,
-        [invoiceData.supplierName]
+        [rawName]
       )
+      if (byName.rows.length === 0) {
+        byName = await pool.query(
+          `SELECT supplier_id FROM suppliers
+             WHERE LOWER(REGEXP_REPLACE(TRIM(supplier_name), '\\s+', ' ', 'g')) = $1
+             LIMIT 1`,
+          [normName]
+        )
+      }
+      if (byName.rows.length === 0 && firstWords.length >= 8) {
+        // Only use the prefix path when the first-4-words match exactly
+        // ONE supplier. Multiple matches = ambiguous → leave supplierId null
+        // (we'll fall back to the GRN/ASN reverse lookup later, or the
+        // invoice ends up unresolved which is safer than picking wrong).
+        const ambig = await pool.query(
+          `SELECT supplier_id FROM suppliers
+             WHERE LOWER(TRIM(supplier_name)) LIKE $1 || '%'
+             LIMIT 2`,
+          [firstWords]
+        )
+        if (ambig.rows.length === 1) byName = ambig
+      }
+
       if (byName.rows.length > 0) supplierId = byName.rows[0].supplier_id
     }
 

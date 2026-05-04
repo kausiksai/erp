@@ -418,24 +418,42 @@ def check_gst(ctx: InvoiceContext) -> List[Finding]:
         header_igst += igst_amt
         header_tax += total_tax
 
-        # Slab sum: individual slab columns must add up to the total
+        # Slab sum: individual slab columns must add up to the total — but
+        # only run the check when at least one slab column is populated.
+        # The slab breakdown comes from the bill-register Excel; OCR-loaded
+        # invoices don't carry slab columns at all (Landing AI's per-line
+        # tax fields are cgst_amount / sgst_amount only). For those rows
+        # the slab data is *absent*, not *wrong*, so silently skipping
+        # E030/E031/E032 is the correct behaviour.
+        has_cgst_slabs = (
+            il.get("cgst_9_amount") is not None
+            or il.get("cgst_2_5_amount") is not None
+        )
+        has_sgst_slabs = (
+            il.get("sgst_9_amount") is not None
+            or il.get("sgst_2_5_amount") is not None
+        )
+        has_igst_slabs = (
+            il.get("igst_18_amount") is not None
+            or il.get("igst_5_amount") is not None
+        )
         cgst_slab_sum = _dec(il.get("cgst_9_amount")) + _dec(il.get("cgst_2_5_amount"))
         sgst_slab_sum = _dec(il.get("sgst_9_amount")) + _dec(il.get("sgst_2_5_amount"))
         igst_slab_sum = _dec(il.get("igst_18_amount")) + _dec(il.get("igst_5_amount"))
 
-        if cgst_amt > 0 and abs(cgst_slab_sum - cgst_amt) > TOL_AMOUNT:
+        if has_cgst_slabs and cgst_amt > 0 and abs(cgst_slab_sum - cgst_amt) > TOL_AMOUNT:
             out.append(Finding(
                 "E030_CGST_SLAB_SUM_MISMATCH", SEVERITY_ERROR, CAT_GST,
                 f"Line {seq} CGST slab sum ({cgst_slab_sum}) != cgst_amount ({cgst_amt})",
                 line_seq=seq,
             ))
-        if sgst_amt > 0 and abs(sgst_slab_sum - sgst_amt) > TOL_AMOUNT:
+        if has_sgst_slabs and sgst_amt > 0 and abs(sgst_slab_sum - sgst_amt) > TOL_AMOUNT:
             out.append(Finding(
                 "E031_SGST_SLAB_SUM_MISMATCH", SEVERITY_ERROR, CAT_GST,
                 f"Line {seq} SGST slab sum ({sgst_slab_sum}) != sgst_amount ({sgst_amt})",
                 line_seq=seq,
             ))
-        if igst_amt > 0 and abs(igst_slab_sum - igst_amt) > TOL_AMOUNT:
+        if has_igst_slabs and igst_amt > 0 and abs(igst_slab_sum - igst_amt) > TOL_AMOUNT:
             out.append(Finding(
                 "E032_IGST_SLAB_SUM_MISMATCH", SEVERITY_ERROR, CAT_GST,
                 f"Line {seq} IGST slab sum ({igst_slab_sum}) != igst_amount ({igst_amt})",
