@@ -257,16 +257,40 @@ function poNumberCandidates(raw) {
 
 // Resolve the first matching po_id by trying each variant against
 // purchase_orders.po_number, preferring the latest amendment.
-async function resolvePoIdByCandidates(pool, candidates) {
+//
+// When the original `raw` was bare digits (e.g. invoice printed "5250378"),
+// the candidate list contains synthetic prefixed forms ("PO5250378",
+// "OSC5250378", …). Those synthetic forms MUST be scoped to the invoice's
+// supplier — otherwise we'd match SHAH TRADING's PO5250378 against a BHAVANI
+// invoice (exactly what hit production on 2026-05-04). If supplier is
+// unknown, synthetic candidates are skipped — better unresolved than wrong.
+//
+// Variants from non-bare-digit raw text (e.g. "PO9251807", "PO9/PO9251807")
+// are tried against any supplier — those are unambiguous master forms.
+async function resolvePoIdByCandidates(pool, candidates, supplierId, raw) {
+  const rawWasBareDigit = /^\d{6,}$/.test(String(raw || '').trim())
+  const isSynthetic = (c) =>
+    rawWasBareDigit && /^(PO|OSC|OP|MTS|STP)\d{6,}$/.test(c)
+
   for (const c of candidates) {
-    const r = await pool.query(
-      `SELECT po_id FROM purchase_orders
-       WHERE TRIM(po_number) = TRIM($1)
-       ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC
-       LIMIT 1`,
-      [c]
-    )
-    if (r.rows.length > 0) return r.rows[0].po_id
+    if (isSynthetic(c)) {
+      if (!supplierId) continue  // refuse to guess across suppliers
+      const r = await pool.query(
+        `SELECT po_id FROM purchase_orders
+         WHERE TRIM(po_number) = TRIM($1) AND supplier_id = $2
+         ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC LIMIT 1`,
+        [c, supplierId]
+      )
+      if (r.rows.length > 0) return r.rows[0].po_id
+    } else {
+      const r = await pool.query(
+        `SELECT po_id FROM purchase_orders
+         WHERE TRIM(po_number) = TRIM($1)
+         ORDER BY COALESCE(amd_no, 0) DESC, po_id DESC LIMIT 1`,
+        [c]
+      )
+      if (r.rows.length > 0) return r.rows[0].po_id
+    }
   }
   return null
 }
@@ -325,26 +349,9 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
     // NO DATABASE WRITES — Just extract and return. Data is only persisted
     // when the user clicks "Save Invoice" on the review form.
 
-    // Resolve PO reference. Order:
-    //   1. open_order_no (Open Order series, OP* or OSC*) takes precedence so
-    //      "SC3/32600014" invoices link to OSC3/OSC3240010, not STP3/32600014.
-    //   2. po_number (standard PO).
-    //
-    // For each, try every poNumberCandidates() variant. Suppliers print PO
-    // numbers as e.g. "PO9/PO9251807" or "PO9250648/2025-26" while master
-    // stores "PO9251807" / "PO9250648" — the variants strip prefix
-    // duplications and date suffixes so we still hit the master.
-    const openOrderRef = invoiceData.openOrderNo
-    const poNumberRef = req.body.poNumber || req.query.poNumber || invoiceData.poNumber
-    let poId = null
-    if (openOrderRef) {
-      poId = await resolvePoIdByCandidates(pool, poNumberCandidates(openOrderRef))
-    }
-    if (!poId && poNumberRef) {
-      poId = await resolvePoIdByCandidates(pool, poNumberCandidates(poNumberRef))
-    }
-
-    // Resolve supplier (prefer GSTIN match over name — much more reliable)
+    // Resolve supplier FIRST (prefer GSTIN match over name — much more
+    // reliable). PO resolution below uses supplierId to scope synthetic
+    // bare-digit candidates and avoid cross-supplier false matches.
     let supplierId = null
     if (invoiceData.supplierGstin) {
       const bySuplrGstin = await pool.query(
@@ -381,10 +388,6 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
         )
       }
       if (byName.rows.length === 0 && firstWords.length >= 8) {
-        // Only use the prefix path when the first-4-words match exactly
-        // ONE supplier. Multiple matches = ambiguous → leave supplierId null
-        // (we'll fall back to the GRN/ASN reverse lookup later, or the
-        // invoice ends up unresolved which is safer than picking wrong).
         const ambig = await pool.query(
           `SELECT supplier_id FROM suppliers
              WHERE LOWER(TRIM(supplier_name)) LIKE $1 || '%'
@@ -395,6 +398,24 @@ router.post('/invoices/upload', uploadInvoice.single('pdf'), async (req, res) =>
       }
 
       if (byName.rows.length > 0) supplierId = byName.rows[0].supplier_id
+    }
+
+    // Resolve PO reference. Order:
+    //   1. open_order_no (Open Order series, OP* or OSC*) takes precedence so
+    //      "SC3/32600014" invoices link to OSC3/OSC3240010, not STP3/32600014.
+    //   2. po_number (standard PO).
+    //
+    // For each, try every poNumberCandidates() variant. Bare-digit synthetic
+    // variants are scoped to the resolved supplierId by the resolver so we
+    // don't cross suppliers.
+    const openOrderRef = invoiceData.openOrderNo
+    const poNumberRef = req.body.poNumber || req.query.poNumber || invoiceData.poNumber
+    let poId = null
+    if (openOrderRef) {
+      poId = await resolvePoIdByCandidates(pool, poNumberCandidates(openOrderRef), supplierId, openOrderRef)
+    }
+    if (!poId && poNumberRef) {
+      poId = await resolvePoIdByCandidates(pool, poNumberCandidates(poNumberRef), supplierId, poNumberRef)
     }
 
     // Last-resort PO fallback — walk through GRN / ASN references the
@@ -1710,7 +1731,20 @@ router.post('/invoices', async (req, res) => {
             item.itemName || '',
             item.hsnSac || item.itemCode || null,
             item.uom || null,
-            item.billedQty ? parseFloat(item.billedQty) : null,
+            // billed_qty: prefer the explicit billedQty (form/portal), fall
+            // back to OCR-extracted `quantity`, finally derive from
+            // taxable_value / rate when both are present (Landing AI sometimes
+            // gives one without the other on messy rows). Without this fix
+            // every OCR-loaded line landed with billed_qty NULL because the
+            // upload response ships `quantity`, not `billedQty`.
+            (
+              item.billedQty != null && item.billedQty !== '' ? parseFloat(item.billedQty) :
+              item.quantity != null && item.quantity !== '' ? parseFloat(item.quantity) :
+              (item.taxableValue && item.rate &&
+               parseFloat(item.rate) > 0)
+                ? parseFloat(item.taxableValue) / parseFloat(item.rate)
+                : null
+            ),
             item.weight != null ? parseFloat(item.weight) : null,
             item.count != null ? parseInt(item.count, 10) : null,
             item.rate || item.unitPrice ? parseFloat(item.rate || item.unitPrice) : null,
