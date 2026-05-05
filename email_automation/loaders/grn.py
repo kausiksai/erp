@@ -137,8 +137,12 @@ def load(
             return result
 
         values: List[Tuple[Any, ...]] = []
+        skipped_blocked = 0
         for r in rows:
             supplier_id = supplier_resolver.resolve(r.get("supplier"), r.get("supplier_name"))
+            if supplier_resolver.is_blocked(supplier_id):
+                skipped_blocked += 1
+                continue
             # Resolve in this order:
             #   1. (po_no, amd_no) — standard PO reference
             #   2. open_order_no   — Open Order series (OP*/OSC*); used by the
@@ -254,6 +258,7 @@ def load(
 
         bulk_insert(cur, "grn", GRN_COLS, values, page_size=1000)
         result.rows_inserted = len(values)
+        result.extras["skipped_blocked_supplier"] = skipped_blocked
 
     result.duration_seconds = time.time() - t0
     log.info(result.summary())

@@ -247,11 +247,15 @@ def load(
     # -- Step 1: resolve supplier_id + po_id per invoice ----------------------
     resolved: List[Dict[str, Any]] = []
     skipped_no_supplier = 0
+    skipped_blocked_supplier = 0
     for inv in invoices:
         h = inv["header"]
         supplier_id = supplier_resolver.resolve(h.get("supplier"), h.get("supplier_name"))
         if supplier_id is None:
             skipped_no_supplier += 1
+            continue
+        if supplier_resolver.is_blocked(supplier_id):
+            skipped_blocked_supplier += 1
             continue
         # Prefer open_order_no when it's populated. Open Order series (OP*,
         # OSC*) PO numbers are the canonical link for those invoices and
@@ -286,6 +290,7 @@ def load(
         )
 
     result.extras["skipped_no_supplier"] = skipped_no_supplier
+    result.extras["skipped_blocked_supplier"] = skipped_blocked_supplier
 
     if not resolved:
         result.duration_seconds = time.time() - t0

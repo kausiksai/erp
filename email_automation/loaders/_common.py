@@ -99,10 +99,18 @@ class SupplierResolver:
     we find it via name, the resolver updates that row to set suplr_id.
     """
 
+    # Suppliers whose data should never be ingested (intercompany self-bills,
+    # known-bad sources, etc.). Matched case-insensitive against the
+    # supplier_name. Loaders call is_blocked() and skip the row.
+    BLOCKED_NAME_PATTERNS: Tuple[str, ...] = (
+        "SRIMUKHA PRECISION",
+    )
+
     def __init__(self, conn: PGConnection) -> None:
         self.conn = conn
         self._by_code: Dict[str, int] = {}
         self._by_name: Dict[str, int] = {}
+        self.blocked_ids: set = set()
         self.stats = {
             "cache_hits_code": 0,
             "cache_hits_name": 0,
@@ -111,6 +119,16 @@ class SupplierResolver:
             "created": 0,
             "enriched": 0,
         }
+
+    @classmethod
+    def _name_is_blocked(cls, name: Optional[str]) -> bool:
+        if not name:
+            return False
+        n = name.lower()
+        return any(p.lower() in n for p in cls.BLOCKED_NAME_PATTERNS)
+
+    def is_blocked(self, supplier_id: Optional[int]) -> bool:
+        return supplier_id is not None and supplier_id in self.blocked_ids
 
     @staticmethod
     def _norm_name(name: Optional[str]) -> Optional[str]:
@@ -135,10 +153,13 @@ class SupplierResolver:
                 norm = self._norm_name(name)
                 if norm:
                     self._by_name.setdefault(norm, supplier_id)
-        log.debug(
-            "supplier prefetch: codes=%d names=%d",
+                if self._name_is_blocked(name):
+                    self.blocked_ids.add(supplier_id)
+        log.info(
+            "supplier prefetch: codes=%d names=%d blocked=%d",
             len(self._by_code),
             len(self._by_name),
+            len(self.blocked_ids),
         )
 
     def resolve(
@@ -248,6 +269,8 @@ class SupplierResolver:
         norm = self._norm_name(display_name)
         if norm:
             self._by_name[norm] = supplier_id
+        if self._name_is_blocked(display_name):
+            self.blocked_ids.add(supplier_id)
         self.stats["created"] += 1
         return supplier_id
 
