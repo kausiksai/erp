@@ -78,18 +78,33 @@ def _fetch_pending_ids(limit: Optional[int] = None) -> List[int]:
     # values and defeat the reviewer's approval step. Once a reviewer
     # signs off (manually_approved) or the two sources agree (auto_matched)
     # they flow through normally. Legacy single-source rows are unaffected.
+    #
+    # Also re-evaluate `validated` invoices that haven't yet been picked up
+    # for payment approval. GRN / DC / Schedule tables are TRUNCATE+reload
+    # daily, so an invoice valid yesterday can lose its supporting evidence
+    # today (e.g. GRN no longer in the daily export). Without this re-check
+    # the row would stay validated and drift onto the Pending Approval queue
+    # with stale data. Validated rows that already have a payment_approvals
+    # entry are excluded — finance has acted, the engine shouldn't demote.
     with get_conn(readonly=True) as conn:
         with conn.cursor() as cur:
             sql = """
-                SELECT invoice_id FROM invoices
-                WHERE status IN (%s, %s)
-                  AND COALESCE(reconciliation_status, 'single_source')
+                SELECT i.invoice_id
+                FROM invoices i
+                LEFT JOIN payment_approvals pa
+                       ON pa.invoice_id = i.invoice_id
+                WHERE COALESCE(i.reconciliation_status, 'single_source')
                       <> 'pending_reconciliation'
-                ORDER BY invoice_id
+                  AND (
+                       i.status IN (%s, %s)
+                    OR (i.status = %s AND pa.id IS NULL)
+                  )
+                ORDER BY i.invoice_id
             """
             params = (
                 STATUS_WAITING_FOR_VALIDATION,
                 STATUS_WAITING_FOR_RE_VALIDATION,
+                TGT_VALIDATED,
             )
             if limit is not None:
                 sql += " LIMIT %s"
