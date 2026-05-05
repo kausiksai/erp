@@ -208,7 +208,24 @@ def parse(source: PathOrBytes) -> List[Dict[str, Any]]:
                 }
                 grouped[key] = invoice
 
-            assbl_val = coerce_decimal(raw.get("assbl_val"))
+            # Bill Register column semantics (verified against export):
+            #   "Gross Amt(Base Curry)" — per-line pre-tax amount (= qty × rate).
+            #   "Net Amt(Base Curry)"   — per-line total inc. tax.
+            #   "Bill Amt(BC)"          — invoice GRAND total, REPEATED on every line.
+            #   "Assbl.Val"             — Bill Amt minus this line's tax (a derived
+            #                             column, NOT per-line assessable value).
+            # Earlier code mapped Assbl.Val → taxable/assessable_value and
+            # Bill Amt(BC) → line_total. Both produced wildly wrong numbers
+            # (line_total stored 3× the invoice total; assessable bore no
+            # relation to qty × rate). Use the per-line Gross/Net columns,
+            # falling back to the legacy values for older formats that lack
+            # the explicit per-line columns.
+            gross_base = coerce_decimal(raw.get("gross_base"))
+            net_base = coerce_decimal(raw.get("net_base"))
+            assbl_val_legacy = coerce_decimal(raw.get("assbl_val"))
+            bill_amt_bc_legacy = coerce_decimal(raw.get("bill_amt_bc"))
+            line_assbl = gross_base if gross_base is not None else assbl_val_legacy
+            line_total_value = net_base if net_base is not None else bill_amt_bc_legacy
             cgst_total = coerce_decimal(raw.get("cgst_total"))
             sgst_total = coerce_decimal(raw.get("sgst_total"))
             igst_total = coerce_decimal(raw.get("igst_total"))
@@ -225,16 +242,16 @@ def parse(source: PathOrBytes) -> List[Dict[str, Any]]:
                 "hsn_sac":            coerce_str(raw.get("hsn_code"), max_len=20),
                 "billed_qty":         coerce_decimal(raw.get("qty")),
                 "rate":               coerce_decimal(raw.get("price")),
-                "gross_amount":       coerce_decimal(raw.get("gross_base")),
+                "gross_amount":       gross_base,
                 "gross_amount_suplr": coerce_decimal(raw.get("gross_suplr")),
-                "net_amount":         coerce_decimal(raw.get("net_base")),
+                "net_amount":         net_base,
                 "net_amount_suplr":   coerce_decimal(raw.get("net_suplr")),
-                "line_total":         coerce_decimal(raw.get("bill_amt_bc")),
+                "line_total":         line_total_value,
                 "bill_amt_tc":        coerce_decimal(raw.get("bill_amt_tc")),
                 "domestic_amt":       coerce_decimal(raw.get("domestic_amt")),
                 "import_amt":         coerce_decimal(raw.get("import_amt")),
-                "assessable_value":   assbl_val,
-                "taxable_value":      assbl_val,
+                "assessable_value":   line_assbl,
+                "taxable_value":      line_assbl,
                 "grn_tax_amount":     coerce_decimal(raw.get("grn_tax_amt")),
                 "cgst_amount":        cgst_total,
                 "sgst_amount":        sgst_total,
@@ -243,9 +260,9 @@ def parse(source: PathOrBytes) -> List[Dict[str, Any]]:
                 "cgst_rcm_amount":    coerce_decimal(raw.get("cgst_rcm_total")),
                 "sgst_rcm_amount":    coerce_decimal(raw.get("sgst_rcm_total")),
                 "igst_rcm_amount":    coerce_decimal(raw.get("igst_rcm_total")),
-                "cgst_rate":          _infer_rate_pct(cgst_total, assbl_val),
-                "sgst_rate":          _infer_rate_pct(sgst_total, assbl_val),
-                "igst_rate":          _infer_rate_pct(igst_total, assbl_val),
+                "cgst_rate":          _infer_rate_pct(cgst_total, line_assbl),
+                "sgst_rate":          _infer_rate_pct(sgst_total, line_assbl),
+                "igst_rate":          _infer_rate_pct(igst_total, line_assbl),
                 # Individual GST slab breakdowns from the Bill Register
                 "cgst_9_amount":      coerce_decimal(raw.get("cgst9")),
                 "cgst_2_5_amount":    coerce_decimal(raw.get("cgst2_5")),
