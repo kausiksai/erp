@@ -97,13 +97,20 @@ function PaymentsPage() {
       setError('')
       setSuccess('')
       setExpandedIds(new Set())
-      const res = await apiFetch(endpointFor(tab))
+      // Fetch with a high limit so the displayed count reflects all
+      // pending invoices, not just the first server-default page (100).
+      // The backend caps at 1000 internally; we ask for everything.
+      const res = await apiFetch(`${endpointFor(tab)}?limit=1000`)
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load payments'))
       const body = await res.json()
       const items: PaymentRow[] = body.items || body.payments || (Array.isArray(body) ? body : [])
+      // Trust the server's `total` (= COUNT(*) of the filter) when present —
+      // otherwise fall back to items.length. This keeps the displayed count
+      // accurate even if the page is paginated server-side.
+      const reportedTotal = typeof body.total === 'number' ? body.total : items.length
       setRows(items)
       setTotals({
-        count: items.length,
+        count: reportedTotal,
         value: items.reduce((s, r) => s + (parseAmount(r.total_amount) ?? 0), 0)
       })
     } catch (err) {
