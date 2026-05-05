@@ -275,7 +275,17 @@ def log_attachment(entry: AttachmentLogEntry) -> int:
 
 
 def already_processed(message_id: Optional[str], attachment_sha256: Optional[str]) -> bool:
-    """Return True if this (message_id, sha256) pair is already in the log."""
+    """Return True only when this (message_id, sha256) pair was previously
+    loaded SUCCESSFULLY. Failed prior loads do NOT count as processed —
+    otherwise a transient FK violation or DB blip on one phase would
+    permanently block retries of that attachment.
+
+    Caught in production on 2026-05-05: PO + DC loaders failed at 06:00 IST
+    with FK violations, the failure path logged status='failed' rows, and
+    the 07:16 retry skipped both files as duplicates. Genuine deduplication
+    (same email re-delivered twice) still works because successful loads
+    write status='loaded' which IS counted here.
+    """
     if not message_id or not attachment_sha256:
         return False
     try:
@@ -284,10 +294,12 @@ def already_processed(message_id: Optional[str], attachment_sha256: Optional[str
                 cur.execute(
                     """
                     SELECT 1 FROM email_automation_log
-                    WHERE message_id = %s AND attachment_sha256 = %s
+                    WHERE message_id = %s
+                      AND attachment_sha256 = %s
+                      AND status = %s
                     LIMIT 1
                     """,
-                    (message_id, attachment_sha256),
+                    (message_id, attachment_sha256, STATUS_LOADED),
                 )
                 return cur.fetchone() is not None
     except psycopg2.Error as exc:
