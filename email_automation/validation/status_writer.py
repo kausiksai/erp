@@ -58,15 +58,25 @@ def apply_validation_result(conn: PGConnection, result: ValidationResult) -> Non
             payment_due_date = (
                 inv_date + timedelta(days=due_days) if inv_date else None
             )
+            # Persist resolved po_id when validation succeeded.
+            # The engine's load_invoice_context can resolve a PO via the
+            # GRN/ASN fallback even when invoices.po_id is NULL. Without
+            # writing it back, the frontend can't display the PO / GRN /
+            # ASN / DC for the validated invoice (it queries by po_id),
+            # and subsequent sweeper runs would re-run the fallback every
+            # time. Set po_id only when it's currently NULL — never
+            # overwrite an existing po_id since that may have been
+            # manually corrected by a reviewer.
             cur.execute(
                 """
                 UPDATE invoices
                 SET status = %s,
                     payment_due_date = %s,
+                    po_id = COALESCE(po_id, %s),
                     updated_at = NOW()
                 WHERE invoice_id = %s
                 """,
-                (result.target_status, payment_due_date, result.invoice_id),
+                (result.target_status, payment_due_date, result.po_id, result.invoice_id),
             )
 
             # Mark PO based on cumulative invoiced qty vs PO total qty:
