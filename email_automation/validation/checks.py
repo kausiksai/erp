@@ -111,16 +111,24 @@ def _resolve_po_line(
     inv_line_count: int,
     inv_line_index: int,
 ) -> Optional[Dict[str, Any]]:
-    """Mirror Node resolvePoLineForInvoiceLine."""
+    """Match an invoice line to its PO line.
+
+    Resolution order:
+        1. Explicit po_line_id (rare; never set by current loaders).
+        2. Item-code / description match (best unused match scoring ≥80).
+        3. Sequence-number match (positional fallback for unused lines).
+        4. Positional fallback when line counts agree.
+
+    Item match wins over sequence because the Bill Register and PO XLS often
+    list the same items in different orders. Sequence-first matching used to
+    pair line N of the invoice with line N of the PO regardless of item,
+    producing false E022/E021 mismatches on every reordered multi-line invoice.
+    """
     if inv_line.get("po_line_id"):
         for pl in po_lines:
             if pl["po_line_id"] == inv_line["po_line_id"]:
                 return pl
-    if inv_line.get("sequence_number") is not None:
-        for pl in po_lines:
-            if pl.get("sequence_number") == inv_line["sequence_number"]:
-                return pl
-    # By item text (best unused match above threshold)
+    # By item text (best unused match above threshold) — preferred over seq.
     best = None
     best_score = 0
     for pl in po_lines:
@@ -132,9 +140,16 @@ def _resolve_po_line(
             best_score = score
     if best and best_score >= 80:
         return best
-    # Positional fallback only if line counts match
+    # Sequence-number fallback (only consider unused PO lines).
+    if inv_line.get("sequence_number") is not None:
+        for pl in po_lines:
+            if pl.get("sequence_number") == inv_line["sequence_number"] and pl["po_line_id"] not in used_ids:
+                return pl
+    # Positional fallback only if line counts match.
     if inv_line_index < len(po_lines) and inv_line_count == len(po_lines):
-        return po_lines[inv_line_index]
+        cand = po_lines[inv_line_index]
+        if cand["po_line_id"] not in used_ids:
+            return cand
     return None
 
 
@@ -725,16 +740,21 @@ def check_open_po_requirements(ctx: InvoiceContext) -> List[Finding]:
     if ctx.po is None or not ctx.po.is_open_po:
         return out
 
-    if ctx.grn_accepted_qty_total <= TOL_QTY:
+    # Scope GRN qty to THIS invoice (matched via grn.supplier_doc_no =
+    # invoice.invoice_number). The cumulative grn_accepted_qty_total spans
+    # every invoice ever drawn against this open PO, so comparing it to a
+    # single invoice's qty is meaningless.
+    grn_for_invoice = ctx.this_invoice_grn_accepted_qty_total
+    if grn_for_invoice <= TOL_QTY:
         out.append(Finding(
             "E070_OPEN_PO_NO_GRN", SEVERITY_ERROR, CAT_OPEN_PO,
-            "Open PO: GRN with quantity is required",
+            "Open PO: GRN with quantity is required for this invoice",
         ))
-    elif abs(ctx.this_inv_qty - ctx.grn_accepted_qty_total) > TOL_QTY:
+    elif abs(ctx.this_inv_qty - grn_for_invoice) > TOL_QTY:
         out.append(Finding(
             "E071_OPEN_PO_GRN_QTY_MISMATCH", SEVERITY_ERROR, CAT_OPEN_PO,
             f"Open PO: invoice qty ({ctx.this_inv_qty}) must match GRN total "
-            f"({ctx.grn_accepted_qty_total})",
+            f"for this invoice ({grn_for_invoice})",
         ))
 
     # ASN is now optional for Open PO. We only validate it WHEN it exists —

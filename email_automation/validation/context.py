@@ -55,6 +55,12 @@ class InvoiceContext:
     # Sums / counts fetched once so checks don't re-query
     grn_qty_total: Decimal
     grn_accepted_qty_total: Decimal
+    # GRN totals scoped to THIS invoice only (matched via grn.supplier_doc_no =
+    # invoice.invoice_number). Use these for open-PO qty checks — the
+    # cumulative totals above span every invoice on a blanket PO and will
+    # never match a single invoice's qty.
+    this_invoice_grn_qty_total: Decimal
+    this_invoice_grn_accepted_qty_total: Decimal
     asn_count: int
     asn_qty_total: Decimal
     dc_count: int
@@ -316,6 +322,25 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             grn_qty_total = _to_decimal(row["q"])
             grn_accepted_qty_total = _to_decimal(row["aq"])
 
+        # -- GRN totals scoped to THIS invoice only (open-PO qty checks) -----
+        this_invoice_grn_qty_total = Decimal(0)
+        this_invoice_grn_accepted_qty_total = Decimal(0)
+        if po is not None and invoice.get("invoice_number"):
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(grn_qty), 0)::numeric       AS q,
+                       COALESCE(SUM(COALESCE(accepted_qty, grn_qty, 0)), 0)::numeric AS aq
+                FROM grn
+                WHERE po_id = %s
+                  AND TRIM(COALESCE(supplier_doc_no, '')) <> ''
+                  AND LOWER(TRIM(supplier_doc_no)) = LOWER(TRIM(%s))
+                """,
+                (po.po_id, invoice["invoice_number"]),
+            )
+            row = cur.fetchone()
+            this_invoice_grn_qty_total = _to_decimal(row["q"])
+            this_invoice_grn_accepted_qty_total = _to_decimal(row["aq"])
+
         # -- ASN totals (linked via inv_no = invoice_number) ------------------
         asn_count = 0
         asn_qty_total = Decimal(0)
@@ -415,6 +440,8 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             po=po,
             grn_qty_total=grn_qty_total,
             grn_accepted_qty_total=grn_accepted_qty_total,
+            this_invoice_grn_qty_total=this_invoice_grn_qty_total,
+            this_invoice_grn_accepted_qty_total=this_invoice_grn_accepted_qty_total,
             asn_count=asn_count,
             asn_qty_total=asn_qty_total,
             dc_count=dc_count,
