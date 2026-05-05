@@ -61,6 +61,9 @@ class InvoiceContext:
     # never match a single invoice's qty.
     this_invoice_grn_qty_total: Decimal
     this_invoice_grn_accepted_qty_total: Decimal
+    # Schedule totals scoped to THIS invoice via (ss_pfx, ss_no) only.
+    # The schedule_qty_total above spans the whole PO across many invoices.
+    this_invoice_schedule_qty_total: Decimal
     asn_count: int
     asn_qty_total: Decimal
     dc_count: int
@@ -341,19 +344,29 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             this_invoice_grn_qty_total = _to_decimal(row["q"])
             this_invoice_grn_accepted_qty_total = _to_decimal(row["aq"])
 
-        # -- ASN totals (linked via inv_no = invoice_number) ------------------
+        # -- ASN totals (linked via inv_no = invoice_number, scoped by supplier)
+        # The ASN export's inv_no field is just the supplier's invoice number;
+        # different external suppliers commonly use the same short string
+        # (e.g. "10", "118"). Without a supplier filter the match collides —
+        # one inv_no = "127" matched 18 ASN rows across 15 different suppliers
+        # totalling 41,797 units, all bleeding into the qty-mismatch checks
+        # for the original invoice. Scope by joining suppliers on the ASN's
+        # supplier_name field (ASN doesn't carry supplier_id).
         asn_count = 0
         asn_qty_total = Decimal(0)
-        if invoice.get("invoice_number"):
+        if invoice.get("invoice_number") and invoice.get("supplier_id") is not None:
             cur.execute(
                 """
                 SELECT COUNT(*)::int AS c,
-                       COALESCE(SUM(quantity), 0)::numeric AS q
-                FROM asn
-                WHERE TRIM(COALESCE(inv_no, '')) <> ''
-                  AND LOWER(TRIM(inv_no)) = LOWER(TRIM(%s))
+                       COALESCE(SUM(a.quantity), 0)::numeric AS q
+                FROM asn a
+                JOIN suppliers s
+                  ON LOWER(TRIM(s.supplier_name)) = LOWER(TRIM(a.supplier_name))
+                WHERE TRIM(COALESCE(a.inv_no, '')) <> ''
+                  AND LOWER(TRIM(a.inv_no)) = LOWER(TRIM(%s))
+                  AND s.supplier_id = %s
                 """,
-                (invoice["invoice_number"],),
+                (invoice["invoice_number"], invoice["supplier_id"]),
             )
             row = cur.fetchone()
             asn_count = int(row["c"])
@@ -410,6 +423,29 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             schedule_count = int(row["c"])
             schedule_qty_total = _to_decimal(row["q"])
 
+        # -- Schedule totals scoped to THIS invoice (ss_pfx, ss_no exact match)
+        # Used for E076. The schedule_qty_total above is cumulative across
+        # the whole PO and matches the absence-detection check (E074), but
+        # comparing it to a single invoice's qty creates the same scope-bug
+        # we already fixed for GRN/E071. The (ss_pfx, ss_no) reference on
+        # the invoice IS the natural per-invoice scope.
+        this_invoice_schedule_qty_total = Decimal(0)
+        if po is not None:
+            inv_ss_pfx_s = (invoice.get("ss_pfx") or "").strip()
+            inv_ss_no_s = (invoice.get("ss_no") or "").strip()
+            if inv_ss_pfx_s and inv_ss_no_s:
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(sched_qty), 0)::numeric AS q
+                    FROM po_schedules
+                    WHERE LOWER(TRIM(COALESCE(ss_pfx, ''))) = LOWER(%s)
+                      AND LOWER(TRIM(COALESCE(ss_no, '')))  = LOWER(%s)
+                    """,
+                    (inv_ss_pfx_s, inv_ss_no_s),
+                )
+                row = cur.fetchone()
+                this_invoice_schedule_qty_total = _to_decimal(row["q"])
+
         # -- Cumulative across other invoices for the same PO ----------------
         other_inv_total_amount = Decimal(0)
         other_inv_total_qty = Decimal(0)
@@ -442,6 +478,7 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             grn_accepted_qty_total=grn_accepted_qty_total,
             this_invoice_grn_qty_total=this_invoice_grn_qty_total,
             this_invoice_grn_accepted_qty_total=this_invoice_grn_accepted_qty_total,
+            this_invoice_schedule_qty_total=this_invoice_schedule_qty_total,
             asn_count=asn_count,
             asn_qty_total=asn_qty_total,
             dc_count=dc_count,

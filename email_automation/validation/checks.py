@@ -167,14 +167,20 @@ def check_reference_data(ctx: InvoiceContext) -> List[Finding]:
                            "Invoice date is missing"))
     if ctx.po is None:
         po_number = ctx.invoice.get("po_number")
-        if not po_number:
+        open_order_no = ctx.invoice.get("open_order_no")
+        # An invoice with open_order_no set but no resolved PO points to an
+        # open/blanket PO that isn't loaded in our master — semantically
+        # the same gap as a regular PO not found. Route to E003 rather than
+        # E002 so the action ("PO X is missing from master") is correct.
+        ref = po_number or open_order_no
+        if not ref:
             out.append(Finding("E002_NO_PO_LINK", SEVERITY_ERROR, CAT_REFERENCE,
-                               "Invoice is not linked to any PO"))
+                               "Invoice is not linked to any PO or Open Order"))
         else:
             out.append(Finding(
                 "E003_PO_NOT_FOUND", SEVERITY_ERROR, CAT_REFERENCE,
-                f"PO '{po_number}' not found in purchase_orders — may arrive in a later run",
-                data={"po_number": po_number},
+                f"PO '{ref}' not found in purchase_orders — may arrive in a later run",
+                data={"po_number": ref},
             ))
     if ctx.supplier is None:
         out.append(Finding("E004_NO_SUPPLIER", SEVERITY_ERROR, CAT_HEADER,
@@ -492,18 +498,28 @@ def check_gst(ctx: InvoiceContext) -> List[Finding]:
                 line_seq=seq,
             ))
 
-        # Intra/inter state rule
+        # Intra/inter state rule (assessed from supplier's perspective:
+        # place_of_supply == supplier_state means supplier kept goods in
+        # their own state). The mismatch with the GST type chosen by the
+        # supplier signals that EITHER the place_of_supply field was filled
+        # in incorrectly OR the wrong GST split was used. Both are supplier-
+        # side data quality issues — finance should ask the supplier to
+        # correct the invoice before it can be paid.
         if intra_state and igst_amt > 0:
             out.append(Finding(
                 "E034_INTRA_STATE_WITH_IGST", SEVERITY_ERROR, CAT_GST,
-                f"Line {seq}: intra-state supply (place={place_of_supply}, supplier_state={supplier_state}) "
-                f"should not have IGST {igst_amt}",
+                f"Line {seq}: invoice declares place_of_supply={place_of_supply} which equals "
+                f"supplier state ({supplier_state}) → intra-state, but charged IGST {igst_amt}. "
+                f"Supplier must either correct place_of_supply to the actual delivery state, "
+                f"or re-issue the invoice with CGST + SGST.",
                 line_seq=seq,
             ))
         if (not intra_state) and place_of_supply and supplier_state and (cgst_amt > 0 or sgst_amt > 0):
             out.append(Finding(
                 "E035_INTER_STATE_WITH_CGST_SGST", SEVERITY_ERROR, CAT_GST,
-                f"Line {seq}: inter-state supply should use IGST, not CGST/SGST",
+                f"Line {seq}: invoice declares place_of_supply={place_of_supply} but supplier "
+                f"state is {supplier_state} → inter-state, but charged CGST/SGST. Supplier "
+                f"must either correct place_of_supply, or re-issue with IGST.",
                 line_seq=seq,
             ))
 
@@ -567,11 +583,23 @@ def check_totals(ctx: InvoiceContext) -> List[Finding]:
                     data={"invoice_qty": str(this_qty), "po_qty": str(po_qty)},
                 ))
             else:
-                out.append(Finding(
-                    "E041_HEADER_QTY_UNDER_PO", SEVERITY_ERROR, CAT_TOTALS,
-                    f"Σ invoice billed_qty ({this_qty}) is less than Σ PO line qty ({po_qty})",
-                    data={"invoice_qty": str(this_qty), "po_qty": str(po_qty)},
-                ))
+                # Suppress E041 when cumulative billing across all invoices on
+                # this PO meets or exceeds the PO total — the PO is fully
+                # consumed across siblings; this invoice being individually
+                # under is just normal multi-shipment billing.
+                cumulative_qty = this_qty + ctx.other_invoices_total_qty
+                if cumulative_qty < po_qty - TOL_QTY:
+                    out.append(Finding(
+                        "E041_HEADER_QTY_UNDER_PO", SEVERITY_ERROR, CAT_TOTALS,
+                        f"Σ invoice billed_qty ({this_qty}) is less than Σ PO line qty ({po_qty}); "
+                        f"cumulative billing across all invoices on this PO ({cumulative_qty}) "
+                        f"still falls short.",
+                        data={
+                            "invoice_qty": str(this_qty),
+                            "po_qty": str(po_qty),
+                            "cumulative_qty": str(cumulative_qty),
+                        },
+                    ))
 
     # Header pre-tax amount vs computed PO value
     if ctx.po_value_computed > 0 and not ctx.po.is_open_po:
@@ -777,11 +805,16 @@ def check_open_po_requirements(ctx: InvoiceContext) -> List[Finding]:
             f"Open PO: invoice qty ({ctx.this_inv_qty}) must match DC total "
             f"({ctx.dc_qty_total})",
         ))
-    if ctx.schedule_count > 0 and ctx.schedule_qty_total > 0 and abs(ctx.this_inv_qty - ctx.schedule_qty_total) > TOL_QTY:
+    # Schedule qty match — use the invoice-scoped schedule total (matched
+    # via the invoice's own ss_pfx/ss_no). The cumulative schedule_qty_total
+    # spans every shipment scheduled against the open PO and would never
+    # match a single invoice's qty, exactly like the original E071 bug.
+    sched_for_invoice = ctx.this_invoice_schedule_qty_total
+    if ctx.schedule_count > 0 and sched_for_invoice > 0 and abs(ctx.this_inv_qty - sched_for_invoice) > TOL_QTY:
         out.append(Finding(
             "E076_OPEN_PO_SCHED_QTY_MISMATCH", SEVERITY_ERROR, CAT_OPEN_PO,
             f"Open PO: invoice qty ({ctx.this_inv_qty}) must match Schedule total "
-            f"({ctx.schedule_qty_total})",
+            f"for this invoice ({sched_for_invoice})",
         ))
     return out
 
