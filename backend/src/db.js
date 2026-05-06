@@ -23,6 +23,10 @@ const pool = new Pool({
   ssl: sslOption,
   max: process.env.PGPOOL_MAX ? Number(process.env.PGPOOL_MAX) : 10,
   idleTimeoutMillis: process.env.PG_IDLE ? Number(process.env.PG_IDLE) : 30000,
+  // Tag every connection with the app name so the invoice_status_audit
+  // trigger (and any other forensic tooling) can attribute changes to this
+  // service rather than seeing a generic 'unknown' app_name.
+  application_name: 'billing_backend',
 })
 
 export { pool }
