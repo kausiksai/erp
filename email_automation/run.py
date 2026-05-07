@@ -257,7 +257,7 @@ def run(args: argparse.Namespace) -> int:
                 traceback.print_exc()
 
         # -- Step 2: fetch emails --------------------------------------------
-        source = make_source(args.source)
+        source = make_source(args.source, replay_date=getattr(args, "date", None))
         try:
             messages: List[FetchedMessage] = list(source.fetch())
         except Exception as exc:
@@ -658,9 +658,24 @@ def main() -> int:
     )
     parser.add_argument(
         "--source",
-        choices=["zoho", "local"],
+        choices=["zoho", "local", "downloaded"],
         default="zoho",
-        help="mail source: 'zoho' hits Zoho IMAP, 'local' reads docs/ folder as fake emails",
+        help=(
+            "mail source: 'zoho' hits Zoho IMAP, 'local' reads docs/ folder, "
+            "'downloaded' replays files saved under email_automation/downloaded/"
+            "<doc_type>/<date>/ for a specific --date"
+        ),
+    )
+    parser.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help=(
+            "Replay downloaded files for this date (YYYY-MM-DD). Implies "
+            "--source=downloaded if --source isn't otherwise specified. "
+            "All files in each <doc_type>/<date>/ folder are combined and "
+            "loaded with a single TRUNCATE per doc_type."
+        ),
     )
     parser.add_argument(
         "--skip-sweeps",
@@ -668,6 +683,12 @@ def main() -> int:
         help="skip pre- and post-validation sweeps (fast path for smoke tests only)",
     )
     args = parser.parse_args()
+    # --date implies downloaded mode unless the user explicitly asked for
+    # something else (e.g. they passed --source local --date X by mistake).
+    if args.date and args.source == "zoho":
+        args.source = "downloaded"
+    if args.source == "downloaded" and not args.date:
+        parser.error("--source=downloaded requires --date YYYY-MM-DD")
     return run(args)
 
 

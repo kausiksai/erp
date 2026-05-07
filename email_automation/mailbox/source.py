@@ -266,12 +266,90 @@ class LocalMailSource(MailSource):
 
 
 # ---------------------------------------------------------------------------
+# Downloaded archive source — replay a past day's saved files
+# ---------------------------------------------------------------------------
+class DownloadedMailSource(MailSource):
+    """Replay every file the pipeline downloaded on a given date.
+
+    The Zoho-source path saves attachments under
+    ``<downloaded>/<doc_type>/<YYYY-MM-DD>/<filename>`` (see
+    run._save_attachment). This source walks that tree for a chosen date
+    and yields each file as a synthetic FetchedMessage, so an ad-hoc run
+    can re-load any past day's data without going through IMAP again.
+
+    Multiple files in the same date folder for the same doc_type are all
+    picked up — the loader loop combines them and truncates the
+    destination table once before the combined insert.
+    """
+
+    # doc_type -> subject template the classifier expects.
+    DOC_TYPES: List[tuple] = [
+        ("po",       "Notification - Purchase Order Details(DD-MMM-YYYY)"),
+        ("asn",      "Notification - Advance Shipment Notice report(DD-MMM-YYYY)"),
+        ("grn",      "Notification - GRN Details(DD-MMM-YYYY)"),
+        ("dc",       "Notification - DC Transaction(DD-MMM-YYYY)"),
+        ("schedule", "Notification - Supplier Schedule(DD-MMM-YYYY)"),
+        ("invoice",  "Notification - Bill Register(DD-MMM-YYYY)"),
+    ]
+
+    def __init__(self, downloaded_root: Path, date_str: str) -> None:
+        self.root = Path(downloaded_root)
+        self.date_str = date_str  # expected format: YYYY-MM-DD
+
+    def fetch(self) -> Iterator[FetchedMessage]:
+        # Build the subject's date string from the requested date.
+        try:
+            d = datetime.strptime(self.date_str, "%Y-%m-%d")
+            date_subject_str = d.strftime("%d-%b-%Y").upper()
+        except ValueError:
+            log.warning("DownloadedMailSource: bad date %r, expected YYYY-MM-DD", self.date_str)
+            date_subject_str = self.date_str
+        for doc_type, subject_tpl in self.DOC_TYPES:
+            folder = self.root / doc_type / self.date_str
+            if not folder.is_dir():
+                log.warning("DownloadedMailSource: no folder %s", folder)
+                continue
+            paths = sorted(p for p in folder.glob("*") if p.is_file() and not p.name.startswith("~$"))
+            if not paths:
+                log.warning("DownloadedMailSource: no files in %s", folder)
+                continue
+            log.info("DownloadedMailSource: %d %s file(s) in %s", len(paths), doc_type, folder)
+            for path in paths:
+                content = path.read_bytes()
+                sha = hashlib.sha256(content).hexdigest()
+                att = FetchedAttachment(
+                    file_name=path.name,
+                    content=content,
+                    sha256=sha,
+                    size=len(content),
+                )
+                subject = subject_tpl.replace("DD-MMM-YYYY", date_subject_str)
+                yield FetchedMessage(
+                    message_id=f"replay-{self.date_str}-{path.name}-{sha[:16]}@local.test",
+                    uid=None,
+                    sender=CONFIG.imap.allowed_senders[0],
+                    subject=subject,
+                    received_at=datetime.now(timezone.utc),
+                    attachments=[att],
+                )
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
-def make_source(kind: str = "zoho", *, local_folder: Optional[Path] = None) -> MailSource:
+def make_source(
+    kind: str = "zoho",
+    *,
+    local_folder: Optional[Path] = None,
+    replay_date: Optional[str] = None,
+) -> MailSource:
     if kind == "zoho":
         return ZohoMailSource()
     if kind == "local":
         folder = local_folder or (Path(__file__).resolve().parents[2] / "docs")
         return LocalMailSource(folder)
-    raise ValueError(f"unknown mail source kind: {kind!r} (expected 'zoho' or 'local')")
+    if kind == "downloaded":
+        if not replay_date:
+            raise ValueError("--source=downloaded requires --date YYYY-MM-DD")
+        return DownloadedMailSource(CONFIG.paths.downloaded, replay_date)
+    raise ValueError(f"unknown mail source kind: {kind!r} (expected 'zoho', 'local', or 'downloaded')")
