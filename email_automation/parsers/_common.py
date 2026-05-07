@@ -185,6 +185,12 @@ _DATE_FORMATS = (
     "%d-%m-%Y",
     "%d/%m/%Y",
     "%d.%m.%Y",
+    # Historical bulk exports (e.g. "PO DETAILS 01-03-2023 TO 30-04-2026.xlsx")
+    # store dates as "02-JAN-23" / "30-APR-2026" — DD-MMM-YY and DD-MMM-YYYY.
+    "%d-%b-%Y",
+    "%d-%b-%y",
+    "%d-%B-%Y",   # full month name variant
+    "%d-%B-%y",
     "%m/%d/%Y",   # last resort; source files do not use this, but the OCR
                   # pipeline sometimes does — harmless to keep as a fallback
 )

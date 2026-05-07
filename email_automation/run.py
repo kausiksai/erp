@@ -454,8 +454,22 @@ def run(args: argparse.Namespace) -> int:
             if not parsed_files:
                 continue
 
-            # Phase B — combined load (truncate happens once inside loader)
-            combined_rows = [r for (_, _, _, parsed) in parsed_files for r in parsed]
+            # Phase B — combined load (truncate happens once inside loader).
+            # Memory: when a single file's parsed list is several hundred
+            # thousand rows the list-comprehension would duplicate the full
+            # list and OOM on a small VM. Reuse the existing list directly
+            # for the single-file case; only build a new list when we
+            # genuinely need to concatenate. Also stash row counts for the
+            # audit logger here, then drop the parsed lists from
+            # parsed_files so the garbage collector can free them before
+            # the loader runs and allocates its own bulk-insert buffers.
+            if len(parsed_files) == 1:
+                combined_rows = parsed_files[0][3]
+            else:
+                combined_rows = []
+                for _, _, _, parsed in parsed_files:
+                    combined_rows.extend(parsed)
+            row_counts_per_file = [len(parsed) for (_, _, _, parsed) in parsed_files]
             combined_started = time.time()
             file_names = ", ".join(att.file_name for (_, att, _, _) in parsed_files)
             log.info(
@@ -493,7 +507,7 @@ def run(args: argparse.Namespace) -> int:
                 # from the combined load are stamped on every row; that's
                 # acceptable because the loader can't easily attribute
                 # outcomes back to source file.
-                for msg, att, dl_path, parsed in parsed_files:
+                for (msg, att, dl_path, _), n_rows in zip(parsed_files, row_counts_per_file):
                     try:
                         log_attachment(
                             AttachmentLogEntry(
@@ -508,7 +522,7 @@ def run(args: argparse.Namespace) -> int:
                                 doc_type=doc_type,
                                 status=STATUS_LOADED,
                                 file_path=str(dl_path),
-                                rows_processed=len(parsed),
+                                rows_processed=n_rows,
                                 rows_inserted=lr.rows_inserted,
                                 rows_updated=lr.rows_updated,
                                 rows_skipped=lr.rows_skipped,
