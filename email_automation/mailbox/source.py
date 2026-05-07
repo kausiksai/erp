@@ -214,17 +214,23 @@ class LocalMailSource(MailSource):
     Intended for end-to-end pipeline tests that don't need live IMAP.
     """
 
-    # File name -> (doc_type, subject-template).
-    # The subject strings here are the *expected Zoho format*, which the
-    # classifier must recognise. If the real Zoho subjects differ, adjust
-    # here and in classifier SUBJECT_KEYWORDS.
+    # Glob pattern -> (doc_type, subject-template).
+    # Patterns are case-sensitive on Linux/macOS, case-insensitive on Windows.
+    # Multiple files matching the same pattern are all picked up — handy
+    # when the source ERP splits a day's data across two exports (e.g.
+    # GRN.xls and GRN_2.xls). The downstream loader combines them and
+    # truncates the destination table once before the combined insert.
+    #
+    # Subject strings here are the *expected Zoho format* the classifier
+    # recognises. If real Zoho subjects differ, adjust here and in
+    # classifier SUBJECT_KEYWORDS.
     FILE_MAP: List[tuple] = [
-        ("PO.xls",                      "po",       "Notification - Purchase Order Details(DD-MMM-YYYY)"),
-        ("ASN.xls",                     "asn",      "Notification - Advance Shipment Notice report(DD-MMM-YYYY)"),
-        ("GRN.xls",                     "grn",      "Notification - GRN Details(DD-MMM-YYYY)"),
-        ("DC.xls",                      "dc",       "Notification - DC Transaction(DD-MMM-YYYY)"),
-        ("schedule.xls",                "schedule", "Notification - Supplier Schedule(DD-MMM-YYYY)"),
-        ("Bill Register Mar-26.xlsx",   "invoice",  "Notification - Bill Register(DD-MMM-YYYY)"),
+        ("PO*.xls*",                    "po",       "Notification - Purchase Order Details(DD-MMM-YYYY)"),
+        ("ASN*.xls*",                   "asn",      "Notification - Advance Shipment Notice report(DD-MMM-YYYY)"),
+        ("GRN*.xls*",                   "grn",      "Notification - GRN Details(DD-MMM-YYYY)"),
+        ("DC*.xls*",                    "dc",       "Notification - DC Transaction(DD-MMM-YYYY)"),
+        ("schedule*.xls*",              "schedule", "Notification - Supplier Schedule(DD-MMM-YYYY)"),
+        ("Bill Register*.xls*",         "invoice",  "Notification - Bill Register(DD-MMM-YYYY)"),
     ]
 
     def __init__(self, folder: Path) -> None:
@@ -232,30 +238,31 @@ class LocalMailSource(MailSource):
 
     def fetch(self) -> Iterator[FetchedMessage]:
         date_str = datetime.now().strftime("%d-%b-%Y").upper()
-        for fname, _doc_type, subject_tpl in self.FILE_MAP:
-            path = self.folder / fname
-            if not path.is_file():
-                log.warning("LocalMailSource: missing file %s", path)
+        for pattern, _doc_type, subject_tpl in self.FILE_MAP:
+            matches = sorted(self.folder.glob(pattern))
+            # Skip Excel temp/lock files Excel creates while a workbook is open
+            matches = [p for p in matches if p.is_file() and not p.name.startswith("~$")]
+            if not matches:
+                log.warning("LocalMailSource: no files matching %s in %s", pattern, self.folder)
                 continue
-            content = path.read_bytes()
-            sha = hashlib.sha256(content).hexdigest()
-            att = FetchedAttachment(
-                file_name=fname,
-                content=content,
-                sha256=sha,
-                size=len(content),
-            )
-            subject = subject_tpl.replace("DD-MMM-YYYY", date_str)
-            yield FetchedMessage(
-                message_id=f"local-{fname}-{sha[:16]}@local.test",
-                uid=None,
-                # Use the first whitelisted sender as the synthetic "from"
-                # address for local-fixture messages.
-                sender=CONFIG.imap.allowed_senders[0],
-                subject=subject,
-                received_at=datetime.now(timezone.utc),
-                attachments=[att],
-            )
+            for path in matches:
+                content = path.read_bytes()
+                sha = hashlib.sha256(content).hexdigest()
+                att = FetchedAttachment(
+                    file_name=path.name,
+                    content=content,
+                    sha256=sha,
+                    size=len(content),
+                )
+                subject = subject_tpl.replace("DD-MMM-YYYY", date_str)
+                yield FetchedMessage(
+                    message_id=f"local-{path.name}-{sha[:16]}@local.test",
+                    uid=None,
+                    sender=CONFIG.imap.allowed_senders[0],
+                    subject=subject,
+                    received_at=datetime.now(timezone.utc),
+                    attachments=[att],
+                )
 
 
 # ---------------------------------------------------------------------------

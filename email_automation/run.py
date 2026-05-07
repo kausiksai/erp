@@ -398,65 +398,30 @@ def run(args: argparse.Namespace) -> int:
             po_resolver.prefetch()
 
         # -- Step 5: process in dependency order -----------------------------
+        # For each doc_type, parse ALL files first, concatenate the parsed
+        # rows, then call the loader once. This matters for the doc_types
+        # whose loader does TRUNCATE+insert (po, asn, grn, dc, schedule):
+        # if we called load() per-file the second file would wipe the first.
+        # The combined load truncates once and bulk-inserts every file's
+        # rows in a single transaction. Per-file audit logs are still
+        # written so the trail of "which file contributed" is preserved.
         seen_uids: set = set()
         for doc_type in PROCESS_ORDER:
-            for msg, att, dl_path in pending.get(doc_type, []):
+            attachments = pending.get(doc_type, [])
+            if not attachments:
+                continue
+
+            parser_mod, loader_mod = PARSER_LOADER_MAP[doc_type]
+
+            # Phase A — parse every file for this doc_type
+            parsed_files = []  # [(msg, att, dl_path, parsed_rows)]
+            for msg, att, dl_path in attachments:
                 log.info(
-                    "loading %s: %s (%.1f KB)", doc_type, att.file_name, att.size / 1024
+                    "parsing %s: %s (%.1f KB)", doc_type, att.file_name, att.size / 1024
                 )
-                file_started = time.time()
                 try:
-                    parser_mod, loader_mod = PARSER_LOADER_MAP[doc_type]
                     parsed = parser_mod.parse(att.content)
-                    with get_conn() as conn:
-                        if doc_type == "invoice":
-                            lr = loader_mod.load(
-                                conn,
-                                parsed,
-                                supplier_resolver=supplier_resolver,
-                                po_resolver=po_resolver,
-                                run_id=run_id,
-                            )
-                        else:
-                            lr = loader_mod.load(
-                                conn,
-                                parsed,
-                                supplier_resolver=supplier_resolver,
-                                po_resolver=po_resolver,
-                            )
-                    counters["succeeded"] += 1
-                    elapsed = time.time() - file_started
-                    log.info("  [OK]   %s", lr.summary())
-                    file_lines.append(
-                        f"[OK]   {doc_type:8s} {att.file_name:32s} "
-                        f"processed={lr.rows_processed} "
-                        f"inserted={lr.rows_inserted} updated={lr.rows_updated} "
-                        f"skipped={lr.rows_skipped}  ({elapsed:.1f}s)"
-                    )
-                    try:
-                        log_attachment(
-                            AttachmentLogEntry(
-                                run_id=run_id,
-                                message_id=msg.message_id,
-                                email_uid=msg.uid,
-                                sender=msg.sender,
-                                subject=msg.subject,
-                                received_at=msg.received_at,
-                                attachment_name=att.file_name,
-                                attachment_sha256=att.sha256,
-                                doc_type=doc_type,
-                                status=STATUS_LOADED,
-                                file_path=str(dl_path),
-                                rows_processed=lr.rows_processed,
-                                rows_inserted=lr.rows_inserted,
-                                rows_updated=lr.rows_updated,
-                                rows_skipped=lr.rows_skipped,
-                            )
-                        )
-                    except Exception as exc:
-                        log.warning("audit log (loaded) failed: %s", exc)
-                    if msg.uid is not None:
-                        seen_uids.add(msg.uid)
+                    parsed_files.append((msg, att, dl_path, parsed))
                 except Exception as exc:
                     counters["failed"] += 1
                     error_text = f"{type(exc).__name__}: {exc}"
@@ -483,8 +448,107 @@ def run(args: argparse.Namespace) -> int:
                                 file_path=str(fail_path),
                             )
                         )
-                    except Exception as exc:
-                        log.warning("audit log (failed) failed: %s", exc)
+                    except Exception as audit_exc:
+                        log.warning("audit log (failed) failed: %s", audit_exc)
+
+            if not parsed_files:
+                continue
+
+            # Phase B — combined load (truncate happens once inside loader)
+            combined_rows = [r for (_, _, _, parsed) in parsed_files for r in parsed]
+            combined_started = time.time()
+            file_names = ", ".join(att.file_name for (_, att, _, _) in parsed_files)
+            log.info(
+                "loading %s: %d file(s) combined, %d rows total — files: %s",
+                doc_type, len(parsed_files), len(combined_rows), file_names,
+            )
+            try:
+                with get_conn() as conn:
+                    if doc_type == "invoice":
+                        lr = loader_mod.load(
+                            conn,
+                            combined_rows,
+                            supplier_resolver=supplier_resolver,
+                            po_resolver=po_resolver,
+                            run_id=run_id,
+                        )
+                    else:
+                        lr = loader_mod.load(
+                            conn,
+                            combined_rows,
+                            supplier_resolver=supplier_resolver,
+                            po_resolver=po_resolver,
+                        )
+                counters["succeeded"] += len(parsed_files)
+                elapsed = time.time() - combined_started
+                log.info("  [OK]   %s", lr.summary())
+                file_lines.append(
+                    f"[OK]   {doc_type:8s} {len(parsed_files)} file(s) "
+                    f"processed={lr.rows_processed} "
+                    f"inserted={lr.rows_inserted} updated={lr.rows_updated} "
+                    f"skipped={lr.rows_skipped}  ({elapsed:.1f}s)"
+                )
+                # Per-file audit entries — record each contributor with the
+                # row count it provided. Aggregate inserted/updated/skipped
+                # from the combined load are stamped on every row; that's
+                # acceptable because the loader can't easily attribute
+                # outcomes back to source file.
+                for msg, att, dl_path, parsed in parsed_files:
+                    try:
+                        log_attachment(
+                            AttachmentLogEntry(
+                                run_id=run_id,
+                                message_id=msg.message_id,
+                                email_uid=msg.uid,
+                                sender=msg.sender,
+                                subject=msg.subject,
+                                received_at=msg.received_at,
+                                attachment_name=att.file_name,
+                                attachment_sha256=att.sha256,
+                                doc_type=doc_type,
+                                status=STATUS_LOADED,
+                                file_path=str(dl_path),
+                                rows_processed=len(parsed),
+                                rows_inserted=lr.rows_inserted,
+                                rows_updated=lr.rows_updated,
+                                rows_skipped=lr.rows_skipped,
+                            )
+                        )
+                    except Exception as audit_exc:
+                        log.warning("audit log (loaded) failed: %s", audit_exc)
+                    if msg.uid is not None:
+                        seen_uids.add(msg.uid)
+            except Exception as exc:
+                # Combined load failed → all contributing files marked failed.
+                counters["failed"] += len(parsed_files)
+                error_text = f"{type(exc).__name__}: {exc}"
+                tb_text = traceback.format_exc()
+                log.error("  [FAIL] %s combined load (%d files): %s\n%s",
+                          doc_type, len(parsed_files), error_text, tb_text)
+                for msg, att, dl_path, parsed in parsed_files:
+                    fail_path = _save_failed(doc_type, att, tb_text, started)
+                    file_lines.append(
+                        f"[FAIL] {doc_type:8s} {att.file_name:32s} {error_text[:80]}"
+                    )
+                    try:
+                        log_attachment(
+                            AttachmentLogEntry(
+                                run_id=run_id,
+                                message_id=msg.message_id,
+                                email_uid=msg.uid,
+                                sender=msg.sender,
+                                subject=msg.subject,
+                                received_at=msg.received_at,
+                                attachment_name=att.file_name,
+                                attachment_sha256=att.sha256,
+                                doc_type=doc_type,
+                                status=STATUS_FAILED,
+                                error_message=error_text,
+                                file_path=str(fail_path),
+                            )
+                        )
+                    except Exception as audit_exc:
+                        log.warning("audit log (failed) failed: %s", audit_exc)
 
         # -- Step 6: mark Zoho messages as seen ------------------------------
         if isinstance(source, ZohoMailSource):
