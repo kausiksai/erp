@@ -66,7 +66,12 @@ def load_workbook_flex(source: PathOrBytes) -> Any:
         raise TypeError(f"Unsupported source type: {type(source).__name__}")
 
     try:
-        return load_workbook(buf, data_only=True)
+        # read_only=True puts openpyxl in streaming mode — cells are not
+        # materialised as Python objects up-front, the file is parsed as
+        # rows are iterated. Critical for large historical bulk exports
+        # (e.g. the 131 MB GRN file with 314k rows): without streaming
+        # peak memory was ~6 GB and OOM'd the 4 GB VM.
+        return load_workbook(buf, data_only=True, read_only=True)
     except Exception as exc:
         raise ParseError(f"openpyxl failed to open workbook: {exc}") from exc
 
@@ -106,10 +111,7 @@ def build_header_map(
 
     If `required` is provided, raises ParseError on any missing field.
     """
-    if ws.max_row == 0 or ws.max_column == 0:
-        raise ParseError("Worksheet is empty")
-
-    # Build lookup of normalised alias -> canonical field name
+    # Build lookup of normalised alias -> canonical field name.
     alias_lookup: Dict[str, str] = {}
     for field, variants in aliases.items():
         for variant in variants:
@@ -117,42 +119,42 @@ def build_header_map(
 
     best_row = 0
     best_map: Dict[str, int] = {}
-    scan_limit = min(max_scan_rows, ws.max_row)
+    best_preview: List[Any] = []
 
-    for row_idx in range(1, scan_limit + 1):
-        row_cells = [
-            _norm(ws.cell(row=row_idx, column=col_idx).value)
-            for col_idx in range(1, ws.max_column + 1)
-        ]
+    # Scan via iter_rows so this works in openpyxl's read_only streaming
+    # mode (where ws.cell() does file I/O per call and ws.max_row/max_column
+    # are not reliable until the worksheet has been fully iterated).
+    for row_idx, row in enumerate(
+        ws.iter_rows(max_row=max_scan_rows, values_only=True), start=1
+    ):
+        if row is None:
+            continue
         col_map: Dict[str, int] = {}
-        for col_idx, cell in enumerate(row_cells):
-            if cell and cell in alias_lookup:
-                field = alias_lookup[cell]
-                # first occurrence wins so that duplicate headers
-                # (GRN has three columns literally named "Type") do not
-                # overwrite an earlier match.
+        for col_idx, cell in enumerate(row):
+            n = _norm(cell)
+            if n and n in alias_lookup:
+                field = alias_lookup[n]
+                # first occurrence wins so duplicate headers (GRN has
+                # three columns literally named "Type") don't overwrite
+                # an earlier match.
                 col_map.setdefault(field, col_idx)
         if len(col_map) > len(best_map):
             best_map = col_map
             best_row = row_idx
+            best_preview = list(row[:40])
 
     if best_row == 0:
         raise ParseError(
-            f"Could not locate header row (scanned {scan_limit} rows). "
+            f"Could not locate header row (scanned {max_scan_rows} rows). "
             f"Expected any of: {sorted(aliases.keys())}"
         )
 
     if required:
         missing = [f for f in required if f not in best_map]
         if missing:
-            # Include the row we thought was the header for debugging.
-            header_preview = [
-                ws.cell(row=best_row, column=c).value
-                for c in range(1, min(ws.max_column + 1, 40))
-            ]
             raise ParseError(
                 f"Header row {best_row} is missing required fields {missing}. "
-                f"Row preview: {header_preview!r}"
+                f"Row preview: {best_preview!r}"
             )
 
     return best_row, best_map
