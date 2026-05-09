@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
+import { useConfirm } from '../contexts/ConfirmContext'
 
 interface Supplier {
   supplier_id?: number
@@ -58,8 +60,8 @@ function SupplierFormPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const toast = useToast()
+  const confirmDialog = useConfirm()
 
   const load = async () => {
     try {
@@ -69,7 +71,7 @@ function SupplierFormPage() {
       const body = await res.json()
       setList(Array.isArray(body) ? body : (body.items || body.suppliers || []))
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Action failed', getDisplayError(err))
     } finally {
       setLoading(false)
     }
@@ -92,10 +94,8 @@ function SupplierFormPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    setSuccess('')
     if (!form.supplier_name.trim()) {
-      setError('Supplier name is required')
+      toast.warn('Supplier name required', 'Enter the supplier name to continue.')
       return
     }
     try {
@@ -106,12 +106,12 @@ function SupplierFormPage() {
         body: JSON.stringify(form)
       })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Save failed'))
-      setSuccess(editingId ? 'Supplier updated.' : 'Supplier created.')
+      toast.success(editingId ? 'Supplier updated' : 'Supplier created', form.supplier_name)
       setForm(EMPTY)
       setEditingId(null)
       await load()
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Save failed', getDisplayError(err))
     } finally {
       setSaving(false)
     }
@@ -120,28 +120,32 @@ function SupplierFormPage() {
   const handleEdit = (row: Supplier) => {
     setEditingId(row.supplier_id || null)
     setForm({ ...EMPTY, ...row })
-    setError('')
-    setSuccess('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleDelete = async (row: Supplier) => {
     if (!row.supplier_id) return
-    if (!confirm(`Delete supplier "${row.supplier_name}"? This cannot be undone.`)) return
+    const ok = await confirmDialog({
+      title: `Delete supplier "${row.supplier_name}"?`,
+      body: 'This is permanent. Past POs and invoices keep their reference but new ones can\'t be added.',
+      icon: 'pi-trash',
+      kind: 'danger',
+      okLabel: 'Delete'
+    })
+    if (!ok) return
     try {
       const res = await apiFetch(`suppliers/${row.supplier_id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Delete failed'))
+      toast.success('Supplier deleted', `"${row.supplier_name}" was removed.`)
       await load()
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Delete failed', getDisplayError(err))
     }
   }
 
   const cancel = () => {
     setForm(EMPTY)
     setEditingId(null)
-    setError('')
-    setSuccess('')
   }
 
   return (
@@ -158,8 +162,6 @@ function SupplierFormPage() {
         }
       />
 
-      {error   && <div className="glass-card" style={{ borderColor: 'var(--status-danger-ring)', color: 'var(--status-danger-fg)' }}><i className="pi pi-exclamation-triangle" /> {error}</div>}
-      {success && <div className="glass-card" style={{ borderColor: 'var(--status-success-ring)', color: 'var(--status-success-fg)' }}><i className="pi pi-check-circle" /> {success}</div>}
 
       <form className="glass-card" onSubmit={handleSave}>
         <h3 className="glass-card__title"><i className="pi pi-id-card" style={{ color: 'var(--brand-600)' }} /> Identity</h3>

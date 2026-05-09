@@ -4,6 +4,8 @@ import ListPage from '../components/ListPage'
 import type { ListPageColumn, FetchParams, FetchResult } from '../components/ListPage'
 import ExcelUploadButton from '../components/ExcelUploadButton'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
+import { useConfirm } from '../contexts/ConfirmContext'
 
 interface Supplier {
   supplier_id: number
@@ -34,17 +36,25 @@ function SuppliersPage() {
   const navigate = useNavigate()
   const [total, setTotal] = useState(0)
   const [reloadKey, setReloadKey] = useState(0)
-  const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const toast = useToast()
+  const confirmDialog = useConfirm()
 
   const handleDeleteSupplier = async (row: Supplier) => {
-    if (!confirm(`Delete supplier "${row.supplier_name}"? This cannot be undone.`)) return
+    const ok = await confirmDialog({
+      title: `Delete supplier "${row.supplier_name}"?`,
+      body: 'This is permanent. Any historical POs and invoices linked to this supplier will keep their reference but you won\'t be able to add new ones.',
+      icon: 'pi-trash',
+      kind: 'danger',
+      okLabel: 'Delete'
+    })
+    if (!ok) return
     try {
       const res = await apiFetch(`suppliers/${row.supplier_id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Delete failed'))
-      setBanner({ tone: 'success', text: `Supplier "${row.supplier_name}" deleted.` })
+      toast.success('Supplier deleted', `"${row.supplier_name}" was removed from the master.`)
       setReloadKey((k) => k + 1)
     } catch (err) {
-      setBanner({ tone: 'danger', text: getDisplayError(err) })
+      toast.danger('Delete failed', getDisplayError(err))
     }
   }
 
@@ -180,24 +190,11 @@ function SuppliersPage() {
           endpoint="suppliers/upload-excel"
           label="Upload supplier Excel"
           onSuccess={(message) => {
-            setBanner({ tone: 'success', text: message })
+            toast.success('Suppliers imported', message)
             setReloadKey((k) => k + 1)
           }}
-          onError={(message) => setBanner({ tone: 'danger', text: message })}
+          onError={(message) => toast.danger('Upload failed', message)}
         />
-      }
-      banner={
-        banner ? (
-          <div
-            className="glass-card"
-            style={{
-              borderColor: `var(--status-${banner.tone}-ring)`,
-              color: `var(--status-${banner.tone}-fg)`
-            }}
-          >
-            <i className={`pi ${banner.tone === 'success' ? 'pi-check-circle' : 'pi-exclamation-triangle'}`} /> {banner.text}
-          </div>
-        ) : null
       }
       kpis={[{ label: 'Suppliers on file', value: total.toLocaleString('en-IN'), icon: 'pi-users', variant: 'emerald' }]}
       filters={[{ key: 'search', type: 'search', placeholder: 'Search name, ID, GSTIN, city…' }]}
