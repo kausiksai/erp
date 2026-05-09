@@ -84,15 +84,17 @@ function WorkspacePage() {
 
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
+  const [trend, setTrend] = useState<Array<{ date: string; count: number }>>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let alive = true
     async function load() {
       try {
-        const [qRes, sRes] = await Promise.all([
+        const [qRes, sRes, tRes] = await Promise.all([
           apiFetch('workspace/queue').catch(() => null),
-          apiFetch('reports/dashboard-summary').catch(() => null)
+          apiFetch('reports/dashboard-summary').catch(() => null),
+          apiFetch('insights/validation-trend?days=14').catch(() => null)
         ])
         if (!alive) return
         if (qRes?.ok) {
@@ -101,6 +103,10 @@ function WorkspacePage() {
         }
         if (sRes?.ok) {
           setSummary(await sRes.json())
+        }
+        if (tRes?.ok) {
+          const j = await tRes.json()
+          setTrend(j.points || [])
         }
       } finally {
         if (alive) setLoading(false)
@@ -318,6 +324,133 @@ function WorkspacePage() {
           </SectionCard>
         </div>
       )}
+
+      {/* ===== AI insights + validation trend ===== */}
+      {(t || trend.length > 0) && (
+        <>
+          <div className="section-title" style={{ marginTop: 24 }}>
+            <span className="section-title__label">Insights</span>
+            <span className="section-title__line" />
+          </div>
+
+          <div className="grid-charts" style={{ marginBottom: 'var(--space-6)' }}>
+            <SectionCard icon="pi-chart-line" title="Validations · last 14 days" meta={trend.length === 0 ? 'no data yet' : `${trend.reduce((s, p) => s + p.count, 0)} total`}>
+              <TrendSparkline points={trend} />
+            </SectionCard>
+
+            <SectionCard icon="pi-bolt" title="Suggestions">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                {buildInsights(queue, t).length === 0 ? (
+                  <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>No active suggestions — your queue is clean.</div>
+                ) : buildInsights(queue, t).map((ins, i) => (
+                  <div key={i} className="insight-card">
+                    <div className="insight-card__icon"><i className={`pi ${ins.icon}`} /></div>
+                    <div>
+                      <div className="insight-card__title">{ins.title}</div>
+                      <div className="insight-card__body">{ins.body}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+/* ---------- Insights derivation ----------
+ * Compute 2–4 actionable suggestions from data we already have on the page.
+ * Pure UI logic — no extra fetch.
+ */
+function buildInsights(queue: QueueItem[], totals: DashboardTotals | null | undefined) {
+  const out: Array<{ icon: string; title: string; body: string }> = []
+
+  // Single biggest blocker from the queue (highest priority + count chip).
+  const biggest = queue
+    .filter(q => q.chip && /\d/.test(q.chip))
+    .map(q => ({ ...q, n: parseInt(q.chip!.replace(/[^\d]/g, ''), 10) || 0 }))
+    .sort((a, b) => b.n - a.n)[0]
+  if (biggest && biggest.n >= 50) {
+    out.push({
+      icon: 'pi-exclamation-triangle',
+      title: `Clear ${biggest.n.toLocaleString('en-IN')} stuck invoices in one move`,
+      body: biggest.body || biggest.title
+    })
+  }
+
+  // Validation rate posture
+  if (totals) {
+    const total = Number(totals.invoices) || 0
+    const pct = total ? Math.round((Number(totals.validated) / total) * 100) : 0
+    if (pct < 30 && total > 100) {
+      out.push({
+        icon: 'pi-percentage',
+        title: `Only ${pct}% validated — pipeline is stuck upstream`,
+        body: 'Most invoices are blocked on missing reference data. Resolve the top error groups first.'
+      })
+    } else if (pct >= 60) {
+      out.push({
+        icon: 'pi-check-circle',
+        title: `${pct}% of invoices validated — healthy throughput`,
+        body: 'Look at the few remaining error groups; the rest of the queue is clean.'
+      })
+    }
+  }
+
+  // Receiving-team backlog
+  const recvItem = queue.find(q => q.id === 'group:E070' || q.id === 'group:E074')
+  if (recvItem) {
+    out.push({
+      icon: 'pi-inbox',
+      title: 'Receiving paperwork is the hold-up',
+      body: 'GRN entries are missing supplier_doc_no — the validation engine can\'t link them to invoices.'
+    })
+  }
+
+  return out.slice(0, 3)
+}
+
+/* ---------- Sparkline ----------
+ * 14-day daily validation count. SVG path with area fill + dotted line.
+ */
+function TrendSparkline({ points }: { points: Array<{ date: string; count: number }> }) {
+  if (points.length === 0) {
+    return (
+      <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>
+        No validation activity recorded in the last 14 days.
+      </div>
+    )
+  }
+  const max = Math.max(1, ...points.map(p => p.count))
+  const w = 600, h = 160, padX = 8, padY = 14
+  const stepX = points.length > 1 ? (w - 2 * padX) / (points.length - 1) : 0
+  const y = (v: number) => h - padY - (v / max) * (h - 2 * padY)
+  const x = (i: number) => padX + i * stepX
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p.count)}`).join(' ')
+  const areaPath = `${linePath} L ${x(points.length - 1)} ${h - padY} L ${x(0)} ${h - padY} Z`
+  const total = points.reduce((s, p) => s + p.count, 0)
+  return (
+    <>
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: 180 }}>
+        <defs>
+          <linearGradient id="ws-trend" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#ws-trend)" />
+        <path d={linePath} stroke="#2563eb" strokeWidth="2" fill="none" strokeLinejoin="round" strokeLinecap="round" />
+        {points.map((p, i) => (
+          <circle key={i} cx={x(i)} cy={y(p.count)} r="2.5" fill="#2563eb" />
+        ))}
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', marginTop: 6 }}>
+        <span>{points[0]?.date}</span>
+        <span><b style={{ color: 'var(--text-primary)' }}>{total.toLocaleString('en-IN')}</b> validated in 14 days</span>
+        <span>{points[points.length - 1]?.date}</span>
+      </div>
     </>
   )
 }

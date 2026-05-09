@@ -194,6 +194,47 @@ async function buildQueue(userId) {
 }
 
 /**
+ * GET /api/insights/validation-trend?days=14
+ *
+ * Returns daily counts of invoices currently in `validated` status,
+ * bucketed by their last update date. Used by the Workspace trend chart.
+ *
+ * This isn't a perfect "validations per day" stream because status changes
+ * can be overwritten — but it tracks the cumulative pipeline well enough
+ * for the visual.
+ */
+export async function getValidationTrendRoute(req, res) {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 14, 1), 90)
+    const { rows } = await pool.query(`
+      WITH series AS (
+        SELECT generate_series(
+          (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')::date,
+          CURRENT_DATE,
+          INTERVAL '1 day'
+        )::date AS d
+      ),
+      buckets AS (
+        SELECT DATE_TRUNC('day', updated_at)::date AS d, COUNT(*)::int AS n
+          FROM invoices
+         WHERE status = 'validated'
+           AND updated_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+         GROUP BY 1
+      )
+      SELECT to_char(s.d, 'YYYY-MM-DD') AS date,
+             COALESCE(b.n, 0)            AS count
+        FROM series s
+        LEFT JOIN buckets b ON b.d = s.d
+        ORDER BY s.d
+    `, [days])
+    res.json({ days, points: rows })
+  } catch (err) {
+    console.error('Error building validation trend:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+}
+
+/**
  * GET /api/workspace/queue
  *
  * Returns the action queue for the authenticated user. The user comes

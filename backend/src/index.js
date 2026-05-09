@@ -62,7 +62,7 @@ import {
 } from './reconcile.js'
 
 // Redesign Phase 2 — additive endpoints powering the new portal screens.
-import { getWorkspaceQueueRoute } from './workspaceQueue.js'
+import { getWorkspaceQueueRoute, getValidationTrendRoute } from './workspaceQueue.js'
 import {
   getValidationRulesRoute,
   patchValidationRuleRoute,
@@ -4982,8 +4982,9 @@ router.patch('/payments/:id/mark-done', authenticateToken, authorize(['admin', '
 // frontend-redesign branch. None modify or replace existing routes.
 // ===========================================================================
 
-// Workspace action queue (the new home page)
-router.get('/workspace/queue', authenticateToken, getWorkspaceQueueRoute)
+// Workspace action queue + validation trend (the new home page)
+router.get('/workspace/queue',          authenticateToken, getWorkspaceQueueRoute)
+router.get('/insights/validation-trend', authenticateToken, getValidationTrendRoute)
 
 // Validation rules library
 router.get('/validation-rules',           authenticateToken, getValidationRulesRoute)

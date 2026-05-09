@@ -314,6 +314,43 @@
 .tbl--compact tbody td { padding: 8px 14px; }
 .tbl--compact thead th  { padding: 8px 14px; }
 
+/* --- Insight card (Workspace suggestions) ---------------------------- */
+.insight-card {
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(135deg, #eef2ff 0%, #f0f9ff 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+[data-theme="dark"] .insight-card {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.10) 0%, rgba(59, 130, 246, 0.06) 100%);
+}
+.insight-card__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #a78bfa, #7c3aed);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-base);
+  flex-shrink: 0;
+}
+.insight-card__title {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  margin-bottom: 3px;
+  line-height: 1.35;
+}
+.insight-card__body {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
 /* --- Section card header (used by <SectionCard>) ---------------------- */
 .section-card__header {
   padding: var(--space-3) var(--space-5);
