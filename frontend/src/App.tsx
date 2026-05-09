@@ -18,10 +18,7 @@ import InvoiceUploadPage from './pages/InvoiceUploadPage'
 import ReconciliationPage from './pages/ReconciliationPage'
 import PurchaseOrdersPage from './pages/PurchaseOrdersPage'
 import IncompletePOsPage from './pages/IncompletePOsPage'
-import GRNPage from './pages/GRNPage'
-import ASNPage from './pages/ASNPage'
-import DCPage from './pages/DCPage'
-import SchedulesPage from './pages/SchedulesPage'
+import ReceiptsPage from './pages/ReceiptsPage'
 import OpenPoPrefixesPage from './pages/OpenPoPrefixesPage'
 import SuppliersPage from './pages/SuppliersPage'
 import SupplierFormPage from './pages/SupplierFormPage'
@@ -95,10 +92,11 @@ function App() {
         {/* Documents */}
         <Route path="/purchase-orders"            element={<ShellRoute><PurchaseOrdersPage /></ShellRoute>} />
         <Route path="/purchase-orders/incomplete" element={<ShellRoute><IncompletePOsPage /></ShellRoute>} />
-        <Route path="/grn"                        element={<ShellRoute><GRNPage /></ShellRoute>} />
-        <Route path="/asn"                        element={<ShellRoute><ASNPage /></ShellRoute>} />
-        <Route path="/delivery-challans"          element={<ShellRoute><DCPage /></ShellRoute>} />
-        <Route path="/po-schedules"               element={<ShellRoute><SchedulesPage /></ShellRoute>} />
+        {/* Legacy receipt routes redirect to the consolidated /receipts page. */}
+        <Route path="/grn"                        element={<Navigate to="/receipts?type=grn" replace />} />
+        <Route path="/asn"                        element={<Navigate to="/receipts?type=asn" replace />} />
+        <Route path="/delivery-challans"          element={<Navigate to="/receipts?type=dc" replace />} />
+        <Route path="/po-schedules"               element={<Navigate to="/receipts?type=schedule" replace />} />
         <Route path="/open-po-prefixes"           element={<ShellRoute><OpenPoPrefixesPage /></ShellRoute>} />
         <Route path="/items/price-history"        element={<ShellRoute><ItemPriceHistoryPage /></ShellRoute>} />
 
@@ -122,7 +120,7 @@ function App() {
 
         {/* Redesign IA — new wrapper paths. Each is replaced with its real
             page during Phase 3; placeholders avoid 404s in the meantime. */}
-        <Route path="/receipts" element={<ShellRoute><RedesignPlaceholder title="Receipts" subtitle="Combined GRN, ASN, Delivery Challans, and Schedules under one screen with tabs." /></ShellRoute>} />
+        <Route path="/receipts" element={<ShellRoute><ReceiptsPage /></ShellRoute>} />
         <Route path="/rules" element={<ShellRoute requiredRole={['admin']}><RedesignPlaceholder title="Validation rules" subtitle="The 28-rule validation library — every check the engine runs, current count, owner, and severity controls." /></ShellRoute>} />
         <Route path="/audit" element={<ShellRoute requiredRole={['admin']}><RedesignPlaceholder title="Audit log" subtitle="Chronological record of every meaningful action — automated or human — across the portal." /></ShellRoute>} />
         <Route path="/settings" element={<ShellRoute><RedesignPlaceholder title="Settings" subtitle="Profile, Users, Owners, and Open PO prefixes consolidated into one tabbed screen." /></ShellRoute>} />
