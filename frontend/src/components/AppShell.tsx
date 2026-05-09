@@ -18,49 +18,52 @@ interface NavGroup {
   items: NavItem[]
 }
 
+/**
+ * Sidebar navigation — redesign IA.
+ *
+ * 4 groups / 14 items, down from 5 / 19. The shrinkage happens by:
+ *   - Receipts merges GRN, ASN, Delivery Challans and Schedules into one
+ *   - Settings absorbs Profile, Users, Owners and Open PO prefixes
+ *   - Incomplete POs is now a tab inside Purchase orders
+ *   - Old "Dashboard" / "Analytics" / "Needs reconciliation" labels become
+ *     "Workspace" / "Insights" / "Reconciliation"
+ *
+ * Routes that no longer have a sidebar entry (e.g. /grn) keep working —
+ * App.tsx still defines them and they redirect to their consolidated home.
+ */
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: 'Overview',
+    label: 'Work',
     items: [
-      { to: '/',                     label: 'Dashboard',          icon: 'pi-th-large' },
-      { to: '/analytics',            label: 'Analytics',          icon: 'pi-chart-line' },
-      { to: '/reports',              label: 'Reports',            icon: 'pi-chart-bar' },
-      { to: '/items/price-history',  label: 'Item price history', icon: 'pi-history' }
-    ]
-  },
-  {
-    label: 'Workflow',
-    items: [
-      { to: '/invoices/validate',          label: 'Invoices',             icon: 'pi-file' },
-      { to: '/invoices/upload',            label: 'Upload invoice',       icon: 'pi-upload' },
-      { to: '/invoices/reconciliation',    label: 'Needs reconciliation', icon: 'pi-sync' },
-      { to: '/payments/approve',           label: 'Payments',             icon: 'pi-wallet' },
-      { to: '/purchase-orders/incomplete', label: 'Incomplete POs',       icon: 'pi-exclamation-circle' }
+      { to: '/',                          label: 'Workspace',      icon: 'pi-home' },
+      { to: '/invoices/validate',         label: 'Invoices',       icon: 'pi-file' },
+      { to: '/invoices/upload',           label: 'Upload invoice', icon: 'pi-upload' },
+      { to: '/invoices/reconciliation',   label: 'Reconciliation', icon: 'pi-sync' },
+      { to: '/payments/approve',          label: 'Payments',       icon: 'pi-wallet' }
     ]
   },
   {
     label: 'Documents',
     items: [
-      { to: '/purchase-orders',            label: 'Purchase orders',   icon: 'pi-shopping-cart' },
-      { to: '/grn',                        label: 'GRN',               icon: 'pi-box' },
-      { to: '/asn',                        label: 'ASN',               icon: 'pi-truck' },
-      { to: '/delivery-challans',          label: 'Delivery challans', icon: 'pi-file-edit' },
-      { to: '/po-schedules',               label: 'Schedules',         icon: 'pi-calendar' },
-      { to: '/open-po-prefixes',           label: 'Open PO prefixes',  icon: 'pi-tag' }
+      { to: '/purchase-orders', label: 'Purchase orders', icon: 'pi-shopping-cart' },
+      { to: '/receipts',        label: 'Receipts',        icon: 'pi-box' },
+      { to: '/suppliers',       label: 'Suppliers',       icon: 'pi-users', roles: ['admin', 'manager'] }
     ]
   },
   {
-    label: 'Masters',
+    label: 'Insights',
     items: [
-      { to: '/suppliers',              label: 'Suppliers', icon: 'pi-users',   roles: ['admin', 'manager'] },
-      { to: '/users/registration',     label: 'Users',     icon: 'pi-user',    roles: ['admin', 'manager'] },
-      { to: '/owners/details',         label: 'Owners',    icon: 'pi-id-card', roles: ['admin'] }
+      { to: '/analytics',           label: 'Insights',           icon: 'pi-chart-line' },
+      { to: '/items/price-history', label: 'Item price history', icon: 'pi-history' },
+      { to: '/reports',             label: 'Reports',            icon: 'pi-chart-bar' }
     ]
   },
   {
     label: 'System',
     items: [
-      { to: '/profile', label: 'Profile', icon: 'pi-user-edit' }
+      { to: '/rules',    label: 'Validation rules', icon: 'pi-shield' },
+      { to: '/audit',    label: 'Audit log',        icon: 'pi-history' },
+      { to: '/settings', label: 'Settings',         icon: 'pi-cog' }
     ]
   }
 ]

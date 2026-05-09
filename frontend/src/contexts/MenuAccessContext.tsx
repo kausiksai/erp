@@ -36,15 +36,30 @@ interface MenuAccessState {
   refresh: () => Promise<void>
 }
 
-const ALWAYS_ALLOWED_PATHS = new Set<string>(['/', '/profile'])
+const ALWAYS_ALLOWED_PATHS = new Set<string>(['/', '/profile', '/settings'])
 
 // Tab-sibling groups: routes that share a single menu entry + single page
 // component. Granting any path in the group implicitly grants the others,
 // so the admin toolbar doesn't need three separate permission toggles for
 // "Payments" when the sidebar surfaces only one entry.
+//
+// The redesign IA also folds several legacy entries into single combined
+// pages (Receipts wraps GRN/ASN/DC/Schedules; Settings wraps Profile/Users/
+// Owners/Prefixes). Granting any leaf grants the wrapper, so existing per-
+// user permissions continue to work without a database migration.
 const SIBLING_GROUPS: string[][] = [
-  ['/payments/approve', '/payments/ready', '/payments/history']
+  ['/payments/approve', '/payments/ready', '/payments/history'],
+  // Receipts is the consolidated view of these four pages
+  ['/receipts', '/grn', '/asn', '/delivery-challans', '/po-schedules'],
+  // Settings tabs absorb these four
+  ['/settings', '/profile', '/users/registration', '/owners/details', '/open-po-prefixes'],
+  // Insights replaces Analytics (visible label change only)
+  ['/analytics']
 ]
+
+// New IA-only paths that don't exist in the legacy menu table at all.
+// Admin-only by default; non-admins simply won't see them in the sidebar.
+const ADMIN_ONLY_PATHS = new Set<string>(['/rules', '/audit'])
 
 const MenuAccessContext = createContext<MenuAccessState>({
   loading: true,
@@ -105,13 +120,15 @@ export function MenuAccessProvider({ children }: { children: ReactNode }) {
       if (it.path) allowedPaths.add(it.path)
       if (it.menu_id) allowedMenuIds.add(it.menu_id)
     }
+    const isAdmin = (role || '').toLowerCase() === 'admin'
     const canAccess = (path: string) => {
       if (!path) return false
       if (ALWAYS_ALLOWED_PATHS.has(path)) return true
+      if (ADMIN_ONLY_PATHS.has(path)) return isAdmin
       if (allowedPaths.has(path)) return true
       // Tab-sibling rule — grant all paths in a group if any one is allowed.
       for (const group of SIBLING_GROUPS) {
-        if (group.includes(path) && group.some((g) => allowedPaths.has(g))) {
+        if (group.includes(path) && group.some((g) => allowedPaths.has(g) || ALWAYS_ALLOWED_PATHS.has(g))) {
           return true
         }
       }
@@ -121,6 +138,17 @@ export function MenuAccessProvider({ children }: { children: ReactNode }) {
         if (p !== '/' && path.startsWith(p + '/')) return true
       }
       return false
+    }
+
+    // Add the new IA wrapper paths to the visible-paths set so AppShell's
+    // sidebar filter can render them. canAccess is the actual gate.
+    for (const group of SIBLING_GROUPS) {
+      if (group.some((g) => allowedPaths.has(g) || ALWAYS_ALLOWED_PATHS.has(g))) {
+        allowedPaths.add(group[0])
+      }
+    }
+    if (isAdmin) {
+      ADMIN_ONLY_PATHS.forEach((p) => allowedPaths.add(p))
     }
     return {
       loading,

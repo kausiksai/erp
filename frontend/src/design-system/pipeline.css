@@ -1,0 +1,95 @@
+/* ==========================================================================
+   design-system/pipeline.css
+   7-step status indicator used at the top of invoice / PO detail panes.
+   PO → ASN → GRN → Invoice → Validated → Approved → Paid
+   ========================================================================== */
+
+.pipeline {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(135deg, var(--surface-0) 0%, var(--surface-1) 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.pipeline__step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+  padding: 0 var(--space-2);
+  min-width: 80px;
+}
+
+.pipeline__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pipeline__dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  flex-shrink: 0;
+}
+.pipeline__dot--done {
+  background: var(--accent-emerald);
+  color: #fff;
+}
+.pipeline__dot--current {
+  background: var(--brand-600);
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.16);
+}
+.pipeline__dot--pending {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border-default);
+}
+.pipeline__dot--failed {
+  background: var(--status-danger-bg);
+  color: var(--status-danger-fg);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.pipeline__dot--skipped {
+  background: var(--surface-2);
+  color: var(--text-faint);
+  border: 1px dashed var(--border-default);
+}
+
+.pipeline__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+}
+
+.pipeline__meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.pipeline__line {
+  flex: 0 0 24px;
+  height: 2px;
+  background: var(--surface-3);
+  align-self: flex-start;
+  margin-top: 10px;
+}
+.pipeline__line--done {
+  background: var(--accent-emerald);
+}
+
+@media (max-width: 900px) {
+  .pipeline { overflow-x: auto; padding: var(--space-3) var(--space-2); }
+  .pipeline__step { min-width: 84px; }
+}

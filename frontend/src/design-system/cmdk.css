@@ -1,0 +1,107 @@
+/* ==========================================================================
+   design-system/cmdk.css
+   ⌘K command palette modal.
+   ========================================================================== */
+
+.cmdk-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay, rgba(15, 23, 42, 0.5));
+  backdrop-filter: blur(3px);
+  z-index: 80;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.cmdk-backdrop.is-open { display: flex; }
+
+.cmdk {
+  width: min(640px, 92vw);
+  background: var(--surface-0);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+  animation: cmdk-in var(--dur-base) var(--ease-out);
+}
+@keyframes cmdk-in {
+  from { transform: translateY(-12px); opacity: 0; }
+  to   { transform: none;              opacity: 1; }
+}
+
+.cmdk__input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.cmdk__input i { color: var(--text-muted); }
+.cmdk__input input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.cmdk__input input::placeholder { color: var(--text-muted); }
+.cmdk__esc {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.cmdk__list {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.cmdk__section {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: var(--fw-bold);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  letter-spacing: 0.06em;
+}
+
+.cmdk__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+}
+.cmdk__item:hover, .cmdk__item.is-active {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+.cmdk__item i { width: 18px; color: var(--text-muted); }
+.cmdk__item:hover i, .cmdk__item.is-active i { color: var(--brand-600); }
+.cmdk__meta {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.cmdk__empty {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}

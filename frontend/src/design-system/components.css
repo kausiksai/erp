@@ -253,6 +253,38 @@
 .status-chip--muted   { background: var(--status-muted-bg);   color: var(--status-muted-fg);   border-color: var(--status-muted-ring); }
 .status-chip--violet  { background: var(--status-violet-bg);  color: var(--status-violet-fg);  border-color: var(--status-violet-ring); }
 
+/* --- Section card header (used by <SectionCard>) ---------------------- */
+.section-card__header {
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: linear-gradient(180deg, var(--surface-0), var(--surface-1));
+}
+.section-card__title {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+.section-card__title i { color: var(--brand-600); }
+.section-card__meta {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.section-card__actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.section-card__body { padding: var(--space-5); }
+
 /* --- Grid helpers ------------------------------------------------------- */
 .grid-kpis {
   display: grid;
