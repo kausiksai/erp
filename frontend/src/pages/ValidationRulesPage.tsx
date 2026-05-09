@@ -189,37 +189,37 @@ function ValidationRulesPage() {
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table className="tbl">
               <thead>
-                <tr style={{ background: 'var(--surface-1)', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <Th>Code</Th>
-                  <Th>Rule</Th>
-                  <Th>Severity</Th>
-                  <Th>Category</Th>
-                  <Th>Owner</Th>
-                  <Th align="right">Affected</Th>
-                  <Th align="right">Active</Th>
+                <tr>
+                  <th>Code</th>
+                  <th>Rule</th>
+                  <th>Severity</th>
+                  <th>Category</th>
+                  <th>Owner</th>
+                  <th className="tbl__num">Affected</th>
+                  <th className="tbl__num">Active</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((r) => (
-                  <tr key={r.code} style={{ borderBottom: '1px solid var(--border-subtle)', opacity: r.active ? 1 : 0.55 }}>
-                    <Td mono bold>{r.code}</Td>
-                    <Td>
-                      <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</div>
-                      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 2 }}>{r.description}</div>
-                    </Td>
-                    <Td>
+                  <tr key={r.code} style={{ opacity: r.active ? 1 : 0.55 }}>
+                    <td className="tbl__mono tbl__bold">{r.code}</td>
+                    <td>
+                      <div className="tbl__bold">{r.name}</div>
+                      <div className="tbl__muted" style={{ fontSize: 'var(--fs-xs)', marginTop: 2 }}>{r.description}</div>
+                    </td>
+                    <td>
                       <StatusChip
                         status={r.severity}
                         variant={SEVERITY_VARIANT[r.severity]}
                         label={SEVERITY_LABEL[r.severity]}
                       />
-                    </Td>
-                    <Td muted>{r.category}</Td>
-                    <Td muted>{r.owner}</Td>
-                    <Td align="right" mono>{r.count.toLocaleString('en-IN')}</Td>
-                    <Td align="right">
+                    </td>
+                    <td className="tbl__muted">{r.category}</td>
+                    <td className="tbl__muted">{r.owner}</td>
+                    <td className="tbl__num">{r.count.toLocaleString('en-IN')}</td>
+                    <td className="tbl__num">
                       <button
                         type="button"
                         onClick={() => toggleRule(r)}
@@ -229,7 +229,7 @@ function ValidationRulesPage() {
                       >
                         <i className={`pi ${r.active ? 'pi-check' : 'pi-eye-slash'}`} /> {r.active ? 'Active' : 'Muted'}
                       </button>
-                    </Td>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -238,31 +238,6 @@ function ValidationRulesPage() {
         )}
       </div>
     </>
-  )
-}
-
-function Th({ children, align }: { children?: React.ReactNode; align?: 'right' }) {
-  return (
-    <th style={{
-      padding: '10px 14px', fontSize: 'var(--fs-xs)', fontWeight: 600,
-      color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em',
-      textAlign: align === 'right' ? 'right' : 'left', whiteSpace: 'nowrap'
-    }}>{children}</th>
-  )
-}
-function Td({ children, bold, muted, align, mono }: {
-  children?: React.ReactNode; bold?: boolean; muted?: boolean; align?: 'right'; mono?: boolean
-}) {
-  return (
-    <td style={{
-      padding: '12px 14px', fontSize: 'var(--fs-sm)',
-      color: muted ? 'var(--text-muted)' : 'var(--text-primary)',
-      fontWeight: bold ? 600 : 400,
-      textAlign: align === 'right' ? 'right' : 'left',
-      fontFamily: mono ? 'var(--font-mono)' : undefined,
-      fontVariantNumeric: mono ? 'tabular-nums' : undefined,
-      verticalAlign: 'top'
-    }}>{children}</td>
   )
 }
 

@@ -193,79 +193,54 @@ function ReceiptsPage() {
 function Table({ activeTab, rows }: { activeTab: Kind; rows: ReceiptRow[] }) {
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table className="tbl">
         <thead>
-          <tr style={{ background: 'var(--surface-1)', borderBottom: '1px solid var(--border-subtle)' }}>
-            <Th>Doc no</Th>
-            <Th>Date</Th>
-            <Th>PO</Th>
-            {(activeTab === 'grn' || activeTab === 'asn') && <Th>Supplier doc</Th>}
-            <Th>Item</Th>
-            <Th align="right">Qty</Th>
-            {activeTab === 'grn' && <Th align="right">Accepted</Th>}
-            {activeTab === 'dc' && <><Th align="right">Consumed</Th><Th align="right">Balance</Th></>}
-            {activeTab === 'asn' && <Th>Transporter</Th>}
-            <Th>Status</Th>
+          <tr>
+            <th>Doc no</th>
+            <th>Date</th>
+            <th>PO</th>
+            {(activeTab === 'grn' || activeTab === 'asn') && <th>Supplier doc</th>}
+            <th>Item</th>
+            <th className="tbl__num">Qty</th>
+            {activeTab === 'grn' && <th className="tbl__num">Accepted</th>}
+            {activeTab === 'dc' && <><th className="tbl__num">Consumed</th><th className="tbl__num">Balance</th></>}
+            {activeTab === 'asn' && <th>Transporter</th>}
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={`${r.kind}-${r.id}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-              <Td bold>{r.doc_no || <em style={{ color: 'var(--text-muted)' }}>—</em>}</Td>
-              <Td muted>{formatDate(r.doc_date)}</Td>
-              <Td><code style={{ fontSize: 'var(--fs-xs)' }}>{r.po_number || '—'}</code></Td>
+            <tr key={`${r.kind}-${r.id}`}>
+              <td className="tbl__bold">{r.doc_no || <em className="tbl__muted">—</em>}</td>
+              <td className="tbl__muted">{formatDate(r.doc_date)}</td>
+              <td className="tbl__mono">{r.po_number || '—'}</td>
               {(activeTab === 'grn' || activeTab === 'asn') && (
-                <Td><code style={{ fontSize: 'var(--fs-xs)' }}>{r.supplier_doc_no || '—'}</code></Td>
+                <td className="tbl__mono">{r.supplier_doc_no || '—'}</td>
               )}
-              <Td>{r.item || <span style={{ color: 'var(--text-muted)' }}>—</span>}</Td>
-              <Td align="right" mono>{r.qty != null ? `${r.qty} ${r.uom || ''}` : '—'}</Td>
+              <td>{r.item || <span className="tbl__muted">—</span>}</td>
+              <td className="tbl__num">{r.qty != null ? `${r.qty} ${r.uom || ''}` : '—'}</td>
               {activeTab === 'grn' && (
-                <Td align="right" mono>{r.accepted_qty != null ? `${r.accepted_qty} ${r.uom || ''}` : '—'}</Td>
+                <td className="tbl__num">{r.accepted_qty != null ? `${r.accepted_qty} ${r.uom || ''}` : '—'}</td>
               )}
               {activeTab === 'dc' && (
                 <>
-                  <Td align="right" mono>{r.consumed != null ? r.consumed : '—'}</Td>
-                  <Td align="right" mono>{r.balance != null ? r.balance : '—'}</Td>
+                  <td className="tbl__num">{r.consumed != null ? r.consumed : '—'}</td>
+                  <td className="tbl__num">{r.balance != null ? r.balance : '—'}</td>
                 </>
               )}
               {activeTab === 'asn' && (
-                <Td muted>{r.transporter || '—'}</Td>
+                <td className="tbl__muted">{r.transporter || '—'}</td>
               )}
-              <Td>
+              <td>
                 {r.status
                   ? <span className="status-chip status-chip--info">{r.status}</span>
-                  : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-              </Td>
+                  : <span className="tbl__muted">—</span>}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
-  )
-}
-
-function Th({ children, align }: { children?: React.ReactNode; align?: 'right' }) {
-  return (
-    <th style={{
-      padding: '10px 14px', fontSize: 'var(--fs-xs)', fontWeight: 600,
-      color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em',
-      textAlign: align === 'right' ? 'right' : 'left', whiteSpace: 'nowrap'
-    }}>{children}</th>
-  )
-}
-function Td({ children, bold, muted, align, mono }: {
-  children?: React.ReactNode; bold?: boolean; muted?: boolean; align?: 'right'; mono?: boolean
-}) {
-  return (
-    <td style={{
-      padding: '12px 14px', fontSize: 'var(--fs-sm)',
-      color: muted ? 'var(--text-muted)' : 'var(--text-primary)',
-      fontWeight: bold ? 600 : 400,
-      textAlign: align === 'right' ? 'right' : 'left',
-      fontFamily: mono ? 'var(--font-mono)' : undefined,
-      fontVariantNumeric: mono ? 'tabular-nums' : undefined,
-      verticalAlign: 'top'
-    }}>{children}</td>
   )
 }
 

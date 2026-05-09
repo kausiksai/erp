@@ -145,39 +145,39 @@ function AuditLogPage() {
             </div>
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="tbl">
             <thead>
-              <tr style={{ background: 'var(--surface-1)', borderBottom: '1px solid var(--border-subtle)' }}>
-                <Th>When</Th>
-                <Th>Actor</Th>
-                <Th>Action</Th>
-                <Th>Entity</Th>
-                <Th>Summary</Th>
+              <tr>
+                <th>When</th>
+                <th>Actor</th>
+                <th>Action</th>
+                <th>Entity</th>
+                <th>Summary</th>
               </tr>
             </thead>
             <tbody>
               {events.map((e) => (
-                <tr key={e.audit_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <Td muted nowrap>{formatDateTime(e.ts)}</Td>
-                  <Td>
+                <tr key={e.audit_id}>
+                  <td className="tbl__muted tbl__nowrap">{formatDateTime(e.ts)}</td>
+                  <td>
                     <StatusChip
                       status={e.actor_kind}
                       variant={ACTOR_VARIANT[e.actor_kind]}
                       label={e.actor_label || ACTOR_LABEL[e.actor_kind]}
                     />
-                  </Td>
-                  <Td><code style={{ fontSize: 'var(--fs-xs)' }}>{e.action}</code></Td>
-                  <Td>
+                  </td>
+                  <td className="tbl__mono">{e.action}</td>
+                  <td>
                     {e.entity_kind && (
                       <>
                         <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                           {e.entity_kind}
                         </span>{' '}
-                        <span style={{ fontWeight: 600 }}>{e.entity_label || e.entity_id || '—'}</span>
+                        <span className="tbl__bold">{e.entity_label || e.entity_id || '—'}</span>
                       </>
                     )}
-                  </Td>
-                  <Td muted>{e.summary || '—'}</Td>
+                  </td>
+                  <td className="tbl__muted">{e.summary || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -185,26 +185,6 @@ function AuditLogPage() {
         )}
       </div>
     </>
-  )
-}
-
-function Th({ children }: { children?: React.ReactNode }) {
-  return (
-    <th style={{
-      padding: '10px 14px', fontSize: 'var(--fs-xs)', fontWeight: 600,
-      color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em',
-      textAlign: 'left', whiteSpace: 'nowrap'
-    }}>{children}</th>
-  )
-}
-function Td({ children, muted, nowrap }: { children?: React.ReactNode; muted?: boolean; nowrap?: boolean }) {
-  return (
-    <td style={{
-      padding: '12px 14px', fontSize: 'var(--fs-sm)',
-      color: muted ? 'var(--text-muted)' : 'var(--text-primary)',
-      whiteSpace: nowrap ? 'nowrap' : undefined,
-      verticalAlign: 'top'
-    }}>{children}</td>
   )
 }
 

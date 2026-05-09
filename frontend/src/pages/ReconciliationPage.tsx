@@ -223,39 +223,37 @@ function ReconciliationPage() {
                     </div>
                   )}
                   {!isLoadingGroup && groupSamples.length > 0 && (
-                    <table className="tbl" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <table className="tbl tbl--compact">
                       <thead>
-                        <tr style={{ background: 'var(--surface-1)', borderBottom: '1px solid var(--border-subtle)' }}>
-                          <Th>Invoice</Th>
-                          <Th>Date</Th>
-                          <Th>Supplier</Th>
-                          <Th>PO</Th>
-                          <Th>Source</Th>
-                          <Th align="right">Amount</Th>
-                          <Th align="right" />
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Date</th>
+                          <th>Supplier</th>
+                          <th>PO</th>
+                          <th>Source</th>
+                          <th className="tbl__num">Amount</th>
+                          <th />
                         </tr>
                       </thead>
                       <tbody>
                         {groupSamples.map((s) => (
                           <tr
                             key={s.invoice_id}
+                            className="is-clickable"
                             onClick={() => setOpenInv(s)}
-                            style={{ cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)' }}
                           >
-                            <Td bold>{s.invoice_number}</Td>
-                            <Td muted>{formatDate(s.invoice_date)}</Td>
-                            <Td>{s.supplier_name || <span style={{ color: 'var(--text-muted)' }}>—</span>}</Td>
-                            <Td><code style={{ fontSize: 'var(--fs-xs)' }}>{s.po_number || '—'}</code></Td>
-                            <Td>
-                              {s.source === 'ocr' ? <StatusChip status="ocr" variant="violet" label="OCR" />
-                                : s.source === 'excel' ? <StatusChip status="excel" variant="info" label="Excel" />
-                                : s.source === 'both' ? <StatusChip status="both" variant="success" label="Both" />
-                                : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                            </Td>
-                            <Td align="right" bold>{formatINRSymbol(s.total_amount)}</Td>
-                            <Td align="right">
-                              <i className="pi pi-arrow-right" style={{ color: 'var(--text-muted)' }} />
-                            </Td>
+                            <td className="tbl__bold">{s.invoice_number}</td>
+                            <td className="tbl__muted">{formatDate(s.invoice_date)}</td>
+                            <td>{s.supplier_name || <span className="tbl__muted">—</span>}</td>
+                            <td className="tbl__mono">{s.po_number || '—'}</td>
+                            <td>
+                              {s.source === 'ocr'   ? <StatusChip status="ocr"   variant="violet"  label="OCR" />
+                                : s.source === 'excel' ? <StatusChip status="excel" variant="info"    label="Excel" />
+                                : s.source === 'both'  ? <StatusChip status="both"  variant="success" label="Both" />
+                                : <span className="tbl__muted">—</span>}
+                            </td>
+                            <td className="tbl__num tbl__bold">{formatINRSymbol(s.total_amount)}</td>
+                            <td className="tbl__num"><i className="pi pi-arrow-right tbl__muted" /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -314,30 +312,6 @@ function ReconciliationPage() {
         )}
       </SlideOver>
     </>
-  )
-}
-
-/* Tiny table cell helpers — keeps the row markup readable. */
-function Th({ children, align }: { children?: React.ReactNode; align?: 'right' }) {
-  return (
-    <th style={{
-      padding: '10px 14px', fontSize: 'var(--fs-xs)', fontWeight: 600,
-      color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em',
-      textAlign: align === 'right' ? 'right' : 'left'
-    }}>{children}</th>
-  )
-}
-function Td({ children, bold, muted, align }: {
-  children?: React.ReactNode; bold?: boolean; muted?: boolean; align?: 'right'
-}) {
-  return (
-    <td style={{
-      padding: '12px 14px', fontSize: 'var(--fs-sm)',
-      color: muted ? 'var(--text-muted)' : 'var(--text-primary)',
-      fontWeight: bold ? 600 : 400,
-      textAlign: align === 'right' ? 'right' : 'left',
-      verticalAlign: 'top'
-    }}>{children}</td>
   )
 }
 

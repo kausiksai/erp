@@ -143,17 +143,23 @@
   margin-bottom: var(--space-4);
 }
 
-/* --- Stat (KPI) card --------------------------------------------------- */
+/* --- Stat (KPI) card ---------------------------------------------------
+   Tightened in Phase 4a to match the approved demo values exactly:
+   * 16px / 16px / 18px padding (was 20 / 20 / 24)
+   * 26px value (was clamp 24–36)
+   * 34px icon (was 44)
+   * 6px gap (was 12)
+   ---------------------------------------------------------------------- */
 .stat-card {
   position: relative;
-  padding: var(--space-5) var(--space-5) var(--space-6);
+  padding: 16px 16px 18px;
   border-radius: var(--radius-xl);
   background: var(--surface-0);
   border: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-xs);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 8px;
   overflow: hidden;
   transition: transform var(--dur-base) var(--ease-out),
               box-shadow var(--dur-base) var(--ease-out);
@@ -166,34 +172,32 @@
   right: 0;
   height: 3px;
   background: linear-gradient(90deg, var(--stat-accent-a, var(--brand-500)) 0%, var(--stat-accent-b, var(--accent-cyan)) 100%);
-  opacity: 0.9;
 }
 .stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
 }
 .stat-card__icon {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-lg);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, var(--stat-accent-a, var(--brand-500)) 0%, var(--stat-accent-b, var(--accent-cyan)) 100%);
   color: #fff;
-  font-size: 1.2rem;
-  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--stat-accent-a, #3b82f6) 50%, transparent);
+  font-size: 14px;
 }
 .stat-card__label {
-  font-size: var(--fs-xs);
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
   font-weight: var(--fw-semibold);
   margin: 0;
 }
 .stat-card__value {
-  font-size: clamp(1.5rem, 2vw, 2.25rem);
+  font-size: 26px;
   font-weight: var(--fw-bold);
   color: var(--text-primary);
   line-height: 1;
@@ -203,17 +207,17 @@
 .stat-card__delta {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  padding: 0.2rem 0.55rem;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  padding: 3px 8px;
   border-radius: var(--radius-full);
 }
 .stat-card__delta--up   { background: var(--status-success-bg); color: var(--status-success-fg); }
 .stat-card__delta--down { background: var(--status-danger-bg);  color: var(--status-danger-fg);  }
 .stat-card__delta--flat { background: var(--status-muted-bg);   color: var(--status-muted-fg);   }
 .stat-card__footer {
-  font-size: var(--fs-xs);
+  font-size: 11px;
   color: var(--text-faint);
   margin-top: auto;
 }
@@ -230,14 +234,14 @@
 .status-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.7rem;
+  gap: 5px;
+  padding: 3px 9px;
   border-radius: var(--radius-full);
-  font-size: var(--fs-xs);
+  font-size: 11.5px;
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.02em;
   white-space: nowrap;
   border: 1px solid transparent;
+  line-height: 1.5;
 }
 .status-chip::before {
   content: '';
@@ -252,6 +256,63 @@
 .status-chip--danger  { background: var(--status-danger-bg);  color: var(--status-danger-fg);  border-color: var(--status-danger-ring); }
 .status-chip--muted   { background: var(--status-muted-bg);   color: var(--status-muted-fg);   border-color: var(--status-muted-ring); }
 .status-chip--violet  { background: var(--status-violet-bg);  color: var(--status-violet-fg);  border-color: var(--status-violet-ring); }
+
+/* --- Shared lightweight table -----------------------------------------
+   Used by the redesigned pages that don't need PrimeReact's full
+   DataTable. Mirrors the approved demo's `.tbl` class precisely.
+
+     <table className="tbl">
+       <thead><tr><th>...</th></tr></thead>
+       <tbody><tr><td>...</td></tr></tbody>
+     </table>
+
+   Variants:
+     <table className="tbl tbl--compact">  ─ tighter cell padding
+     <td className="tbl__num">              ─ right-aligned mono number
+     <tr className="tbl__total">            ─ bold totals row at the bottom
+   ---------------------------------------------------------------------- */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tbl thead th {
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: var(--fw-semibold);
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+.tbl tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.tbl tbody tr:last-child td { border-bottom: 0; }
+.tbl tbody tr.is-clickable { cursor: pointer; }
+.tbl tbody tr:hover { background: var(--surface-1); }
+.tbl__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+.tbl__bold { font-weight: var(--fw-semibold); color: var(--text-primary); }
+.tbl__muted { color: var(--text-muted); }
+.tbl__nowrap { white-space: nowrap; }
+.tbl__mono { font-family: var(--font-mono); font-size: 12.5px; }
+.tbl__total td {
+  background: var(--surface-1);
+  font-weight: var(--fw-bold);
+  color: var(--text-primary);
+}
+.tbl--compact tbody td { padding: 8px 14px; }
+.tbl--compact thead th  { padding: 8px 14px; }
 
 /* --- Section card header (used by <SectionCard>) ---------------------- */
 .section-card__header {
@@ -340,13 +401,13 @@
 .action-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: 0.55rem 1rem;
+  gap: 6px;
+  padding: 8px 14px;
   border-radius: var(--radius-full);
   background: linear-gradient(135deg, var(--brand-600) 0%, var(--brand-700) 100%);
   color: #fff;
   font-weight: var(--fw-semibold);
-  font-size: var(--fs-sm);
+  font-size: 13px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   cursor: pointer;
   box-shadow: 0 6px 16px -6px rgba(37, 99, 235, 0.5);
