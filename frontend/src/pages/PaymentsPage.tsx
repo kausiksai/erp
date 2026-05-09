@@ -7,6 +7,8 @@ import InvoiceExpansion from '../components/InvoiceExpansion'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { formatINRSymbol, formatDate, parseAmount } from '../utils/format'
 import { downloadCsv } from '../utils/exportCsv'
+import { useToast } from '../contexts/ToastContext'
+import { useConfirm } from '../contexts/ConfirmContext'
 
 type Tab = 'approve' | 'ready' | 'history'
 
@@ -54,10 +56,11 @@ function PaymentsPage() {
     location.pathname.endsWith('/ready')   ? 'ready'   : 'approve'
   const [tab, setTab] = useState<Tab>(initialTab)
 
+  const toast = useToast()
+  const confirmDialog = useConfirm()
+
   const [rows, setRows] = useState<PaymentRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [busyId, setBusyId] = useState<number | null>(null)
   const [totals, setTotals] = useState({ count: 0, value: 0 })
 
@@ -94,8 +97,6 @@ function PaymentsPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true)
-      setError('')
-      setSuccess('')
       setExpandedIds(new Set())
       // Fetch with a high limit so the displayed count reflects all
       // pending invoices, not just the first server-default page (100).
@@ -114,7 +115,7 @@ function PaymentsPage() {
         value: items.reduce((s, r) => s + (parseAmount(r.total_amount) ?? 0), 0)
       })
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Action failed', getDisplayError(err))
     } finally {
       setLoading(false)
     }
@@ -130,8 +131,14 @@ function PaymentsPage() {
   /* ---------- approve / reject ---------- */
 
   const handleApprove = async (row: PaymentRow) => {
-    if (!confirm(`Approve payment for invoice ${row.invoice_number} (${formatINRSymbol(row.total_amount)})?`)) return
-    setError(''); setSuccess('')
+    const ok = await confirmDialog({
+      title: `Approve payment for ${row.invoice_number}?`,
+      body: `${formatINRSymbol(row.total_amount)} will move to the Ready for payment queue.`,
+      icon: 'pi-check-circle',
+      kind: 'success',
+      okLabel: 'Approve'
+    })
+    if (!ok) return
     setBusyId(row.invoice_id)
     try {
       const res = await apiFetch('payments/approve', {
@@ -139,21 +146,20 @@ function PaymentsPage() {
         body: JSON.stringify({ invoiceId: row.invoice_id })
       })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Approve failed'))
-      setSuccess(`Invoice ${row.invoice_number} approved — moved to Ready for payment.`)
+      toast.success('Approved for payment', `Invoice ${row.invoice_number} moved to Ready for payment.`)
       setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
       setTotals((t) => ({
         count: Math.max(0, t.count - 1),
         value: Math.max(0, t.value - (parseAmount(row.total_amount) ?? 0))
       }))
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Action failed', getDisplayError(err))
     } finally {
       setBusyId(null)
     }
   }
 
   const handleApproveWithBank = async (row: PaymentRow) => {
-    setError(''); setSuccess('')
     setBusyId(row.invoice_id)
     try {
       const payload: Record<string, unknown> = { invoiceId: row.invoice_id }
@@ -167,7 +173,7 @@ function PaymentsPage() {
         body: JSON.stringify(payload)
       })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Approve failed'))
-      setSuccess(`Invoice ${row.invoice_number} approved with modified bank details.`)
+      toast.success('Approved with bank override', `Invoice ${row.invoice_number} — using the modified bank details.`)
       setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
       setTotals((t) => ({
         count: Math.max(0, t.count - 1),
@@ -176,7 +182,7 @@ function PaymentsPage() {
       setBankOverrideId(null)
       setBankForm({ bank_account_name: '', bank_account_number: '', bank_ifsc_code: '', bank_name: '', branch_name: '' })
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Action failed', getDisplayError(err))
     } finally {
       setBusyId(null)
     }
@@ -185,7 +191,6 @@ function PaymentsPage() {
   const handleReject = async (row: PaymentRow) => {
     const reason = window.prompt(`Reject invoice ${row.invoice_number}?\n\nReason (required):`)
     if (!reason || !reason.trim()) return
-    setError(''); setSuccess('')
     setBusyId(row.invoice_id)
     try {
       const res = await apiFetch('payments/reject', {
@@ -193,14 +198,14 @@ function PaymentsPage() {
         body: JSON.stringify({ invoiceId: row.invoice_id, rejection_reason: reason.trim() })
       })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Reject failed'))
-      setSuccess(`Invoice ${row.invoice_number} rejected.`)
+      toast.warn('Invoice rejected', `${row.invoice_number} won't proceed to payment.`)
       setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
       setTotals((t) => ({
         count: Math.max(0, t.count - 1),
         value: Math.max(0, t.value - (parseAmount(row.total_amount) ?? 0))
       }))
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Action failed', getDisplayError(err))
     } finally {
       setBusyId(null)
     }
@@ -216,21 +221,20 @@ function PaymentsPage() {
 
   const recordPayment = async (row: PaymentRow, amountOverride?: number) => {
     if (!row.id) {
-      setError('Missing payment approval id — reload and try again.')
+      toast.danger('Missing approval id', 'Reload the page and try again.')
       return
     }
     const formState = payForms[row.id] ?? EMPTY_PAY_FORM
     const remaining = remainingFor(row)
     const amount = amountOverride != null ? amountOverride : Number(formState.amount)
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError('Enter a valid payment amount greater than zero.')
+      toast.warn('Invalid amount', 'Enter a payment amount greater than zero.')
       return
     }
     if (amount > remaining + 0.01) {
-      setError(`Amount exceeds remaining balance ${formatINRSymbol(remaining)}.`)
+      toast.warn('Amount too high', `Exceeds the remaining balance ${formatINRSymbol(remaining)}.`)
       return
     }
-    setError(''); setSuccess('')
     setPaying(row.id)
     try {
       const res = await apiFetch('payments/record-payment', {
@@ -246,20 +250,20 @@ function PaymentsPage() {
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Record payment failed'))
       const body = await res.json()
       if (body.status === 'payment_done') {
-        setSuccess(`Invoice ${row.invoice_number} fully paid.`)
+        toast.success('Payment recorded', `Invoice ${row.invoice_number} is fully paid.`)
         setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
         setTotals((t) => ({
           count: Math.max(0, t.count - 1),
           value: Math.max(0, t.value - (parseAmount(row.total_amount) ?? 0))
         }))
       } else {
-        setSuccess(`Partial payment of ${formatINRSymbol(amount)} recorded for ${row.invoice_number}. Remaining ${formatINRSymbol(body.remaining)}.`)
+        toast.success('Partial payment', `${formatINRSymbol(amount)} recorded for ${row.invoice_number}. Remaining ${formatINRSymbol(body.remaining)}.`)
         setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, paid_amount: body.paidSoFar, status: 'partially_paid' } : r)))
       }
       // Reset this row's form
       setPayForms((p) => ({ ...p, [row.id as number]: EMPTY_PAY_FORM }))
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Action failed', getDisplayError(err))
     } finally {
       setPaying(null)
     }
@@ -305,17 +309,6 @@ function PaymentsPage() {
           ) : undefined
         }
       />
-
-      {error && (
-        <div className="glass-card" style={{ borderColor: 'var(--status-danger-ring)', color: 'var(--status-danger-fg)' }}>
-          <i className="pi pi-exclamation-triangle" /> {error}
-        </div>
-      )}
-      {success && (
-        <div className="glass-card" style={{ borderColor: 'var(--status-success-ring)', color: 'var(--status-success-fg)' }}>
-          <i className="pi pi-check-circle" /> {success}
-        </div>
-      )}
 
       <div className="grid-kpis fade-in-up--stagger">
         <StatTile
