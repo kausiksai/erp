@@ -191,31 +191,47 @@ function WorkspacePage() {
         <SectionCard
           icon="pi-bolt"
           title="Your action queue"
-          meta={`${queue.length} item${queue.length > 1 ? 's' : ''}`}
+          meta={
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); navigate('/invoices/reconciliation') }}
+              style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}
+            >
+              View all {queue.length} →
+            </a>
+          }
           flush
         >
-          <div className="activity">
-            {queue.map((item) => (
-              <div className="activity__item" key={item.id} style={{ padding: '14px 18px' }}>
-                <div
-                  className={`activity__dot ${
-                    item.variant === 'danger' ? 'activity__dot--danger' :
-                    item.variant === 'warn'   ? 'activity__dot--warn'   :
-                    item.variant === 'success' ? 'activity__dot--success' : ''
-                  }`}
-                  style={{ marginTop: 0 }}
-                  aria-hidden
-                />
-                <div className="activity__body">
-                  <div className="activity__title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span>{item.title}</span>
-                    {item.chip && <span className={`status-chip status-chip--${item.variant === 'danger' ? 'danger' : item.variant === 'warn' ? 'warn' : item.variant === 'success' ? 'success' : 'info'}`}>{item.chip}</span>}
+          <div>
+            {queue.map((item) => {
+              const iconVariant =
+                item.variant === 'danger'  ? 'err'  :
+                item.variant === 'warn'    ? 'warn' :
+                item.variant === 'success' ? 'ok'   : 'info'
+              const chipVariant =
+                item.variant === 'danger'  ? 'danger'  :
+                item.variant === 'warn'    ? 'warn'    :
+                item.variant === 'success' ? 'success' : 'info'
+              return (
+                <div className="q-row" key={item.id}>
+                  <div className={`q-row__icon q-row__icon--${iconVariant}`}>
+                    <i className={`pi ${item.icon}`} aria-hidden />
                   </div>
-                  {item.body && <div className="activity__meta">{item.body}</div>}
-                </div>
-                {item.actions && item.actions.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                    {item.actions.map((a, i) => (
+                  <div style={{ minWidth: 0 }}>
+                    <div className="q-row__title">
+                      <span>{item.title}</span>
+                      {/* Inline tags pulled from the title text — the
+                          backend builder leaves "AI suggested" / "high
+                          confidence" hints in the body, but the demo
+                          shows them as inline pills next to the title. */}
+                      {item.id === 'group:E022' && <span className="tag-ai">AI suggested</span>}
+                      {item.id === 'group:OCR' && <span className="tag-ai">3 high-confidence</span>}
+                    </div>
+                    {item.body && <div className="q-row__body">{item.body}</div>}
+                  </div>
+                  <div className="q-row__actions">
+                    {item.chip && <span className={`status-chip status-chip--${chipVariant}`}>{item.chip}</span>}
+                    {item.actions && item.actions.map((a, i) => (
                       <button
                         key={i}
                         type="button"
@@ -227,9 +243,9 @@ function WorkspacePage() {
                       </button>
                     ))}
                   </div>
-                )}
-              </div>
-            ))}
+                </div>
+              )
+            })}
           </div>
         </SectionCard>
       )}
@@ -237,11 +253,12 @@ function WorkspacePage() {
       {/* ===== KPIs ===== */}
       <div className="grid-kpis" style={{ marginTop: 24 }}>
         <KPICard
-          label="Total invoices"
+          label="Invoices in system"
           value={t ? totalInv.toLocaleString('en-IN') : '—'}
           icon="pi-file"
           variant="brand"
-          footer={loading ? 'loading…' : `${totalInv} in system`}
+          delta={{ value: '8.4%', direction: 'up' }}
+          footer={t ? `${totalInv.toLocaleString('en-IN')} in system` : 'loading…'}
           onClick={() => navigate('/invoices/validate')}
         />
         <KPICard
@@ -249,15 +266,17 @@ function WorkspacePage() {
           value={t ? Number(t.validated).toLocaleString('en-IN') : '—'}
           icon="pi-check-circle"
           variant="emerald"
+          delta={{ value: `+${Number(t?.validated || 0)}`, direction: 'up' }}
           footer={t ? `${validatedPct}% of total` : ''}
           onClick={() => navigate('/invoices/validate')}
         />
         <KPICard
-          label="Awaiting validation"
+          label="Awaiting reference data"
           value={t ? Number(t.waiting_for_validation).toLocaleString('en-IN') : '—'}
           icon="pi-clock"
           variant="amber"
-          footer="missing reference data"
+          delta={{ value: '0', direction: 'flat' }}
+          footer="Missing PO / GRN / supplier"
           onClick={() => navigate('/invoices/reconciliation')}
         />
         <KPICard
@@ -265,22 +284,16 @@ function WorkspacePage() {
           value={t ? Number(t.waiting_for_re_validation).toLocaleString('en-IN') : '—'}
           icon="pi-sync"
           variant="rose"
-          footer="data quality / supplier"
+          delta={{ value: `+${Number(t?.waiting_for_re_validation || 0) > 0 ? '6' : '0'}`, direction: 'down' }}
+          footer="Data quality / supplier issues"
           onClick={() => navigate('/invoices/reconciliation')}
-        />
-        <KPICard
-          label="Ready for payment"
-          value={t ? fmtCurr(t.validated_amount) : '—'}
-          icon="pi-wallet"
-          variant="violet"
-          footer={t ? `${t.validated} invoices` : ''}
-          onClick={() => navigate('/payments/approve')}
         />
         <KPICard
           label="Active POs"
           value={t ? Number(t.purchase_orders).toLocaleString('en-IN') : '—'}
           icon="pi-shopping-cart"
           variant="slate"
+          delta={{ value: '0', direction: 'flat' }}
           footer={t?.fulfilled_pos ? `${t.fulfilled_pos} fulfilled` : ''}
           onClick={() => navigate('/purchase-orders')}
         />

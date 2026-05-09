@@ -20,17 +20,22 @@ function KPICard({ label, value, icon = 'pi-chart-line', variant = 'brand', delt
       className={`stat-card stat-card--${variant}`}
       style={{ border: 0, textAlign: 'left', cursor: onClick ? 'pointer' : 'default' }}
     >
-      <div className="stat-card__icon">
-        <i className={`pi ${icon}`} aria-hidden />
+      {/* Top row — icon (left) + delta arrow (right). Matches the
+          approved demo layout where the up-/down-arrow sits beside the
+          icon, not below the value. */}
+      <div className="stat-card__top">
+        <div className="stat-card__icon">
+          <i className={`pi ${icon}`} aria-hidden />
+        </div>
+        {delta && (
+          <span className={`stat-card__delta stat-card__delta--${delta.direction}`}>
+            <i className={`pi ${delta.direction === 'up' ? 'pi-arrow-up' : delta.direction === 'down' ? 'pi-arrow-down' : 'pi-minus'}`} />
+            {delta.value}
+          </span>
+        )}
       </div>
       <div className="stat-card__label">{label}</div>
       <div className="stat-card__value">{value}</div>
-      {delta && (
-        <div className={`stat-card__delta stat-card__delta--${delta.direction}`}>
-          <i className={`pi ${delta.direction === 'up' ? 'pi-arrow-up-right' : delta.direction === 'down' ? 'pi-arrow-down-right' : 'pi-minus'}`} />
-          {delta.value}
-        </div>
-      )}
       {footer && <div className="stat-card__footer">{footer}</div>}
     </button>
   )

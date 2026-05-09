@@ -177,6 +177,11 @@
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
+.stat-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 .stat-card__icon {
   width: 34px;
   height: 34px;
@@ -374,8 +379,9 @@
 }
 .view-chip--add:hover { border-style: solid; color: var(--brand-700); }
 
-/* --- "NEW" inline tag (page titles) ---------------------------------- */
-.tag-new {
+/* --- Inline tag pills (page titles, action queue) ------------------- */
+.tag-new,
+.tag-ai {
   display: inline-flex;
   align-items: center;
   font-size: 9px;
@@ -384,8 +390,62 @@
   text-transform: uppercase;
   padding: 2px 7px;
   border-radius: 5px;
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
-  color: #7c2d12;
+}
+.tag-new { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #7c2d12; }
+.tag-ai  { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: #fff; }
+
+/* --- Action-queue row (Workspace) -----------------------------------
+   Demo's `.q__row` pattern: 36×36 colored-bg icon block on the left,
+   stacked title + body in the middle, action buttons on the right.
+   ---------------------------------------------------------------- */
+.q-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-3);
+  padding: 12px var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  align-items: center;
+}
+.q-row:last-child { border-bottom: 0; }
+.q-row.is-clickable { cursor: pointer; transition: background var(--dur-fast); }
+.q-row.is-clickable:hover { background: var(--surface-1); }
+
+.q-row__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-base);
+  flex-shrink: 0;
+}
+.q-row__icon--err  { background: var(--status-danger-bg);  color: var(--status-danger-fg); }
+.q-row__icon--warn { background: var(--status-warn-bg);    color: var(--status-warn-fg); }
+.q-row__icon--info { background: var(--status-info-bg);    color: var(--status-info-fg); }
+.q-row__icon--ok   { background: var(--status-success-bg); color: var(--status-success-fg); }
+
+.q-row__title {
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.q-row__body {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+.q-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 /* --- Insight card (Workspace suggestions) ---------------------------- */
