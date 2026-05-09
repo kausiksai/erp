@@ -9,7 +9,7 @@ import { useAuth } from './contexts/AuthContext'
 
 // Brand-new pages — every page is a from-scratch rewrite.
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
+import WorkspacePage from './pages/WorkspacePage'
 import Analytics from './pages/Analytics'
 import ReportsHubPage from './pages/ReportsHubPage'
 import InvoicesPage from './pages/InvoicesPage'
@@ -71,7 +71,7 @@ function App() {
         />
 
         {/* Overview */}
-        <Route path="/"          element={<ShellRoute><Dashboard /></ShellRoute>} />
+        <Route path="/"          element={<ShellRoute><WorkspacePage /></ShellRoute>} />
         <Route path="/analytics" element={<ShellRoute><Analytics /></ShellRoute>} />
         <Route path="/reports"   element={<ShellRoute><ReportsHubPage /></ShellRoute>} />
 
