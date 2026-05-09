@@ -7,7 +7,7 @@ import SlideOver from '../components/SlideOver'
 import PoExpansion from '../components/PoExpansion'
 import ExcelUploadButton from '../components/ExcelUploadButton'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
-import { formatDate, formatInt } from '../utils/format'
+import { formatDate, formatInt, formatINRSymbol, parseAmount } from '../utils/format'
 
 /**
  * Purchase orders list — every PO ingested.
@@ -29,7 +29,13 @@ interface PurchaseOrder {
   pfx: string | null
   unit: string | null
   line_item_count: number | string | null
+  /** PO total = sum(qty × unit_cost × (1 − disc%)). Added in Phase 4b4. */
+  po_value?: string | number | null
+  /** Sum of total_amount across invoices linked to this PO. */
+  invoiced_amount?: string | number | null
 }
+
+type PoType = 'all' | 'open' | 'standard' | 'subcontract'
 
 interface PoStats {
   total: number
@@ -56,6 +62,7 @@ function PurchaseOrdersPage() {
   const [reloadKey, setReloadKey] = useState(0)
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [openPo, setOpenPo] = useState<PurchaseOrder | null>(null)
+  const [poType, setPoType] = useState<PoType>('all')
 
   const loadStats = useCallback(async () => {
     try {
@@ -77,6 +84,7 @@ function PurchaseOrdersPage() {
       qs.set('offset', String(p.offset))
       if (p.search) qs.set('poNumber', p.search)
       if (p.filters.status) qs.set('status', p.filters.status)
+      if (poType !== 'all') qs.set('type', poType)
       const res = await apiFetch(`purchase-orders?${qs.toString()}`)
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load POs'))
       const body = await res.json()
@@ -84,7 +92,7 @@ function PurchaseOrdersPage() {
       const totalN = body.total ?? items.length
       return { items, total: totalN }
     },
-    []
+    [poType]
   )
 
   const columns: ListPageColumn<PurchaseOrder>[] = [
@@ -139,6 +147,38 @@ function PurchaseOrdersPage() {
       style: { textAlign: 'right' }
     },
     {
+      field: 'po_value',
+      header: 'Consumption',
+      body: (row) => {
+        const value = parseAmount(row.po_value) ?? 0
+        const invoiced = parseAmount(row.invoiced_amount) ?? 0
+        if (value <= 0) {
+          return <div style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>—</div>
+        }
+        const pct = Math.min(100, Math.round((invoiced / value) * 100))
+        // Color band: green when fully consumed, amber 30–99, blue otherwise.
+        const color =
+          pct >= 100 ? 'linear-gradient(90deg,#10b981,#14b8a6)' :
+          pct >= 30  ? 'linear-gradient(90deg,#f59e0b,#fbbf24)' :
+                       'linear-gradient(90deg,#3b82f6,#06b6d4)'
+        return (
+          <div style={{ minWidth: 160 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-xs)', marginBottom: 4 }}>
+              <span style={{ fontWeight: 600 }}>{formatINRSymbol(invoiced)}</span>
+              <span className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{pct}%</span>
+            </div>
+            <div style={{ height: 6, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+              of {formatINRSymbol(value)}
+            </div>
+          </div>
+        )
+      },
+      style: { minWidth: 180 }
+    },
+    {
       field: 'status',
       header: 'Status',
       body: (row) => <StatusChip status={row.status} />
@@ -183,6 +223,26 @@ function PurchaseOrdersPage() {
           { label: 'Open',            value: formatInt(stats.open_count),       icon: 'pi-clock',         variant: 'slate',   sublabel: 'Active / not closed' },
           { label: 'Fulfilled',       value: formatInt(stats.fulfilled_count),  icon: 'pi-check-circle',  variant: 'emerald', sublabel: 'Completed' }
         ]}
+        chipRow={
+          <div className="view-chips" style={{ marginBottom: 'var(--space-3)' }}>
+            <span className="view-chips__label">Type:</span>
+            {([
+              { k: 'all',         l: 'All' },
+              { k: 'open',        l: 'Open / blanket' },
+              { k: 'standard',    l: 'Standard' },
+              { k: 'subcontract', l: 'Subcontract' }
+            ] as Array<{ k: PoType; l: string }>).map(({ k, l }) => (
+              <button
+                key={k}
+                type="button"
+                className={`view-chip ${poType === k ? 'view-chip--active' : ''}`}
+                onClick={() => setPoType(k)}
+              >
+                <span>{l}</span>
+              </button>
+            ))}
+          </div>
+        }
         filters={[
           { key: 'search', type: 'search', placeholder: 'Search by PO number…' },
           {

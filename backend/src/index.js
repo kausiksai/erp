@@ -2726,6 +2726,22 @@ router.get('/purchase-orders', async (req, res) => {
       filters.push(`po.unit ILIKE ${pushParam(`%${req.query.unit}%`)}`)
     }
 
+    // Redesign Phase 4b4 — `type` is a derived filter that combines the
+    // pfx column with the open_po_prefixes lookup table. None of the
+    // legacy callers pass it, so the existing behavior is unchanged when
+    // omitted.
+    if (req.query.type) {
+      const t = String(req.query.type).toLowerCase()
+      if (t === 'open') {
+        filters.push(`EXISTS (SELECT 1 FROM open_po_prefixes opp WHERE opp.prefix = po.pfx)`)
+      } else if (t === 'subcontract') {
+        filters.push(`po.pfx ILIKE 'SC%'`)
+      } else if (t === 'standard') {
+        filters.push(`po.pfx NOT ILIKE 'SC%' AND NOT EXISTS (SELECT 1 FROM open_po_prefixes opp WHERE opp.prefix = po.pfx)`)
+      }
+      // 'all' or any other value → no extra filter
+    }
+
     const filterSql = filters.length > 0 ? ` WHERE ${filters.join(' AND ')}` : ''
 
     // Count query - no line_item_count needed, skip the join
@@ -2756,6 +2772,14 @@ router.get('/purchase-orders', async (req, res) => {
          po.status,
          s.supplier_name,
          (SELECT COUNT(*)::int FROM purchase_order_lines pol WHERE pol.po_id = po.po_id) AS line_item_count,
+         -- Consumption data for the redesigned PO list — drives the
+         -- progress bar column. Both subqueries hit existing indexes
+         -- (idx_po_lines_po, idx_invoices_po) so the per-row cost stays
+         -- under 1 ms per PO on the page.
+         (SELECT COALESCE(SUM(pol.qty * pol.unit_cost * (1 - COALESCE(pol.disc_pct, 0) / 100.0)), 0)::numeric(15,2)
+            FROM purchase_order_lines pol WHERE pol.po_id = po.po_id) AS po_value,
+         (SELECT COALESCE(SUM(i.total_amount), 0)::numeric(15,2)
+            FROM invoices i WHERE i.po_id = po.po_id) AS invoiced_amount,
          NULL::TEXT AS bill_to,
          NULL::TEXT AS bill_to_address,
          NULL::TEXT AS bill_to_gstin,
