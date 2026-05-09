@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import ListPage from '../components/ListPage'
 import type { ListPageColumn, FetchParams, FetchResult } from '../components/ListPage'
 import ExcelUploadButton from '../components/ExcelUploadButton'
+import SlideOver from '../components/SlideOver'
+import Supplier360 from '../components/Supplier360'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { useConfirm } from '../contexts/ConfirmContext'
@@ -36,6 +38,7 @@ function SuppliersPage() {
   const navigate = useNavigate()
   const [total, setTotal] = useState(0)
   const [reloadKey, setReloadKey] = useState(0)
+  const [openSup, setOpenSup] = useState<Supplier | null>(null)
   const toast = useToast()
   const confirmDialog = useConfirm()
 
@@ -175,6 +178,7 @@ function SuppliersPage() {
   ]
 
   return (
+    <>
     <ListPage<Supplier>
       eyebrow="Masters"
       eyebrowIcon="pi-users"
@@ -202,10 +206,33 @@ function SuppliersPage() {
       rowKey="supplier_id"
       fetchData={fetchData}
       reloadKey={reloadKey}
-      onRowClick={(row) => navigate('/suppliers/registration', { state: { supplier: row } })}
+      onRowClick={(row) => setOpenSup(row)}
       emptyTitle="No suppliers yet"
       emptyBody="Add your first supplier to start receiving POs against them, or upload an Excel master using the button above."
     />
+    {openSup && (
+      <SlideOver
+        open={true}
+        onClose={() => setOpenSup(null)}
+        title={openSup.supplier_name || 'Supplier'}
+        headerActions={
+          <button
+            type="button"
+            className="action-btn action-btn--ghost"
+            style={{ padding: '6px 12px', fontSize: 'var(--fs-xs)' }}
+            onClick={() => {
+              navigate('/suppliers/registration', { state: { supplier: openSup } })
+              setOpenSup(null)
+            }}
+          >
+            <i className="pi pi-pencil" /> Edit
+          </button>
+        }
+      >
+        <Supplier360 supplierId={openSup.supplier_id} />
+      </SlideOver>
+    )}
+    </>
   )
 }
 

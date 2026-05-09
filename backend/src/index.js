@@ -83,6 +83,7 @@ import {
 import { getReceiptsRoute } from './receipts.js'
 import { getSearchRoute } from './search.js'
 import { getInvoicePriceHistoryRoute } from './priceHistory.js'
+import { getSupplier360Route } from './supplier360.js'
 
 const app = express()
 
@@ -5037,6 +5038,9 @@ router.get('/search', authenticateToken, getSearchRoute)
 
 // Item price history — invoice-side complement to /po-history
 router.get('/items/:itemCode/invoice-history', authenticateToken, getInvoicePriceHistoryRoute)
+
+// Supplier 360 — aggregate read for the slide-over detail panel
+router.get('/suppliers/:id/360', authenticateToken, getSupplier360Route)
 
 // Mount API routes under /api prefix
 app.use('/api', router)
