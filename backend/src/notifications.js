@@ -34,7 +34,7 @@ export async function pushNotification({ userId, variant, title, body, link, met
  */
 export async function getNotificationsRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) return res.status(401).json({ error: 'unauthorized' })
 
     const { unread_only } = req.query
@@ -79,7 +79,7 @@ export async function getNotificationsRoute(req, res) {
 
 export async function markNotificationReadRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) return res.status(401).json({ error: 'unauthorized' })
     const { notificationId } = req.params
     const { rowCount } = await pool.query(
@@ -95,7 +95,7 @@ export async function markNotificationReadRoute(req, res) {
 
 export async function markAllNotificationsReadRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) return res.status(401).json({ error: 'unauthorized' })
     const { rowCount } = await pool.query(
       'UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL',

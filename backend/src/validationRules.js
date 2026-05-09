@@ -155,7 +155,7 @@ export async function patchValidationRuleRoute(req, res) {
       )
     `)
 
-    const userId = req.user?.userId || null
+    const userId = req.user?.user_id || null
     const { rows } = await pool.query(`
       INSERT INTO validation_rule_overrides (code, active, severity_override, updated_by, updated_at)
       VALUES ($1, COALESCE($2, TRUE), $3, $4, NOW())

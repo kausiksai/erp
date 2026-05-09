@@ -197,11 +197,11 @@ async function buildQueue(userId) {
  * GET /api/workspace/queue
  *
  * Returns the action queue for the authenticated user. The user comes
- * from authenticateToken middleware, which sets req.user.userId.
+ * from authenticateToken middleware, which sets req.user.user_id.
  */
 export async function getWorkspaceQueueRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) {
       return res.status(401).json({ error: 'unauthorized' })
     }

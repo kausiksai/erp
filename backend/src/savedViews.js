@@ -1,6 +1,6 @@
 // Saved views — per-user filter-combo presets on list pages.
 //
-// Endpoints (all scoped to req.user.userId):
+// Endpoints (all scoped to req.user.user_id):
 //   GET    /api/saved-views?scope=invoices              list user's views for a scope
 //   POST   /api/saved-views                             create one  { scope, name, filters, is_default? }
 //   PATCH  /api/saved-views/:viewId                     rename / re-filter / set default
@@ -15,7 +15,7 @@ const VALID_SCOPES = new Set(['invoices', 'purchase_orders', 'receipts', 'reconc
 
 export async function listSavedViewsRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) return res.status(401).json({ error: 'unauthorized' })
     const { scope } = req.query
 
@@ -48,7 +48,7 @@ export async function listSavedViewsRoute(req, res) {
 
 export async function createSavedViewRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) return res.status(401).json({ error: 'unauthorized' })
 
     const { scope, name, filters, is_default } = req.body || {}
@@ -93,7 +93,7 @@ export async function createSavedViewRoute(req, res) {
 
 export async function patchSavedViewRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) return res.status(401).json({ error: 'unauthorized' })
     const { viewId } = req.params
     const { name, filters, is_default } = req.body || {}
@@ -140,7 +140,7 @@ export async function patchSavedViewRoute(req, res) {
 
 export async function deleteSavedViewRoute(req, res) {
   try {
-    const userId = req.user?.userId
+    const userId = req.user?.user_id
     if (!userId) return res.status(401).json({ error: 'unauthorized' })
     const { viewId } = req.params
 
