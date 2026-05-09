@@ -3,6 +3,7 @@ import PageHero from '../components/PageHero'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { downloadCsv } from '../utils/exportCsv'
 import { formatDate, formatINR, parseAmount } from '../utils/format'
+import { useToast } from '../contexts/ToastContext'
 
 /**
  * ReportsHubPage — a download center, NOT a router to list pages.
@@ -172,17 +173,14 @@ function ReportsHubPage() {
     return init
   })
   const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [previews, setPreviews] = useState<Record<string, { count: number; at: Date }>>({})
+  const toast = useToast()
 
   const updateRange = (key: string, field: 'from' | 'to', value: string) => {
     setRanges((r) => ({ ...r, [key]: { ...r[key], [field]: value } }))
   }
 
   const handleDownload = async (def: ReportDef) => {
-    setError('')
-    setSuccess('')
     setBusy(def.key)
     try {
       const qs = new URLSearchParams()
@@ -201,7 +199,7 @@ function ReportsHubPage() {
           ? body.rows
           : []
       if (raw.length === 0) {
-        setError(`No rows to export for "${def.title}".`)
+        toast.warn('Nothing to export', `No rows for "${def.title}" in this date range.`)
         return
       }
       // Apply per-column formatters so the CSV is human-readable.
@@ -216,10 +214,10 @@ function ReportsHubPage() {
       const range = def.dateRange && ranges[def.key] ? `_${ranges[def.key].from}_to_${ranges[def.key].to}` : ''
       const filename = `${def.filename}${range}.csv`
       downloadCsv(formatted, filename, def.columns)
-      setSuccess(`Exported ${raw.length.toLocaleString('en-IN')} row(s) → ${filename}`)
+      toast.success('Report exported', `${raw.length.toLocaleString('en-IN')} row(s) → ${filename}`)
       setPreviews((p) => ({ ...p, [def.key]: { count: raw.length, at: new Date() } }))
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Report failed', getDisplayError(err))
     } finally {
       setBusy(null)
     }
@@ -233,17 +231,6 @@ function ReportsHubPage() {
         title="Download center"
         subtitle="Point-in-time extracts you can email to an auditor, attach to a monthly close pack, or hand to finance. Each report is a flat CSV — no navigation, no filters, just the data."
       />
-
-      {error && (
-        <div className="glass-card" style={{ borderColor: 'var(--status-danger-ring)', color: 'var(--status-danger-fg)' }}>
-          <i className="pi pi-exclamation-triangle" /> {error}
-        </div>
-      )}
-      {success && (
-        <div className="glass-card" style={{ borderColor: 'var(--status-success-ring)', color: 'var(--status-success-fg)' }}>
-          <i className="pi pi-check-circle" /> {success}
-        </div>
-      )}
 
       <div
         style={{
