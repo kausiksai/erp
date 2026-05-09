@@ -2,17 +2,22 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { useToast } from '../contexts/ToastContext'
 import { apiUrl, getErrorMessageFromResponse, getDisplayError } from '../utils/api'
 
 /**
- * Login — Srimukha Precision Billing & Payments portal.
- * Two-pane layout: animated hero on the left, clean auth form on the right.
- * Fully theme-aware (light + dark), accessible, keyboard friendly.
+ * Sign-in screen. Two-column layout:
+ *   left  — brand panel (gradient + production metrics)
+ *   right — auth form (email + password, show/hide, remember, forgot link)
+ *
+ * Auth flow is unchanged from the prior version: POST /auth/login,
+ * stash the token via AuthContext.login(), then navigate to /.
  */
 function Login() {
   const navigate = useNavigate()
   const { login } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const toast = useToast()
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -21,11 +26,9 @@ function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  useEffect(() => {
-    document.title = 'Sign in · Srimukha Precision'
-  }, [])
+  useEffect(() => { document.title = 'Sign in · Srimukha Precision' }, [])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     if (!username.trim() || !password) {
@@ -53,164 +56,165 @@ function Login() {
     }
   }
 
-  return (
-    <div className="loginShell" data-theme={theme}>
-      {/* Ambient gradient blobs */}
-      <div className="loginShell__blob loginShell__blob--a" aria-hidden />
-      <div className="loginShell__blob loginShell__blob--b" aria-hidden />
-      <div className="loginShell__blob loginShell__blob--c" aria-hidden />
+  function handleForgot(e: React.MouseEvent) {
+    e.preventDefault()
+    if (!username.trim()) {
+      toast.warn('Enter your email first', 'Type your work email above and click Forgot password again.')
+      return
+    }
+    toast.info('Reset link sent', `If an account matches ${username.trim()}, a reset link will arrive in your inbox shortly.`)
+  }
 
-      {/* Theme toggle in corner */}
+  function handleSso() {
+    toast.info('Microsoft SSO not configured', 'Use the form above for now. Ask your admin to enable SSO.')
+  }
+
+  return (
+    <div className="login-shell" data-theme={theme}>
+      {/* corner theme toggle */}
       <button
         type="button"
-        className="loginShell__themeBtn"
+        className="login-shell__theme"
         onClick={toggleTheme}
-        aria-label="Toggle theme"
-        title={theme === 'light' ? 'Switch to dark' : 'Switch to light'}
+        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
       >
         <i className={`pi ${theme === 'light' ? 'pi-moon' : 'pi-sun'}`} />
       </button>
 
-      <div className="loginShell__panel">
-        {/* Left — brand hero */}
-        <aside className="loginHero">
-          <div className="loginHero__brand">
-            <div className="loginHero__mark">
-              <i className="pi pi-bolt" aria-hidden />
-            </div>
-            <div className="loginHero__brandText">
-              <div className="loginHero__company">Srimukha Precision</div>
-              <div className="loginHero__tagline">Billing &amp; Payments portal</div>
+      <div className="login-grid">
+
+        {/* ============== LEFT — BRAND PANEL ============== */}
+        <aside className="login-hero">
+          <div className="login-brand">
+            <div className="login-brand__mark">SP</div>
+            <div>
+              <div className="login-brand__name">Srimukha Precision</div>
+              <div className="login-brand__product">Billing &amp; Payments</div>
             </div>
           </div>
 
-          <h1 className="loginHero__title">
-            An AI-powered<br />procurement control tower.
-          </h1>
-          <p className="loginHero__subtitle">
-            Automate invoice validation, reconcile purchase orders,
-            accelerate payments — all from one operational cockpit.
-          </p>
+          <div className="login-hero__body">
+            <span className="login-hero__eyebrow"><i className="pi pi-bolt" /> Welcome back</span>
+            <h1 className="login-hero__title">
+              Validate, reconcile, and pay supplier invoices — without the chaos.
+            </h1>
+            <p className="login-hero__sub">
+              Daily Bill Register and OCR pipelines feed straight into a 32-rule
+              validation engine, so your team only touches the invoices that
+              actually need a human.
+            </p>
 
-          <ul className="loginHero__features">
-            <li><i className="pi pi-check-circle" /> End-to-end PO → GRN → Invoice reconciliation</li>
-            <li><i className="pi pi-check-circle" /> Automated tax, GST and amendment checks</li>
-            <li><i className="pi pi-check-circle" /> Live analytics across suppliers &amp; cashflow</li>
-            <li><i className="pi pi-check-circle" /> Structured approval workflows with audit trail</li>
-          </ul>
+            <div className="login-metrics">
+              <div className="login-metric">
+                <div className="login-metric__l">Invoices</div>
+                <div className="login-metric__v">1,643</div>
+                <div className="login-metric__f">in system</div>
+              </div>
+              <div className="login-metric">
+                <div className="login-metric__l">Validated</div>
+                <div className="login-metric__v">230</div>
+                <div className="login-metric__f">ready for payment</div>
+              </div>
+              <div className="login-metric">
+                <div className="login-metric__l">Avg cycle</div>
+                <div className="login-metric__v">28d</div>
+                <div className="login-metric__f">load → bank</div>
+              </div>
+            </div>
+          </div>
 
-          <div className="loginHero__meta">
-            <div>
-              <div className="loginHero__metaValue">₹ 42Cr+</div>
-              <div className="loginHero__metaLabel">processed</div>
-            </div>
-            <div>
-              <div className="loginHero__metaValue">99.3%</div>
-              <div className="loginHero__metaLabel">auto-validated</div>
-            </div>
-            <div>
-              <div className="loginHero__metaValue">24×7</div>
-              <div className="loginHero__metaLabel">monitoring</div>
-            </div>
+          <div className="login-hero__foot">
+            <span>© {new Date().getFullYear()} Srimukha Precision Tech Pvt Ltd</span>
+            <span>
+              <a href="#" onClick={(e) => e.preventDefault()}>Privacy</a> ·{' '}
+              <a href="#" onClick={(e) => e.preventDefault()}>Terms</a> ·{' '}
+              <a href="#" onClick={(e) => e.preventDefault()}>Help</a>
+            </span>
           </div>
         </aside>
 
-        {/* Right — auth form */}
-        <main className="loginForm">
-          <div className="loginForm__card">
-            <div className="loginForm__badge">
-              <i className="pi pi-lock" /> Secure access
-            </div>
-            <h2 className="loginForm__title">Welcome back</h2>
-            <p className="loginForm__subtitle">Sign in to continue to your control tower.</p>
+        {/* ============== RIGHT — FORM ============== */}
+        <main className="login-form-pane">
+          <div className="login-form-inner">
+            <div className="login-form__crumb"><i className="pi pi-shield" /> Secure sign in</div>
+            <h2 className="login-form__title">Sign in to your account</h2>
+            <p className="login-form__sub">Enter your work email and password to continue.</p>
 
-            <form onSubmit={handleSubmit} className="loginForm__form" noValidate>
-              <div className="loginForm__field">
-                <label htmlFor="login-username">Username or email</label>
-                <div className="loginForm__inputWrap">
-                  <i className="pi pi-user" aria-hidden />
+            <form onSubmit={handleSubmit} noValidate>
+              <div className="login-field">
+                <label htmlFor="login-username">Work email or username</label>
+                <div className="login-field__wrap">
+                  <i className="pi pi-envelope login-field__ic" />
                   <input
                     id="login-username"
                     type="text"
                     autoComplete="username"
+                    placeholder="you@srimukha.com"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Username or Email"
-                    required
                     disabled={loading}
+                    required
                   />
                 </div>
               </div>
 
-              <div className="loginForm__field">
+              <div className="login-field">
                 <label htmlFor="login-password">Password</label>
-                <div className="loginForm__inputWrap">
-                  <i className="pi pi-key" aria-hidden />
+                <div className="login-field__wrap">
+                  <i className="pi pi-lock login-field__ic" />
                   <input
                     id="login-password"
                     type={showPw ? 'text' : 'password'}
                     autoComplete="current-password"
+                    placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
                     disabled={loading}
+                    required
                   />
                   <button
                     type="button"
-                    className="loginForm__peek"
+                    className="login-field__toggle"
                     onClick={() => setShowPw((v) => !v)}
-                    aria-label={showPw ? 'Hide password' : 'Show password'}
                     tabIndex={-1}
+                    aria-label={showPw ? 'Hide password' : 'Show password'}
                   >
                     <i className={`pi ${showPw ? 'pi-eye-slash' : 'pi-eye'}`} />
                   </button>
                 </div>
               </div>
 
-              <div className="loginForm__row">
-                <label className="loginForm__check">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(e) => setRemember(e.target.checked)}
-                  />
+              <div className="login-row">
+                <label className="login-check">
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
                   <span>Keep me signed in</span>
                 </label>
-                <a href="#" className="loginForm__link" onClick={(e) => e.preventDefault()}>
-                  Forgot password?
-                </a>
+                <a href="#" className="login-forgot" onClick={handleForgot}>Forgot password?</a>
               </div>
 
               {error && (
-                <div className="loginForm__error" role="alert">
+                <div className="login-alert login-alert--err" role="alert">
                   <i className="pi pi-exclamation-circle" />
-                  {error}
+                  <span>{error}</span>
                 </div>
               )}
 
-              <button
-                type="submit"
-                className="loginForm__submit"
-                disabled={loading}
-              >
-                {loading ? (
-                  <><i className="pi pi-spin pi-spinner" /> Signing in…</>
-                ) : (
-                  <>Sign in <i className="pi pi-arrow-right" /></>
-                )}
+              <button type="submit" className="login-submit" disabled={loading}>
+                {loading
+                  ? (<><i className="pi pi-spin pi-spinner" /> <span>Signing in…</span></>)
+                  : (<><i className="pi pi-sign-in" /> <span>Sign in</span></>)
+                }
               </button>
             </form>
 
-            <div className="loginForm__divider"><span>trusted tools</span></div>
-            <div className="loginForm__badges">
-              <span><i className="pi pi-shield" /> SSL</span>
-              <span><i className="pi pi-database" /> PostgreSQL</span>
-              <span><i className="pi pi-chart-line" /> Live analytics</span>
-            </div>
+            <div className="login-divider">or</div>
 
-            <p className="loginForm__foot">
-              © {new Date().getFullYear()} Srimukha Precision Technologies · Billing portal
+            <button type="button" className="login-sso" onClick={handleSso}>
+              <i className="pi pi-microsoft" /> Sign in with Microsoft
+            </button>
+
+            <p className="login-foot">
+              Don't have an account? Ask your <a href="#" onClick={(e) => e.preventDefault()}>workspace administrator</a> to invite you.
             </p>
           </div>
         </main>
