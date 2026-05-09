@@ -64,6 +64,59 @@ const SEVERITY_LABEL: Record<Rule['severity'], string> = {
   info:    'Info'
 }
 
+/**
+ * Per-rule playbook: an actionable fix narrative + an optional bulk action.
+ * Keyed by the rule-code prefix (everything before the underscore-name).
+ *
+ * The fix narrative shows as a purple "AI suggested fix" banner inside the
+ * expanded group so users see what to do at a glance. The bulk action,
+ * when present, renders as a button on the group header.
+ */
+interface Playbook {
+  fix: string
+  bulkAction?: { label: string; icon: string; act: 'email-erp' | 'email-receiving' | 'approve-debit-notes' | 'reextract-ocr' }
+}
+const PLAYBOOK: Record<string, Playbook> = {
+  E003: { fix: 'Ask source ERP to add SC1–SC9 prefixes to the daily PO export. Resolves the entire group in one config change.', bulkAction: { label: 'Email source ERP', icon: 'pi-envelope', act: 'email-erp' } },
+  E022: { fix: 'These suppliers billed at the gross PO unit_cost without applying the contracted discount. The system can auto-draft debit notes for the difference.', bulkAction: { label: 'Approve all debit notes', icon: 'pi-check', act: 'approve-debit-notes' } },
+  E023: { fix: 'Tightly coupled to E022 — line totals are wrong because rates are wrong. Resolves once the rate is reconciled.' },
+  E070: { fix: 'GRN exists but supplier_doc_no is empty. Receiving needs to fill the supplier\'s invoice number on the GRN row.', bulkAction: { label: 'Email receiving team', icon: 'pi-envelope', act: 'email-receiving' } },
+  E074: { fix: 'Open / blanket POs need either a Delivery Challan or a Supplier Schedule on file before the engine treats the receipt as authorized.' },
+  E041: { fix: 'Partial billing on a multi-shipment PO. Usually no action — the rule clears as remaining shipments arrive. Confirm if the PO should be partially closed.' },
+  E034: { fix: 'GST classification error on the supplier\'s invoice. Ask them to re-issue with CGST + SGST instead of IGST.' },
+  E035: { fix: 'GST classification error on the supplier\'s invoice. Ask them to re-issue with IGST instead of CGST + SGST.' },
+  E004: { fix: 'OCR couldn\'t match the supplier name / GSTIN against your master. Either onboard the supplier or re-extract at higher resolution.', bulkAction: { label: 'Re-extract OCR', icon: 'pi-refresh', act: 'reextract-ocr' } },
+  E002: { fix: 'No PO number could be extracted from the PDF. Operators need to add manual PO entry, or improve the OCR template for this supplier layout.' },
+  E021: { fix: 'Real over-delivery accepted by receiving, supplier billed wrong PO line, or supplier reorganised lines. Procurement should amend PO line up or short-pay.' },
+  E020: { fix: 'Item code on the invoice doesn\'t match any PO line. Either supplier billed for an item the PO didn\'t authorise, or the wrong PO is linked.' },
+  E061: { fix: 'Real over-billing across multiple invoices on the same PO. Finance should issue a debit note or amend the PO value upward.' },
+  E060: { fix: 'Real over-shipment that wasn\'t caught at goods-inward. Procurement should amend PO qty or short-pay the excess.' },
+  E040: { fix: 'Over-billing at the header level. Often paired with E021 (line over). Confirm with the supplier and decide debit-note vs PO amendment.' },
+  E042: { fix: 'Pre-tax invoice total exceeds the computed PO value. Real over-billing in rupees.' },
+  E050: { fix: 'Supplier billed for more units than were physically received. Often a debit-note candidate after verifying with goods-inward.' },
+  E051: { fix: 'A non-open PO requires a GRN before payment; none on file. Either receiving paperwork is pending, or the supplier billed before goods landed.' },
+  E052: { fix: 'ASN (advance shipping notice) on a standard PO doesn\'t agree with the billed qty. Clarify with the supplier.' },
+  E073: { fix: 'ASN qty for an open PO doesn\'t match billed qty within tolerance. Real qty disagreement after our supplier-scope fix.' },
+  E075: { fix: 'DC qty doesn\'t match billed qty for an open PO. Receiving variance — usually small deltas.' },
+  E076: { fix: 'Schedule is for the whole blanket period, not just this invoice\'s content. Procurement may need to amend or accept the deviation.' },
+  E071: { fix: 'GRN qty for this invoice differs from billed qty. Usually small receiving variances (5-25 units).' },
+  E011: { fix: 'Backdated PO situation — supplier delivered first, buyer raised the PO retrospectively. Common in urgent procurement; finance accepts if policy-compliant.' },
+  E010: { fix: 'Supplier data-entry error (wrong year/month) or a post-dated invoice. Ask supplier to re-issue with the correct date.' },
+  E033: { fix: 'CGST and SGST rupee amounts must match. Tax-calculation error on the supplier\'s invoice — ask them to correct.' },
+  E001: { fix: 'Invoice has no invoice number — required for any further processing. Ask supplier to re-issue.' },
+  E005: { fix: 'Invoice supplier doesn\'t match PO supplier. Verify the PO link, or correct supplier on PO master.' },
+  E006: { fix: 'PO is closed / fully invoiced — new invoice can\'t be processed. Verify with procurement.' },
+  E030: { fix: 'Sum of per-slab CGST amounts differs from invoice header CGST. Tax computation error.' },
+  E031: { fix: 'Sum of per-slab SGST amounts differs from invoice header SGST. Tax computation error.' },
+  E032: { fix: 'Sum of per-slab IGST amounts differs from invoice header IGST. Tax computation error.' }
+}
+
+function playbookFor(code: string): Playbook | null {
+  // Codes look like 'E003_PO_NOT_FOUND' — strip to 'E003' for lookup.
+  const prefix = code.split('_')[0]
+  return PLAYBOOK[prefix] || null
+}
+
 function ReconciliationPage() {
   const navigate = useNavigate()
   const toast = useToast()
@@ -111,6 +164,43 @@ function ReconciliationPage() {
   const blockers     = activeRules.filter((r) => r.severity === 'error').reduce((s, r) => s + r.count, 0)
   const warnings     = activeRules.filter((r) => r.severity === 'warning').reduce((s, r) => s + r.count, 0)
   const infos        = activeRules.filter((r) => r.severity === 'info').reduce((s, r) => s + r.count, 0)
+
+  async function runBulkAction(rule: Rule, act: 'email-erp' | 'email-receiving' | 'approve-debit-notes' | 'reextract-ocr') {
+    const ok = await confirm({
+      title: ({
+        'email-erp': `Send escalation to source ERP for ${rule.code}?`,
+        'email-receiving': `Email the receiving team about ${rule.count} invoices?`,
+        'approve-debit-notes': `Approve all ${rule.count} auto-drafted debit notes?`,
+        'reextract-ocr': `Re-extract ${rule.count} OCR invoices?`
+      })[act],
+      body: ({
+        'email-erp': 'Drafts an email summarising the missing reference data — you review before send.',
+        'email-receiving': 'Receiving will get a list of GRN rows that need supplier_doc_no filled.',
+        'approve-debit-notes': 'Each debit note is per-line, with our rate × invoice qty as the basis. Suppliers are notified by email.',
+        'reextract-ocr': 'Re-runs the OCR template against the original PDFs. May resolve some mappings.'
+      })[act],
+      icon: 'pi-bolt',
+      kind: act === 'approve-debit-notes' ? 'success' : 'info',
+      okLabel: 'Run'
+    })
+    if (!ok) return
+    // Endpoint wiring will land in a later phase. For now we surface a
+    // detailed toast so the user sees what happened — no silent failure.
+    toast.info(
+      ({
+        'email-erp': 'Escalation drafted',
+        'email-receiving': 'Receiving will be notified',
+        'approve-debit-notes': 'Debit-note approval queued',
+        'reextract-ocr': 'OCR re-extraction queued'
+      })[act],
+      ({
+        'email-erp': 'Endpoint wiring pending — would email source-erp@srimukha.com.',
+        'email-receiving': 'Endpoint wiring pending — would email receiving-team@.',
+        'approve-debit-notes': `Endpoint wiring pending — would issue ${rule.count} debit notes.`,
+        'reextract-ocr': `Endpoint wiring pending — would re-extract ${rule.count} PDFs.`
+      })[act]
+    )
+  }
 
   async function rerunEngine() {
     const ok = await confirm({
@@ -166,21 +256,22 @@ function ReconciliationPage() {
           const isLoadingGroup = !!loadingSamples[rule.code]
           const variant = SEVERITY_VARIANT[rule.severity]
           const sevLabel = SEVERITY_LABEL[rule.severity]
+          const playbook = playbookFor(rule.code)
 
           return (
             <div key={rule.code} className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
               {/* Card header — clickable, toggles expansion */}
-              <button
-                type="button"
-                onClick={() => toggle(rule.code)}
-                aria-expanded={isOpen}
+              <div
                 style={{
-                  width: '100%', textAlign: 'left', cursor: 'pointer', border: 0,
                   background: 'linear-gradient(180deg,var(--surface-0),var(--surface-1))',
                   padding: 'var(--space-3) var(--space-5)',
                   display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
-                  borderBottom: isOpen ? '1px solid var(--border-subtle)' : '0'
+                  borderBottom: isOpen ? '1px solid var(--border-subtle)' : '0',
+                  cursor: 'pointer'
                 }}
+                onClick={() => toggle(rule.code)}
+                role="button"
+                aria-expanded={isOpen}
               >
                 <div style={{
                   width: 40, height: 40, borderRadius: 'var(--radius-md)',
@@ -206,12 +297,35 @@ function ReconciliationPage() {
                   </div>
                 </div>
 
-                <i className={`pi ${isOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-              </button>
+                {/* Bulk action button — pre-empts row click via stopPropagation */}
+                {playbook?.bulkAction && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); runBulkAction(rule, playbook.bulkAction!.act) }}
+                    className={`action-btn ${playbook.bulkAction.act === 'approve-debit-notes' ? '' : 'action-btn--ghost'}`}
+                    style={{ padding: '6px 12px', fontSize: 'var(--fs-xs)', flexShrink: 0 }}
+                  >
+                    <i className={`pi ${playbook.bulkAction.icon}`} /> {playbook.bulkAction.label}
+                  </button>
+                )}
 
-              {/* Expanded body — sample invoices */}
+                <i className={`pi ${isOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              </div>
+
+              {/* Expanded body — AI suggested fix banner + sample invoices */}
               {isOpen && (
                 <div className="section-card__body" style={{ padding: 0 }}>
+                  {playbook?.fix && (
+                    <div className="insight-card" style={{ margin: 'var(--space-3) var(--space-5) 0', padding: '10px 14px' }}>
+                      <div className="insight-card__icon" style={{ width: 28, height: 28, fontSize: 12 }}>
+                        <i className="pi pi-bolt" />
+                      </div>
+                      <div>
+                        <div className="insight-card__title">Suggested fix</div>
+                        <div className="insight-card__body">{playbook.fix}</div>
+                      </div>
+                    </div>
+                  )}
                   {isLoadingGroup && (
                     <div style={{ padding: 'var(--space-5)', textAlign: 'center', color: 'var(--text-muted)' }}>
                       <i className="pi pi-spin pi-spinner" /> Loading samples…
