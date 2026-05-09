@@ -15,7 +15,7 @@ import ReportsHubPage from './pages/ReportsHubPage'
 import InvoicesPage from './pages/InvoicesPage'
 import InvoiceDetailPage from './pages/InvoiceDetailPage'
 import InvoiceUploadPage from './pages/InvoiceUploadPage'
-import NeedsReconciliationPage from './pages/NeedsReconciliationPage'
+import ReconciliationPage from './pages/ReconciliationPage'
 import PurchaseOrdersPage from './pages/PurchaseOrdersPage'
 import IncompletePOsPage from './pages/IncompletePOsPage'
 import GRNPage from './pages/GRNPage'
@@ -79,7 +79,7 @@ function App() {
         <Route path="/invoices/validate"       element={<ShellRoute><InvoicesPage /></ShellRoute>} />
         <Route path="/invoices/validate/:id"   element={<ShellRoute><InvoiceDetailPage /></ShellRoute>} />
         <Route path="/invoices/upload"         element={<ShellRoute><InvoiceUploadPage /></ShellRoute>} />
-        <Route path="/invoices/reconciliation" element={<ShellRoute><NeedsReconciliationPage /></ShellRoute>} />
+        <Route path="/invoices/reconciliation" element={<ShellRoute><ReconciliationPage /></ShellRoute>} />
 
         {/* Workflow — Payments */}
         <Route

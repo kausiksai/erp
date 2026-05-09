@@ -124,6 +124,49 @@ export async function getValidationRulesRoute(_req, res) {
 }
 
 /**
+ * GET /api/reconciliation/by-code/:code?limit=10
+ *
+ * Returns the most recent invoices currently failing the given rule code.
+ * Used by the redesigned Reconciliation page to populate the sample list
+ * inside each error-code group.
+ */
+export async function getInvoicesByErrorCodeRoute(req, res) {
+  try {
+    const { code } = req.params
+    if (!code) return res.status(400).json({ error: 'code_required' })
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100)
+
+    const sql = `
+      SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.total_amount,
+             i.po_number, i.status, i.source,
+             COALESCE(s.supplier_name, '') AS supplier_name
+        FROM invoices i
+        LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+        WHERE EXISTS (
+          SELECT 1
+            FROM jsonb_array_elements(
+              COALESCE(i.mismatches->'errors', '[]'::jsonb)
+            ) AS e
+           WHERE e->>'code' = $1
+        )
+        ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC
+        LIMIT $2
+    `
+    try {
+      const { rows } = await pool.query(sql, [code, limit])
+      res.json({ code, items: rows })
+    } catch (err) {
+      // mismatches column / errors structure missing — return empty.
+      console.warn('reconciliation by-code:', err.message)
+      res.json({ code, items: [] })
+    }
+  } catch (err) {
+    console.error('Error fetching invoices by error code:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+}
+
+/**
  * PATCH /api/validation-rules/:code
  * Body: { active?: boolean, severity?: 'error'|'warning'|'info' }
  *

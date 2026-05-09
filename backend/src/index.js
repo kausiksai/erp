@@ -63,7 +63,11 @@ import {
 
 // Redesign Phase 2 — additive endpoints powering the new portal screens.
 import { getWorkspaceQueueRoute } from './workspaceQueue.js'
-import { getValidationRulesRoute, patchValidationRuleRoute } from './validationRules.js'
+import {
+  getValidationRulesRoute,
+  patchValidationRuleRoute,
+  getInvoicesByErrorCodeRoute
+} from './validationRules.js'
 import { getAuditEventsRoute } from './auditEvents.js'
 import {
   listSavedViewsRoute,
@@ -4984,6 +4988,7 @@ router.get('/workspace/queue', authenticateToken, getWorkspaceQueueRoute)
 // Validation rules library
 router.get('/validation-rules',           authenticateToken, getValidationRulesRoute)
 router.patch('/validation-rules/:code',   authenticateToken, authorize(['admin']), patchValidationRuleRoute)
+router.get('/reconciliation/by-code/:code', authenticateToken, getInvoicesByErrorCodeRoute)
 
 // Audit log (admin only)
 router.get('/audit', authenticateToken, authorize(['admin']), getAuditEventsRoute)
