@@ -1,0 +1,78 @@
+/* ==========================================================================
+   design-system/toast.css
+   Top-right toast stack used by the global useToast() hook.
+   ========================================================================== */
+
+.toast-stack {
+  position: fixed;
+  top: calc(var(--topbar-h) + var(--space-3));
+  right: var(--space-5);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+  max-width: 100vw;
+}
+
+.toast {
+  min-width: 280px;
+  max-width: 420px;
+  background: var(--surface-0);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-3) var(--space-3);
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  animation: toast-in var(--dur-base) var(--ease-out);
+  pointer-events: auto;
+  font-size: var(--fs-sm);
+}
+@keyframes toast-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: none;             opacity: 1; }
+}
+@keyframes toast-out {
+  from { transform: none;             opacity: 1; }
+  to   { transform: translateX(20px); opacity: 0; }
+}
+.toast.is-leaving { animation: toast-out var(--dur-fast) forwards; }
+
+.toast__icon {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-base);
+  flex-shrink: 0;
+}
+.toast--success .toast__icon { background: var(--status-success-bg); color: var(--status-success-fg); }
+.toast--info    .toast__icon { background: var(--status-info-bg);    color: var(--status-info-fg); }
+.toast--warn    .toast__icon { background: var(--status-warn-bg);    color: var(--status-warn-fg); }
+.toast--danger  .toast__icon { background: var(--status-danger-bg);  color: var(--status-danger-fg); }
+
+.toast__title {
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.toast__body {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  margin-top: 0.15rem;
+  line-height: 1.5;
+}
+
+.toast__close {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+.toast__close:hover { color: var(--text-primary); background: var(--surface-1); }

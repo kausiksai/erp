@@ -8,6 +8,8 @@ import App from './App.tsx'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { MenuAccessProvider } from './contexts/MenuAccessContext'
+import { ToastProvider } from './contexts/ToastContext'
+import { ConfirmProvider } from './contexts/ConfirmContext'
 import ErrorBoundary from './components/ErrorBoundary'
 
 // Shared table/section styles (load after PrimeReact so overrides apply)
@@ -22,7 +24,11 @@ createRoot(rootEl).render(
       <ThemeProvider>
         <AuthProvider>
           <MenuAccessProvider>
-            <App />
+            <ToastProvider>
+              <ConfirmProvider>
+                <App />
+              </ConfirmProvider>
+            </ToastProvider>
           </MenuAccessProvider>
         </AuthProvider>
       </ThemeProvider>

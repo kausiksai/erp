@@ -1,0 +1,83 @@
+/* ==========================================================================
+   design-system/slideover.css
+   Right-edge slide-over panel used for invoice / PO detail and form drawers.
+   The mockup pattern: backdrop blur, 900px max width, slide animation.
+   ========================================================================== */
+
+.slideover-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay, rgba(15, 23, 42, 0.4));
+  backdrop-filter: blur(2px);
+  z-index: 60;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.slideover-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.slideover {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(900px, 92vw);
+  background: var(--surface-0);
+  box-shadow: var(--shadow-xl);
+  z-index: 61;
+  transform: translateX(100%);
+  transition: transform var(--dur-slow) var(--ease-out);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.slideover.is-open {
+  transform: translateX(0);
+}
+
+.slideover__header {
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: linear-gradient(180deg, var(--surface-0), var(--surface-1));
+  flex-shrink: 0;
+}
+.slideover__title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.slideover__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.slideover__close:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.slideover__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+@media (max-width: 600px) {
+  .slideover { width: 100vw; }
+}

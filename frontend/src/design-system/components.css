@@ -251,6 +251,7 @@
 .status-chip--warn    { background: var(--status-warn-bg);    color: var(--status-warn-fg);    border-color: var(--status-warn-ring); }
 .status-chip--danger  { background: var(--status-danger-bg);  color: var(--status-danger-fg);  border-color: var(--status-danger-ring); }
 .status-chip--muted   { background: var(--status-muted-bg);   color: var(--status-muted-fg);   border-color: var(--status-muted-ring); }
+.status-chip--violet  { background: var(--status-violet-bg);  color: var(--status-violet-fg);  border-color: var(--status-violet-ring); }
 
 /* --- Grid helpers ------------------------------------------------------- */
 .grid-kpis {

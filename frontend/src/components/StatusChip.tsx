@@ -1,8 +1,14 @@
+export type ChipVariant = 'success' | 'info' | 'warn' | 'danger' | 'muted' | 'violet'
+
 interface StatusChipProps {
   status: string | null | undefined
+  /** Override the auto-mapped variant (e.g. for OCR source tags). */
+  variant?: ChipVariant
+  /** Override the displayed label (e.g. show 'OCR' instead of mapped status). */
+  label?: string
 }
 
-const STATUS_TO_CHIP: Record<string, { label: string; variant: 'success' | 'info' | 'warn' | 'danger' | 'muted' }> = {
+const STATUS_TO_CHIP: Record<string, { label: string; variant: ChipVariant }> = {
   validated:                 { label: 'Validated',            variant: 'info' },
   waiting_for_validation:    { label: 'Waiting for validation', variant: 'muted' },
   waiting_for_re_validation: { label: 'Re-validation',        variant: 'warn' },
@@ -22,12 +28,12 @@ const STATUS_TO_CHIP: Record<string, { label: string; variant: 'success' | 'info
   pending_approval:          { label: 'Pending approval',     variant: 'warn' }
 }
 
-function StatusChip({ status }: StatusChipProps) {
-  if (!status) return <span className="status-chip status-chip--muted">Unknown</span>
-  const key = String(status).toLowerCase().replace(/[\s-]+/g, '_')
+function StatusChip({ status, variant: variantOverride, label: labelOverride }: StatusChipProps) {
+  if (!status && !labelOverride) return <span className="status-chip status-chip--muted">Unknown</span>
+  const key = String(status ?? '').toLowerCase().replace(/[\s-]+/g, '_')
   const mapped = STATUS_TO_CHIP[key]
-  const label = mapped?.label ?? String(status).replace(/_/g, ' ')
-  const variant = mapped?.variant ?? 'muted'
+  const label = labelOverride ?? mapped?.label ?? String(status).replace(/_/g, ' ')
+  const variant = variantOverride ?? mapped?.variant ?? 'muted'
   return <span className={`status-chip status-chip--${variant}`}>{label}</span>
 }
 

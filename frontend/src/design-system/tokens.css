@@ -55,6 +55,10 @@
   --status-muted-fg:     #475569;
   --status-muted-ring:   rgba(100, 116, 139, 0.25);
 
+  --status-violet-bg:    #f5f3ff;
+  --status-violet-fg:    #6d28d9;
+  --status-violet-ring:  rgba(139, 92, 246, 0.30);
+
   /* ----- Surface (backgrounds) ------------------------------------------ */
   --surface-0:  #ffffff;                 /* cards, dialogs */
   --surface-1:  #f8fafc;                 /* page bg */
@@ -224,6 +228,9 @@
   --status-danger-fg:    #fca5a5;
   --status-muted-bg:     rgba(100, 116, 139, 0.14);
   --status-muted-fg:     #cbd5e1;
+
+  --status-violet-bg:    rgba(139, 92, 246, 0.14);
+  --status-violet-fg:    #c4b5fd;
 
   color-scheme: dark;
 }
