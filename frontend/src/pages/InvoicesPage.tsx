@@ -5,7 +5,11 @@ import type { ListPageColumn, FetchParams, FetchResult } from '../components/Lis
 import StatusChip from '../components/StatusChip'
 import SlideOver from '../components/SlideOver'
 import InvoiceExpansion from '../components/InvoiceExpansion'
+import SavedViewChips from '../components/SavedViewChips'
+import type { ViewDef } from '../components/SavedViewChips'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
+import { useConfirm } from '../contexts/ConfirmContext'
 import { formatINRSymbol, formatDate, formatInt } from '../utils/format'
 import { downloadCsv } from '../utils/exportCsv'
 
@@ -43,6 +47,8 @@ interface InvoiceStats {
 
 function InvoicesPage() {
   const navigate = useNavigate()
+  const toast = useToast()
+  const confirmDialog = useConfirm()
 
   // KPIs reflect the whole DB, not the current page.
   const [stats, setStats] = useState<InvoiceStats>({
@@ -59,6 +65,23 @@ function InvoicesPage() {
   // The slide-over panel. We keep the row data so the title and meta can
   // render without a second fetch — InvoiceExpansion handles its own load.
   const [openInv, setOpenInv] = useState<Invoice | null>(null)
+
+  // Saved view state. The selected view's filters are merged into every
+  // fetchData() request along with the toolbar's own filter values, so a
+  // chip click acts like setting an additional filter dimension.
+  const [activeView, setActiveView] = useState<ViewDef>({ key: 'all', label: 'All', filters: {} })
+
+  // Built-in views — quick filters that don't need to be persisted in
+  // saved_views. The user can save their own combos via the "+" chip.
+  const builtInViews: ViewDef[] = [
+    { key: 'ready',    label: 'Ready to pay',     filters: { status: 'validated' },                          count: stats.validated },
+    { key: 'awaiting', label: 'Awaiting',         filters: { status: 'waiting_for_validation' },             count: stats.waiting },
+    { key: 'reconcile',label: 'Re-validation',    filters: { status: 'waiting_for_re_validation' },          count: stats.re_validation },
+    { key: 'paid',     label: 'Paid',             filters: { status: 'paid' },                               count: stats.paid }
+  ]
+
+  // The view's filter combo is non-default → "Save current" chip becomes useful.
+  const hasActiveFilters = Object.keys(activeView.filters).length > 0
 
   useEffect(() => {
     let alive = true
@@ -81,8 +104,13 @@ function InvoicesPage() {
       qs.set('limit', String(p.limit))
       qs.set('offset', String(p.offset))
       if (p.search) qs.set('q', p.search)
-      if (p.filters.status) qs.set('status', p.filters.status)
-      if (p.filters.source) qs.set('source', p.filters.source)
+      // Merge toolbar filters and active saved-view's filters. Toolbar wins
+      // on conflict so the user can refine a view chip with a dropdown.
+      const merged: Record<string, string> = {}
+      for (const [k, v] of Object.entries(activeView.filters)) merged[k] = String(v)
+      for (const [k, v] of Object.entries(p.filters)) if (v) merged[k] = v
+      if (merged.status) qs.set('status', merged.status)
+      if (merged.source) qs.set('source', merged.source)
       const res = await apiFetch(`invoices?${qs.toString()}`)
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load invoices'))
       const body = await res.json()
@@ -90,7 +118,7 @@ function InvoicesPage() {
       const total = typeof body.total === 'number' ? body.total : items.length
       return { items, total }
     },
-    []
+    [activeView]
   )
 
   const columns: ListPageColumn<Invoice>[] = [
@@ -188,6 +216,16 @@ function InvoicesPage() {
           { label: 'Waiting',           value: formatInt(stats.waiting),            icon: 'pi-clock',        variant: 'amber'   },
           { label: 'Ready for payment', value: formatInt(stats.ready_for_payment),  icon: 'pi-wallet',       variant: 'violet'  }
         ]}
+        chipRow={
+          <SavedViewChips
+            scope="invoices"
+            builtInViews={builtInViews}
+            activeKey={activeView.key}
+            currentFilters={activeView.filters}
+            hasActiveFilters={hasActiveFilters}
+            onPick={(view) => setActiveView(view)}
+          />
+        }
         filters={[
           { key: 'search', type: 'search', placeholder: 'Search invoice #, supplier, PO…' },
           {
@@ -222,6 +260,60 @@ function InvoicesPage() {
         // ignores clicks on the row-toggler (irrelevant now since we pass
         // no rowExpansionTemplate); the whole row is clickable.
         onRowClick={(row) => setOpenInv(row)}
+        selectable
+        bulkActions={[
+          {
+            label: 'Approve for payment',
+            icon: 'pi-check',
+            variant: 'success',
+            onClick: async (selected) => {
+              const validatedSel = selected.filter(r => r.status === 'validated')
+              if (validatedSel.length === 0) {
+                toast.warn('No validated invoices selected', 'Pick at least one invoice with status "Validated".')
+                return
+              }
+              const ok = await confirmDialog({
+                title: `Approve ${validatedSel.length} invoice${validatedSel.length > 1 ? 's' : ''} for payment?`,
+                body: 'They will move to the Ready for payment queue. You can review the batch under Payments → Approve.',
+                icon: 'pi-check-circle',
+                kind: 'success',
+                okLabel: `Approve ${validatedSel.length}`
+              })
+              if (!ok) return
+              try {
+                const results = await Promise.all(validatedSel.map(r =>
+                  apiFetch('payments/approve', {
+                    method: 'POST',
+                    body: JSON.stringify({ invoiceId: r.invoice_id })
+                  })
+                ))
+                const okCount = results.filter(x => x.ok).length
+                toast.success(
+                  `${okCount} approved`,
+                  okCount < validatedSel.length ? `${validatedSel.length - okCount} failed — check logs.` : ''
+                )
+              } catch {
+                toast.danger('Bulk approve failed', 'Some invoices may have been approved.')
+              }
+            }
+          },
+          {
+            label: 'Export selection',
+            icon: 'pi-download',
+            variant: 'ghost',
+            onClick: (selected) => {
+              downloadCsv(selected as unknown as Record<string, unknown>[], 'invoices-selection', [
+                { key: 'invoice_number', header: 'Invoice #' },
+                { key: 'invoice_date',   header: 'Date' },
+                { key: 'supplier_name',  header: 'Supplier' },
+                { key: 'po_number',      header: 'PO' },
+                { key: 'source',         header: 'Source' },
+                { key: 'total_amount',   header: 'Amount' },
+                { key: 'status',         header: 'Status' }
+              ])
+            }
+          }
+        ]}
         emptyTitle="No invoices yet"
         emptyBody="Upload your first invoice to start populating this view."
       />

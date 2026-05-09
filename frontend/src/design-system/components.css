@@ -314,6 +314,66 @@
 .tbl--compact tbody td { padding: 8px 14px; }
 .tbl--compact thead th  { padding: 8px 14px; }
 
+/* --- Saved-view chip row (Invoices list, etc.) ----------------------- */
+.view-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+  align-items: center;
+}
+.view-chips__label {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  margin-right: 4px;
+}
+.view-chip {
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background: var(--surface-0);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.view-chip:hover { background: var(--surface-1); }
+.view-chip--active {
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border-color: rgba(37, 99, 235, 0.3);
+  font-weight: var(--fw-semibold);
+}
+.view-chip__count {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 10.5px;
+  font-weight: var(--fw-bold);
+}
+.view-chip--active .view-chip__count {
+  background: rgba(37, 99, 235, 0.15);
+}
+.view-chip__del {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.view-chip__del:hover { background: rgba(0,0,0,.08); color: var(--status-danger-fg); }
+.view-chip--add {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+.view-chip--add:hover { border-style: solid; color: var(--brand-700); }
+
 /* --- Insight card (Workspace suggestions) ---------------------------- */
 .insight-card {
   padding: var(--space-3) var(--space-4);
