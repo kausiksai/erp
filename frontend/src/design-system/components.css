@@ -374,6 +374,20 @@
 }
 .view-chip--add:hover { border-style: solid; color: var(--brand-700); }
 
+/* --- "NEW" inline tag (page titles) ---------------------------------- */
+.tag-new {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #7c2d12;
+}
+
 /* --- Insight card (Workspace suggestions) ---------------------------- */
 .insight-card {
   padding: var(--space-3) var(--space-4);

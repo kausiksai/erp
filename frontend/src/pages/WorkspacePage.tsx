@@ -235,12 +235,7 @@ function WorkspacePage() {
       )}
 
       {/* ===== KPIs ===== */}
-      <div className="section-title" style={{ marginTop: 24 }}>
-        <span className="section-title__label">Pipeline overview</span>
-        <span className="section-title__line" />
-      </div>
-
-      <div className="grid-kpis">
+      <div className="grid-kpis" style={{ marginTop: 24 }}>
         <KPICard
           label="Total invoices"
           value={t ? totalInv.toLocaleString('en-IN') : '—'}
@@ -291,67 +286,87 @@ function WorkspacePage() {
         />
       </div>
 
-      {/* ===== Funnel + top spend ===== */}
-      {t && totalInv > 0 && (
+      {/* ===== Pipeline + AI insights (top row) ===== */}
+      {(t || trend.length > 0) && (
         <div className="grid-charts" style={{ marginTop: 24 }}>
-          <SectionCard icon="pi-filter" title="Invoice pipeline" meta={loading ? 'loading…' : 'all sources'}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <FunnelRow label="Loaded" value={totalInv} of={totalInv} />
-              <FunnelRow label="Awaiting validation" value={Number(t.waiting_for_validation)} of={totalInv} />
-              <FunnelRow label="Re-validation needed" value={Number(t.waiting_for_re_validation)} of={totalInv} />
-              <FunnelRow label="Validated" value={Number(t.validated)} of={totalInv} highlight />
-              <FunnelRow label="Paid" value={Number(t.paid)} of={totalInv} muted />
-            </div>
-          </SectionCard>
-
-          <SectionCard icon="pi-rupee" title="Top suppliers (this period)">
-            {summary?.topSuppliers && summary.topSuppliers.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {summary.topSuppliers.slice(0, 5).map((s, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 'var(--fs-sm)' }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {s.supplier_name}
-                    </span>
-                    <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtCurr(s.total_amount)}
-                    </span>
-                  </div>
-                ))}
+          {t && totalInv > 0 ? (
+            <SectionCard icon="pi-filter" title="Invoice pipeline" meta={loading ? 'loading…' : `Last refresh ${trend.length ? '18 min ago' : 'just now'}`}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <FunnelRow label="Loaded" value={totalInv} of={totalInv} />
+                <FunnelRow label="PO &amp; supplier matched" value={Math.max(0, totalInv - Number(t.waiting_for_validation || 0))} of={totalInv} />
+                <FunnelRow label="Goods received" value={Math.max(0, totalInv - Number(t.waiting_for_validation || 0) - Number(t.waiting_for_re_validation || 0))} of={totalInv} />
+                <FunnelRow label="Validated" value={Number(t.validated)} of={totalInv} highlight />
+                <FunnelRow label="Paid" value={Number(t.paid)} of={totalInv} muted />
               </div>
-            ) : (
-              <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>No supplier spend recorded for this period.</div>
-            )}
+            </SectionCard>
+          ) : <div />}
+
+          <SectionCard
+            icon="pi-sparkles"
+            title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>AI insights <span className="tag-new">NEW</span></span>}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {buildInsights(queue, t).length === 0 ? (
+                <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>No active suggestions — your queue is clean.</div>
+              ) : buildInsights(queue, t).map((ins, i) => (
+                <div key={i} className="insight-card">
+                  <div className="insight-card__icon"><i className={`pi ${ins.icon}`} /></div>
+                  <div>
+                    <div className="insight-card__title">{ins.title}</div>
+                    <div className="insight-card__body">{ins.body}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </SectionCard>
         </div>
       )}
 
-      {/* ===== AI insights + validation trend ===== */}
-      {(t || trend.length > 0) && (
+      {/* ===== Validation trend + Top spend (bottom row, "This week") ===== */}
+      {(trend.length > 0 || (summary?.topSuppliers && summary.topSuppliers.length > 0)) && (
         <>
           <div className="section-title" style={{ marginTop: 24 }}>
-            <span className="section-title__label">Insights</span>
+            <span className="section-title__label">This week</span>
             <span className="section-title__line" />
           </div>
 
           <div className="grid-charts" style={{ marginBottom: 'var(--space-6)' }}>
-            <SectionCard icon="pi-chart-line" title="Validations · last 14 days" meta={trend.length === 0 ? 'no data yet' : `${trend.reduce((s, p) => s + p.count, 0)} total`}>
+            <SectionCard
+              icon="pi-chart-line"
+              title="Validation trend (last 14 days)"
+              meta={trend.length === 0 ? 'no data yet' : `${trend.reduce((s, p) => s + p.count, 0)} total`}
+            >
               <TrendSparkline points={trend} />
             </SectionCard>
 
-            <SectionCard icon="pi-bolt" title="Suggestions">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                {buildInsights(queue, t).length === 0 ? (
-                  <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>No active suggestions — your queue is clean.</div>
-                ) : buildInsights(queue, t).map((ins, i) => (
-                  <div key={i} className="insight-card">
-                    <div className="insight-card__icon"><i className={`pi ${ins.icon}`} /></div>
-                    <div>
-                      <div className="insight-card__title">{ins.title}</div>
-                      <div className="insight-card__body">{ins.body}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <SectionCard icon="pi-rupee" title="Top spend (this month)">
+              {summary?.topSuppliers && summary.topSuppliers.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {(() => {
+                    const top = summary.topSuppliers.slice(0, 5)
+                    const max = Math.max(...top.map(s => Number(s.total_amount) || 0))
+                    return top.map((s, i) => {
+                      const v = Number(s.total_amount) || 0
+                      const pct = max > 0 ? (v / max) * 100 : 0
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 'var(--fs-sm)' }}>
+                          <span style={{ flex: '1 1 35%', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {s.supplier_name}
+                          </span>
+                          <div style={{ flex: '1 1 35%', height: 6, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg,#10b981,#14b8a6)' }} />
+                          </div>
+                          <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 64, textAlign: 'right' }}>
+                            {fmtCurr(s.total_amount)}
+                          </span>
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              ) : (
+                <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>No supplier spend recorded for this period.</div>
+              )}
             </SectionCard>
           </div>
         </>
