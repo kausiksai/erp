@@ -28,6 +28,8 @@ import PaymentsPage from './pages/PaymentsPage'
 import ProfilePage from './pages/ProfilePage'
 import ItemPriceHistoryPage from './pages/ItemPriceHistoryPage'
 import RedesignPlaceholder from './pages/RedesignPlaceholder'
+import ValidationRulesPage from './pages/ValidationRulesPage'
+import AuditLogPage from './pages/AuditLogPage'
 
 /** Every authenticated route renders inside the global AppShell. */
 function ShellRoute({
@@ -122,8 +124,8 @@ function App() {
         {/* Redesign IA — new wrapper paths. Each is replaced with its real
             page during Phase 3; placeholders avoid 404s in the meantime. */}
         <Route path="/receipts" element={<ShellRoute><ReceiptsPage /></ShellRoute>} />
-        <Route path="/rules" element={<ShellRoute requiredRole={['admin']}><RedesignPlaceholder title="Validation rules" subtitle="The 28-rule validation library — every check the engine runs, current count, owner, and severity controls." /></ShellRoute>} />
-        <Route path="/audit" element={<ShellRoute requiredRole={['admin']}><RedesignPlaceholder title="Audit log" subtitle="Chronological record of every meaningful action — automated or human — across the portal." /></ShellRoute>} />
+        <Route path="/rules" element={<ShellRoute requiredRole={['admin']}><ValidationRulesPage /></ShellRoute>} />
+        <Route path="/audit" element={<ShellRoute requiredRole={['admin']}><AuditLogPage /></ShellRoute>} />
         <Route path="/settings" element={<ShellRoute><RedesignPlaceholder title="Settings" subtitle="Profile, Users, Owners, and Open PO prefixes consolidated into one tabbed screen." /></ShellRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
