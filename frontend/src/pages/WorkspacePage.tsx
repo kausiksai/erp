@@ -85,16 +85,18 @@ function WorkspacePage() {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [trend, setTrend] = useState<Array<{ date: string; count: number }>>([])
+  const [insights, setInsights] = useState<Array<{ icon: string; title: string; body: string }>>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let alive = true
     async function load() {
       try {
-        const [qRes, sRes, tRes] = await Promise.all([
+        const [qRes, sRes, tRes, iRes] = await Promise.all([
           apiFetch('workspace/queue').catch(() => null),
           apiFetch('reports/dashboard-summary').catch(() => null),
-          apiFetch('insights/validation-trend?days=14').catch(() => null)
+          apiFetch('insights/validation-trend?days=14').catch(() => null),
+          apiFetch('insights/suggestions').catch(() => null)
         ])
         if (!alive) return
         if (qRes?.ok) {
@@ -107,6 +109,10 @@ function WorkspacePage() {
         if (tRes?.ok) {
           const j = await tRes.json()
           setTrend(j.points || [])
+        }
+        if (iRes?.ok) {
+          const j = await iRes.json()
+          setInsights(j.items || [])
         }
       } finally {
         if (alive) setLoading(false)
@@ -318,19 +324,28 @@ function WorkspacePage() {
             icon="pi-sparkles"
             title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>AI insights <span className="tag-new">NEW</span></span>}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-              {buildInsights(queue, t).length === 0 ? (
-                <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>No active suggestions — your queue is clean.</div>
-              ) : buildInsights(queue, t).map((ins, i) => (
-                <div key={i} className="insight-card">
-                  <div className="insight-card__icon"><i className={`pi ${ins.icon}`} /></div>
-                  <div>
-                    <div className="insight-card__title">{ins.title}</div>
-                    <div className="insight-card__body">{ins.body}</div>
-                  </div>
+            {(() => {
+              // Prefer the server-derived list (real data); fall back to
+              // the frontend heuristics if the endpoint is missing or
+              // empty so the panel never sits blank.
+              const cards = insights.length > 0 ? insights : buildInsights(queue, t)
+              if (cards.length === 0) {
+                return <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>No active suggestions — your queue is clean.</div>
+              }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  {cards.map((ins, i) => (
+                    <div key={i} className="insight-card">
+                      <div className="insight-card__icon"><i className={`pi ${ins.icon}`} /></div>
+                      <div>
+                        <div className="insight-card__title">{ins.title}</div>
+                        <div className="insight-card__body">{ins.body}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )
+            })()}
           </SectionCard>
         </div>
       )}

@@ -194,6 +194,115 @@ async function buildQueue(userId) {
 }
 
 /**
+ * GET /api/insights/suggestions
+ *
+ * Returns 0–3 AI-style suggestion cards derived from current data.
+ *
+ * The cards are deterministic — same DB state always produces the same
+ * suggestions. Each one combines a numeric finding with a human-readable
+ * narrative the Workspace can render directly.
+ */
+export async function getInsightsSuggestionsRoute(_req, res) {
+  const out = []
+  try {
+    // ---- 1. Single biggest stuck-invoice group (top blocker) ----
+    try {
+      const { rows } = await pool.query(`
+        SELECT e->>'code' AS code, COUNT(DISTINCT i.invoice_id)::int AS n
+          FROM invoices i,
+               LATERAL jsonb_array_elements(
+                 COALESCE(i.mismatches->'errors', '[]'::jsonb)
+               ) e
+         WHERE i.status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                            'debit_note_approval', 'exception_approval')
+         GROUP BY e->>'code'
+         ORDER BY n DESC
+         LIMIT 1
+      `)
+      const top = rows[0]
+      if (top && top.n >= 30) {
+        const code  = String(top.code).split('_')[0]
+        const label = code === 'E003' ? `Add ${top.n} SC* POs to clear top blocker`
+                    : code === 'E022' ? `Approve ${top.n} debit notes in one batch`
+                    : code === 'E070' ? `${top.n} GRN rows missing supplier doc no`
+                    : code === 'E004' ? `${top.n} OCR invoices need supplier match`
+                    : `Resolve ${top.n} stuck invoices in the ${code} bucket`
+        const body  = code === 'E003'
+          ? 'If source ERP exports subcontract POs, you unlock these invoices in one config change.'
+          : code === 'E022'
+          ? 'Supplier rate issue across many invoices. Auto-drafted debit notes ready for review.'
+          : code === 'E070'
+          ? 'Receiving needs to fill supplier_doc_no on the GRN rows. Single-team fix.'
+          : code === 'E004'
+          ? 'Engine has high-confidence guesses for many of these. A review session clears them.'
+          : 'Targeting this category resolves the largest single bucket of stuck invoices.'
+        out.push({ icon: 'pi-bolt', title: label, body, metadata: { code, count: top.n } })
+      }
+    } catch { /* non-fatal */ }
+
+    // ---- 2. Supplier with the highest concentration of one error code ----
+    try {
+      const { rows } = await pool.query(`
+        WITH per AS (
+          SELECT s.supplier_name, e->>'code' AS code, COUNT(DISTINCT i.invoice_id)::int AS n
+            FROM invoices i
+            LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id,
+            LATERAL jsonb_array_elements(
+              COALESCE(i.mismatches->'errors', '[]'::jsonb)
+            ) e
+           WHERE i.status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                              'debit_note_approval', 'exception_approval')
+             AND s.supplier_name IS NOT NULL
+           GROUP BY s.supplier_name, e->>'code'
+        )
+        SELECT supplier_name, code, n
+          FROM per
+         WHERE n >= 5
+         ORDER BY n DESC
+         LIMIT 1
+      `)
+      const top = rows[0]
+      if (top) {
+        const code = String(top.code).split('_')[0]
+        out.push({
+          icon: 'pi-percentage',
+          title: `${top.supplier_name} ${code === 'E022' ? 'rate' : 'data'} issue is systemic`,
+          body:  `All ${top.n} invoices from this supplier hit ${code}. Recommend a master-rate audit.`,
+          metadata: { supplier: top.supplier_name, code, count: top.n }
+        })
+      }
+    } catch { /* non-fatal */ }
+
+    // ---- 3. OCR accuracy trend ----
+    try {
+      const { rows } = await pool.query(`
+        SELECT
+          COALESCE(SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(*), 0), 0)::numeric(5,3) AS rate
+          FROM invoices
+         WHERE source = 'ocr'
+           AND invoice_date >= CURRENT_DATE - INTERVAL '7 days'
+      `)
+      const rate = Number(rows[0]?.rate || 0)
+      // If OCR validation rate is below 90 % in the last week, flag it.
+      if (rate > 0 && rate < 0.90) {
+        const pct = Math.round(rate * 100)
+        out.push({
+          icon: 'pi-trending-up',
+          title: `OCR validation rate at ${pct}% this week`,
+          body:  'Some PDF templates may have changed format. Review OCR queue and re-extract failures.',
+          metadata: { ocr_rate: rate }
+        })
+      }
+    } catch { /* non-fatal */ }
+
+    res.json({ items: out })
+  } catch (err) {
+    console.error('insights/suggestions:', err)
+    res.json({ items: [] })   // never 500 — frontend renders empty state
+  }
+}
+
+/**
  * GET /api/insights/validation-trend?days=14
  *
  * Returns daily counts of invoices currently in `validated` status,
