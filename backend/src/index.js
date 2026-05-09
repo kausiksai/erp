@@ -3676,6 +3676,15 @@ router.get('/reports/dashboard-summary', authenticateToken, async (_req, res) =>
             COUNT(*) FILTER (WHERE status = 'ready_for_payment')         AS ready_for_payment,
             COUNT(*) FILTER (WHERE status = 'paid')                      AS paid,
             COUNT(*)::int                                                AS total,
+            -- Funnel intermediates — used by the Workspace pipeline
+            -- so each step shows real data (not a guessed delta).
+            COUNT(*) FILTER (WHERE po_id IS NOT NULL)::int               AS po_matched,
+            COUNT(*) FILTER (WHERE po_id IS NOT NULL
+                              AND EXISTS (
+                                SELECT 1 FROM grn g
+                                 WHERE g.po_id = invoices.po_id
+                                   AND COALESCE(g.supplier_doc_no, '') = invoices.invoice_number
+                              ))::int                                    AS goods_received,
             COALESCE(SUM(total_amount) FILTER (WHERE status IN ('validated', 'ready_for_payment', 'partially_paid')), 0)::numeric(18,2) AS outstanding_amount,
             COALESCE(SUM(total_amount) FILTER (WHERE status = 'validated'), 0)::numeric(18,2) AS validated_amount,
             COALESCE(SUM(total_amount) FILTER (WHERE status = 'ready_for_payment'), 0)::numeric(18,2) AS ready_amount,
@@ -3698,6 +3707,8 @@ router.get('/reports/dashboard-summary', authenticateToken, async (_req, res) =>
           inv.waiting_for_re_validation::int AS waiting_for_re_validation,
           inv.ready_for_payment::int         AS ready_for_payment,
           inv.paid::int                      AS paid,
+          inv.po_matched::int                AS po_matched,
+          inv.goods_received::int            AS goods_received,
           inv.outstanding_amount,
           inv.validated_amount,
           inv.ready_amount,
@@ -3727,11 +3738,12 @@ router.get('/reports/dashboard-summary', authenticateToken, async (_req, res) =>
       `),
       pool.query(`
         SELECT
-          COALESCE(s.supplier_name, 'Unknown') AS supplier_name,
+          s.supplier_name,
           COUNT(*)::int AS invoice_count,
           COALESCE(SUM(i.total_amount), 0)::numeric(18,2) AS total_amount
         FROM invoices i
-        LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+        JOIN suppliers s ON s.supplier_id = i.supplier_id
+        WHERE s.supplier_name IS NOT NULL AND s.supplier_name <> ''
         GROUP BY s.supplier_name
         ORDER BY total_amount DESC
         LIMIT 10

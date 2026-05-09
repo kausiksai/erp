@@ -43,42 +43,56 @@ async function fetchStatusCounts(client) {
  * Falls back gracefully if `mismatches` isn't populated (returns {}).
  */
 async function fetchErrorCodeCounts(client) {
-  const { rows } = await client.query(`
-    SELECT code, COUNT(*)::int AS n
-      FROM (
-        SELECT DISTINCT i.invoice_id, e->>'code' AS code
-          FROM invoices i,
-               LATERAL jsonb_array_elements(
-                 COALESCE(i.mismatches->'errors', '[]'::jsonb)
-               ) AS e
-         WHERE i.status IN (
-           'waiting_for_validation',
-           'waiting_for_re_validation',
-           'debit_note_approval',
-           'exception_approval'
-         )
-      ) x
-     GROUP BY code
-     ORDER BY n DESC
-  `)
-  return Object.fromEntries(rows.map(r => [r.code, r.n]))
+  try {
+    const { rows } = await client.query(`
+      SELECT code, COUNT(*)::int AS n
+        FROM (
+          SELECT DISTINCT i.invoice_id, e->>'code' AS code
+            FROM invoices i,
+                 LATERAL jsonb_array_elements(
+                   COALESCE(i.mismatches->'errors', '[]'::jsonb)
+                 ) AS e
+           WHERE i.status IN (
+             'waiting_for_validation',
+             'waiting_for_re_validation',
+             'debit_note_approval',
+             'exception_approval'
+           )
+        ) x
+       GROUP BY code
+       ORDER BY n DESC
+    `)
+    return Object.fromEntries(rows.map(r => [r.code, r.n]))
+  } catch (err) {
+    console.warn('fetchErrorCodeCounts:', err.message)
+    return {}
+  }
 }
 
 /**
  * Recent unread system notifications (integration failures, threshold
  * breaches). Surfaced at the top of the queue.
+ *
+ * Defensive: returns [] if the notifications table doesn't exist yet
+ * (Phase 2 migration not applied on this DB) — the rest of the queue
+ * is still useful without it.
  */
 async function fetchSystemNotifications(client, userId, limit = 3) {
-  const { rows } = await client.query(`
-    SELECT notification_id, ts, variant, title, body, link
-      FROM notifications
-     WHERE user_id = $1
-       AND read_at IS NULL
-       AND variant IN ('danger', 'warn')
-     ORDER BY ts DESC
-     LIMIT $2
-  `, [userId, limit])
-  return rows
+  try {
+    const { rows } = await client.query(`
+      SELECT notification_id, ts, variant, title, body, link
+        FROM notifications
+       WHERE user_id = $1
+         AND read_at IS NULL
+         AND variant IN ('danger', 'warn')
+       ORDER BY ts DESC
+       LIMIT $2
+    `, [userId, limit])
+    return rows
+  } catch (err) {
+    if (err.code !== '42P01') console.warn('fetchSystemNotifications:', err.message)
+    return []
+  }
 }
 
 /**

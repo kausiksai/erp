@@ -47,6 +47,10 @@ interface DashboardTotals {
   waiting_for_re_validation: number
   ready_for_payment: number
   paid: number
+  /** Invoices with a po_id set — funnel intermediate added in 4b1-fix4. */
+  po_matched: number
+  /** Invoices linked to a GRN row matching their invoice number — added 4b1-fix4. */
+  goods_received: number
   outstanding_amount: string | number
   validated_amount: string | number
   ready_amount: string | number
@@ -311,11 +315,11 @@ function WorkspacePage() {
           {t && totalInv > 0 ? (
             <SectionCard icon="pi-filter" title="Invoice pipeline" meta={loading ? 'loading…' : `Last refresh ${trend.length ? '18 min ago' : 'just now'}`}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <FunnelRow label="Loaded" value={totalInv} of={totalInv} />
-                <FunnelRow label="PO &amp; supplier matched" value={Math.max(0, totalInv - Number(t.waiting_for_validation || 0))} of={totalInv} />
-                <FunnelRow label="Goods received" value={Math.max(0, totalInv - Number(t.waiting_for_validation || 0) - Number(t.waiting_for_re_validation || 0))} of={totalInv} />
-                <FunnelRow label="Validated" value={Number(t.validated)} of={totalInv} highlight />
-                <FunnelRow label="Paid" value={Number(t.paid)} of={totalInv} muted />
+                <FunnelRow label="Loaded"                  value={totalInv}                            of={totalInv} />
+                <FunnelRow label="PO &amp; supplier matched" value={Number(t.po_matched ?? totalInv)}    of={totalInv} />
+                <FunnelRow label="Goods received"          value={Number(t.goods_received ?? 0)}        of={totalInv} />
+                <FunnelRow label="Validated"               value={Number(t.validated)}                  of={totalInv} highlight />
+                <FunnelRow label="Paid"                    value={Number(t.paid)}                       of={totalInv} muted />
               </div>
             </SectionCard>
           ) : <div />}
