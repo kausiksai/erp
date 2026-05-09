@@ -69,7 +69,8 @@ function App() {
 
         {/* Overview */}
         <Route path="/"          element={<ShellRoute><WorkspacePage /></ShellRoute>} />
-        <Route path="/analytics" element={<ShellRoute><Analytics /></ShellRoute>} />
+        <Route path="/insights"  element={<ShellRoute><Analytics /></ShellRoute>} />
+        <Route path="/analytics" element={<Navigate to="/insights" replace />} />
         <Route path="/reports"   element={<ShellRoute><ReportsHubPage /></ShellRoute>} />
 
         {/* Workflow — Invoices */}

@@ -53,7 +53,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Insights',
     items: [
-      { to: '/analytics',           label: 'Insights',           icon: 'pi-chart-line' },
+      { to: '/insights',            label: 'Insights',           icon: 'pi-chart-line' },
       { to: '/items/price-history', label: 'Item price history', icon: 'pi-history' },
       { to: '/reports',             label: 'Reports',            icon: 'pi-chart-bar' }
     ]

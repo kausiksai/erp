@@ -367,13 +367,13 @@ function Analytics() {
   return (
     <>
       <PageHero
-        eyebrow="Analytics"
+        eyebrow="Insights"
         eyebrowIcon="pi-chart-line"
-        title="Operational analytics hub"
-        subtitle="Executive KPIs, cashflow, suppliers, procurement and compliance — every view you need to run the operation."
+        title="Insights"
+        subtitle="Trends across the billing pipeline — cashflow, suppliers, procurement, compliance. Spot patterns before they become problems."
         actions={
           <button className="action-btn action-btn--ghost" onClick={() => navigate('/')}>
-            <i className="pi pi-home" /> Dashboard
+            <i className="pi pi-home" /> Workspace
           </button>
         }
       />

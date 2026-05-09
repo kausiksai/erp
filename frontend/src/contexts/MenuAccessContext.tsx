@@ -53,8 +53,8 @@ const SIBLING_GROUPS: string[][] = [
   ['/receipts', '/grn', '/asn', '/delivery-challans', '/po-schedules'],
   // Settings tabs absorb these four
   ['/settings', '/profile', '/users/registration', '/owners/details', '/open-po-prefixes'],
-  // Insights replaces Analytics (visible label change only)
-  ['/analytics']
+  // Insights replaces Analytics — granting access to either grants both
+  ['/insights', '/analytics']
 ]
 
 // New IA-only paths that don't exist in the legacy menu table at all.
