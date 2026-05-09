@@ -152,9 +152,22 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             )
             srow = cur.fetchone()
             if srow:
-                state_code = srow.get("state_code") or _state_code_from_gstin(
-                    srow.get("gst_number") or invoice.get("gstin")
-                )
+                # Prefer the supplier state derived from the invoice's own
+                # GSTIN — that's the most authoritative source for this
+                # particular transaction. Multi-state suppliers (suppliers
+                # registered in more than one state) commonly issue invoices
+                # from a different GSTIN than the one stored in our master.
+                # Example: PLASMATEK PVD SYSTEMS has master GSTIN
+                # 29AABCP9012C1Z5 (Karnataka) but bills us from their TN
+                # registration 33ABAFP2350B1ZZ. Falling back to master would
+                # mis-fire E034/E035 for every invoice from the TN entity.
+                inv_gstin_state = _state_code_from_gstin(invoice.get("gstin"))
+                if inv_gstin_state:
+                    state_code = inv_gstin_state
+                else:
+                    state_code = srow.get("state_code") or _state_code_from_gstin(
+                        srow.get("gst_number")
+                    )
                 supplier = SupplierContext(
                     supplier_id=srow["supplier_id"],
                     supplier_name=srow.get("supplier_name"),
