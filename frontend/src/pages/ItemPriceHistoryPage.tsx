@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { formatDate, formatINRSymbol, formatQty, parseAmount } from '../utils/format'
+import { useToast } from '../contexts/ToastContext'
 
 /* =========================================================================
  *   Types
@@ -92,7 +93,7 @@ export default function ItemPriceHistoryPage() {
   const [searched, setSearched] = useState('')
   const [data, setData] = useState<POHistoryResponse | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const toast = useToast()
 
   /* ---------- autocomplete ---------- */
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
@@ -156,7 +157,6 @@ export default function ItemPriceHistoryPage() {
   }, [itemCode, fetchSuggestions])
 
   const search = async (code: string) => {
-    setError('')
     setData(null)
     const trimmed = code.trim()
     if (!trimmed) return
@@ -169,7 +169,7 @@ export default function ItemPriceHistoryPage() {
       const body: POHistoryResponse = await res.json()
       setData(body)
     } catch (err) {
-      setError(getDisplayError(err))
+      toast.danger('Search failed', getDisplayError(err))
     } finally {
       setLoading(false)
     }
@@ -421,19 +421,14 @@ export default function ItemPriceHistoryPage() {
         )}
       </div>
 
-      {/* Error / loading / empty */}
-      {error && (
-        <div style={{ padding: '0.75rem 0.9rem', background: 'var(--status-danger-bg)', color: 'var(--status-danger-fg)', border: '1px solid var(--status-danger-ring)', borderRadius: 'var(--radius-md)', fontSize: '0.86rem', marginBottom: '1rem' }}>
-          <i className="pi pi-exclamation-triangle" /> {error}
-        </div>
-      )}
+      {/* Loading / empty */}
       {loading && (
         <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
           <i className="pi pi-spin pi-spinner" style={{ fontSize: '1.4rem', color: 'var(--brand-600)' }} />
           <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>Looking up PO history for {searched}…</div>
         </div>
       )}
-      {!loading && !error && data && data.count === 0 && (
+      {!loading && data && data.count === 0 && (
         <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface-1)', borderRadius: 'var(--radius-lg)', border: '1px dashed var(--border-default)', fontSize: '0.92rem' }}>
           <i className="pi pi-inbox" style={{ fontSize: '1.4rem', display: 'block', marginBottom: '0.4rem' }} />
           No purchase orders found containing item code{' '}
@@ -442,7 +437,7 @@ export default function ItemPriceHistoryPage() {
       )}
 
       {/* Results */}
-      {!loading && !error && data && data.count > 0 && (
+      {!loading && data && data.count > 0 && (
         <div className="iph-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <Hero
             data={data}
