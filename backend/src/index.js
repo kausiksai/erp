@@ -61,6 +61,25 @@ import {
   applyReconciliationDecision
 } from './reconcile.js'
 
+// Redesign Phase 2 — additive endpoints powering the new portal screens.
+import { getWorkspaceQueueRoute } from './workspaceQueue.js'
+import { getValidationRulesRoute, patchValidationRuleRoute } from './validationRules.js'
+import { getAuditEventsRoute } from './auditEvents.js'
+import {
+  listSavedViewsRoute,
+  createSavedViewRoute,
+  patchSavedViewRoute,
+  deleteSavedViewRoute
+} from './savedViews.js'
+import {
+  getNotificationsRoute,
+  markNotificationReadRoute,
+  markAllNotificationsReadRoute
+} from './notifications.js'
+import { getReceiptsRoute } from './receipts.js'
+import { getSearchRoute } from './search.js'
+import { getInvoicePriceHistoryRoute } from './priceHistory.js'
+
 const app = express()
 
 // CORS: in production set FRONTEND_ORIGIN (e.g. https://app.example.com)
@@ -4953,6 +4972,41 @@ router.patch('/payments/:id/mark-done', authenticateToken, authorize(['admin', '
     client.release()
   }
 })
+
+// ===========================================================================
+// Redesign Phase 2 — additive endpoints. Each one feeds a new screen in the
+// frontend-redesign branch. None modify or replace existing routes.
+// ===========================================================================
+
+// Workspace action queue (the new home page)
+router.get('/workspace/queue', authenticateToken, getWorkspaceQueueRoute)
+
+// Validation rules library
+router.get('/validation-rules',           authenticateToken, getValidationRulesRoute)
+router.patch('/validation-rules/:code',   authenticateToken, authorize(['admin']), patchValidationRuleRoute)
+
+// Audit log (admin only)
+router.get('/audit', authenticateToken, authorize(['admin']), getAuditEventsRoute)
+
+// Saved views (per-user)
+router.get('/saved-views',           authenticateToken, listSavedViewsRoute)
+router.post('/saved-views',          authenticateToken, createSavedViewRoute)
+router.patch('/saved-views/:viewId', authenticateToken, patchSavedViewRoute)
+router.delete('/saved-views/:viewId', authenticateToken, deleteSavedViewRoute)
+
+// Notifications (per-user bell feed)
+router.get('/notifications',                              authenticateToken, getNotificationsRoute)
+router.post('/notifications/:notificationId/read',        authenticateToken, markNotificationReadRoute)
+router.post('/notifications/read-all',                    authenticateToken, markAllNotificationsReadRoute)
+
+// Receipts — unified GRN / ASN / DC / Schedule
+router.get('/receipts', authenticateToken, getReceiptsRoute)
+
+// Cross-entity search (powers ⌘K command palette)
+router.get('/search', authenticateToken, getSearchRoute)
+
+// Item price history — invoice-side complement to /po-history
+router.get('/items/:itemCode/invoice-history', authenticateToken, getInvoicePriceHistoryRoute)
 
 // Mount API routes under /api prefix
 app.use('/api', router)
