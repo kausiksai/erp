@@ -35,21 +35,30 @@ interface QueueItem {
   actions?: QueueAction[]
 }
 
+/**
+ * Shape returned by GET /api/reports/dashboard-summary.
+ * The `totals` field is a single flat row — counts and sums live next to
+ * each other, no further nesting.
+ */
 interface DashboardTotals {
+  invoices: number                          // total count
   validated: number
   waiting_for_validation: number
   waiting_for_re_validation: number
   ready_for_payment: number
   paid: number
-  total: number
   outstanding_amount: string | number
   validated_amount: string | number
   ready_amount: string | number
+  paid_amount: string | number
+  purchase_orders: number                   // PO count
+  fulfilled_pos: number
+  suppliers: number
 }
 
 interface DashboardSummary {
-  totals?: { invoices?: DashboardTotals; po?: { total: number; fulfilled: number } }
-  topSuppliers?: Array<{ supplier_name: string; total: string | number }>
+  totals?: DashboardTotals
+  topSuppliers?: Array<{ supplier_name: string; total_amount?: string | number; invoice_count?: number }>
 }
 
 function fmtCurr(n: string | number | null | undefined): string {
@@ -101,7 +110,7 @@ function WorkspacePage() {
     return () => { alive = false }
   }, [])
 
-  const inv = summary?.totals?.invoices
+  const t = summary?.totals
   const greeting = useMemo(() => {
     const h = new Date().getHours()
     if (h < 12) return 'Good morning'
@@ -109,7 +118,8 @@ function WorkspacePage() {
     return 'Good evening'
   }, [])
 
-  const validatedPct = inv && inv.total ? Math.round((Number(inv.validated) / inv.total) * 100) : 0
+  const totalInv = Number(t?.invoices) || 0
+  const validatedPct = totalInv ? Math.round((Number(t?.validated) / totalInv) * 100) : 0
 
   function runAction(action: QueueAction, item: QueueItem) {
     if (action.link) {
@@ -227,23 +237,23 @@ function WorkspacePage() {
       <div className="grid-kpis">
         <KPICard
           label="Total invoices"
-          value={inv ? inv.total.toLocaleString('en-IN') : '—'}
+          value={t ? totalInv.toLocaleString('en-IN') : '—'}
           icon="pi-file"
           variant="brand"
-          footer={loading ? 'loading…' : `${inv?.total || 0} in system`}
+          footer={loading ? 'loading…' : `${totalInv} in system`}
           onClick={() => navigate('/invoices/validate')}
         />
         <KPICard
           label="Validated"
-          value={inv ? Number(inv.validated).toLocaleString('en-IN') : '—'}
+          value={t ? Number(t.validated).toLocaleString('en-IN') : '—'}
           icon="pi-check-circle"
           variant="emerald"
-          footer={`${validatedPct}% of total`}
+          footer={t ? `${validatedPct}% of total` : ''}
           onClick={() => navigate('/invoices/validate')}
         />
         <KPICard
           label="Awaiting validation"
-          value={inv ? Number(inv.waiting_for_validation).toLocaleString('en-IN') : '—'}
+          value={t ? Number(t.waiting_for_validation).toLocaleString('en-IN') : '—'}
           icon="pi-clock"
           variant="amber"
           footer="missing reference data"
@@ -251,7 +261,7 @@ function WorkspacePage() {
         />
         <KPICard
           label="Re-validation needed"
-          value={inv ? Number(inv.waiting_for_re_validation).toLocaleString('en-IN') : '—'}
+          value={t ? Number(t.waiting_for_re_validation).toLocaleString('en-IN') : '—'}
           icon="pi-sync"
           variant="rose"
           footer="data quality / supplier"
@@ -259,32 +269,32 @@ function WorkspacePage() {
         />
         <KPICard
           label="Ready for payment"
-          value={inv ? fmtCurr(inv.validated_amount) : '—'}
+          value={t ? fmtCurr(t.validated_amount) : '—'}
           icon="pi-wallet"
           variant="violet"
-          footer={`${inv?.validated || 0} invoices`}
+          footer={t ? `${t.validated} invoices` : ''}
           onClick={() => navigate('/payments/approve')}
         />
         <KPICard
           label="Active POs"
-          value={summary?.totals?.po?.total ? Number(summary.totals.po.total).toLocaleString('en-IN') : '—'}
+          value={t ? Number(t.purchase_orders).toLocaleString('en-IN') : '—'}
           icon="pi-shopping-cart"
           variant="slate"
-          footer={summary?.totals?.po?.fulfilled ? `${summary.totals.po.fulfilled} fulfilled` : ''}
+          footer={t?.fulfilled_pos ? `${t.fulfilled_pos} fulfilled` : ''}
           onClick={() => navigate('/purchase-orders')}
         />
       </div>
 
       {/* ===== Funnel + top spend ===== */}
-      {inv && (
+      {t && totalInv > 0 && (
         <div className="grid-charts" style={{ marginTop: 24 }}>
           <SectionCard icon="pi-filter" title="Invoice pipeline" meta={loading ? 'loading…' : 'all sources'}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <FunnelRow label="Loaded" value={inv.total} of={inv.total} />
-              <FunnelRow label="Awaiting validation" value={inv.waiting_for_validation} of={inv.total} />
-              <FunnelRow label="Re-validation needed" value={inv.waiting_for_re_validation} of={inv.total} />
-              <FunnelRow label="Validated" value={inv.validated} of={inv.total} highlight />
-              <FunnelRow label="Paid" value={inv.paid} of={inv.total} muted />
+              <FunnelRow label="Loaded" value={totalInv} of={totalInv} />
+              <FunnelRow label="Awaiting validation" value={Number(t.waiting_for_validation)} of={totalInv} />
+              <FunnelRow label="Re-validation needed" value={Number(t.waiting_for_re_validation)} of={totalInv} />
+              <FunnelRow label="Validated" value={Number(t.validated)} of={totalInv} highlight />
+              <FunnelRow label="Paid" value={Number(t.paid)} of={totalInv} muted />
             </div>
           </SectionCard>
 
@@ -297,7 +307,7 @@ function WorkspacePage() {
                       {s.supplier_name}
                     </span>
                     <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtCurr(s.total)}
+                      {fmtCurr(s.total_amount)}
                     </span>
                   </div>
                 ))}
