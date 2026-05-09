@@ -5,6 +5,7 @@ import 'react-pdf/dist/esm/Page/AnnotationLayer.css'
 import 'react-pdf/dist/esm/Page/TextLayer.css'
 import PageHero from '../components/PageHero'
 import { apiFetch, apiUrl, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
 import { formatINRSymbol, parseAmount } from '../utils/format'
 
 // Wire up the PDF.js worker via jsDelivr CDN — exact version react-pdf expects.
@@ -145,6 +146,7 @@ function InvoiceUploadPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
+  const toast = useToast()
 
   // PDF / image preview state
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -257,7 +259,9 @@ function InvoiceUploadPage() {
           : 'Upload stored. OCR could not extract automatically — fill the fields manually, then save.'
       )
     } catch (err) {
-      setError(getDisplayError(err))
+      const msg = getDisplayError(err)
+      setError(msg)
+      toast.danger('Extraction failed', msg)
       setFile(null)
     } finally {
       setExtracting(false)
@@ -517,8 +521,11 @@ function InvoiceUploadPage() {
       const id = body.invoiceId ?? body.invoice_id ?? null
       setSavedInvoiceId(id)
       setInfo(`Invoice saved successfully${id ? ` · ID ${id}` : ''}.`)
+      toast.success('Invoice saved', id ? `Now in the Invoices list · ID ${id}` : 'Now in the Invoices list')
     } catch (err) {
-      setError(getDisplayError(err))
+      const msg = getDisplayError(err)
+      setError(msg)
+      toast.danger('Save failed', msg)
     } finally {
       setSaving(false)
     }
