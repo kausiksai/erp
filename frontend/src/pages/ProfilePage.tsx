@@ -4,7 +4,9 @@ import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 
-function ProfilePage() {
+interface ProfilePageProps { embedded?: boolean }
+
+function ProfilePage({ embedded = false }: ProfilePageProps = {}) {
   const { user, login, token } = useAuth()
   const { theme, toggleTheme } = useTheme()
 
@@ -102,12 +104,14 @@ function ProfilePage() {
 
   return (
     <>
-      <PageHero
-        eyebrow="My account"
-        eyebrowIcon="pi-user"
-        title="Profile & preferences"
-        subtitle="Update your identity, change your password and switch the portal theme."
-      />
+      {!embedded && (
+        <PageHero
+          eyebrow="My account"
+          eyebrowIcon="pi-user"
+          title="Profile & preferences"
+          subtitle="Update your identity, change your password and switch the portal theme."
+        />
+      )}
 
       {/* ============ Identity + appearance ============ */}
       <div className="grid-charts">

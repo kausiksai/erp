@@ -42,7 +42,9 @@ const EMPTY: Owner = {
   branch: ''
 }
 
-function OwnerPage() {
+interface OwnerPageProps { embedded?: boolean }
+
+function OwnerPage({ embedded = false }: OwnerPageProps = {}) {
   const navigate = useNavigate()
   const [owner, setOwner] = useState<Owner>(EMPTY)
   const [loading, setLoading] = useState(true)
@@ -94,17 +96,19 @@ function OwnerPage() {
 
   return (
     <>
-      <PageHero
-        eyebrow="Company"
-        eyebrowIcon="pi-id-card"
-        title="Operating entity"
-        subtitle="The legal entity that raises POs and receives invoices. This data appears on every generated document."
-        actions={
-          <button className="action-btn action-btn--ghost" onClick={() => navigate('/settings')}>
-            <i className="pi pi-arrow-left" /> Settings
-          </button>
-        }
-      />
+      {!embedded && (
+        <PageHero
+          eyebrow="Company"
+          eyebrowIcon="pi-id-card"
+          title="Operating entity"
+          subtitle="The legal entity that raises POs and receives invoices. This data appears on every generated document."
+          actions={
+            <button className="action-btn action-btn--ghost" onClick={() => navigate('/settings')}>
+              <i className="pi pi-arrow-left" /> Settings
+            </button>
+          }
+        />
+      )}
 
       {error   && <div className="glass-card" style={{ borderColor: 'var(--status-danger-ring)', color: 'var(--status-danger-fg)' }}><i className="pi pi-exclamation-triangle" /> {error}</div>}
       {success && <div className="glass-card" style={{ borderColor: 'var(--status-success-ring)', color: 'var(--status-success-fg)' }}><i className="pi pi-check-circle" /> {success}</div>}

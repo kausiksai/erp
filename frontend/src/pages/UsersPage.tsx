@@ -30,7 +30,9 @@ const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
   user:     { bg: 'var(--status-muted-bg)',   fg: 'var(--status-muted-fg)'   }
 }
 
-function UsersPage() {
+interface UsersPageProps { embedded?: boolean }
+
+function UsersPage({ embedded = false }: UsersPageProps = {}) {
   const navigate = useNavigate()
   const [list, setList] = useState<User[]>([])
   const [form, setForm] = useState<UserForm>(EMPTY)
@@ -188,17 +190,19 @@ function UsersPage() {
 
   return (
     <>
-      <PageHero
-        eyebrow="Masters"
-        eyebrowIcon="pi-user"
-        title={editingId ? 'Edit user' : 'Create user'}
-        subtitle="Portal users, roles and access. Roles drive which menus and approval queues a user can see."
-        actions={
-          <button className="action-btn action-btn--ghost" onClick={() => navigate('/')}>
-            <i className="pi pi-home" /> Dashboard
-          </button>
-        }
-      />
+      {!embedded && (
+        <PageHero
+          eyebrow="Masters"
+          eyebrowIcon="pi-user"
+          title={editingId ? 'Edit user' : 'Create user'}
+          subtitle="Portal users, roles and access. Roles drive which menus and approval queues a user can see."
+          actions={
+            <button className="action-btn action-btn--ghost" onClick={() => navigate('/')}>
+              <i className="pi pi-home" /> Workspace
+            </button>
+          }
+        />
+      )}
 
       {error   && <div className="glass-card" style={{ borderColor: 'var(--status-danger-ring)', color: 'var(--status-danger-fg)' }}><i className="pi pi-exclamation-triangle" /> {error}</div>}
       {success && <div className="glass-card" style={{ borderColor: 'var(--status-success-ring)', color: 'var(--status-success-fg)' }}><i className="pi pi-check-circle" /> {success}</div>}

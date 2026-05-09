@@ -27,9 +27,9 @@ import OwnerPage from './pages/OwnerPage'
 import PaymentsPage from './pages/PaymentsPage'
 import ProfilePage from './pages/ProfilePage'
 import ItemPriceHistoryPage from './pages/ItemPriceHistoryPage'
-import RedesignPlaceholder from './pages/RedesignPlaceholder'
 import ValidationRulesPage from './pages/ValidationRulesPage'
 import AuditLogPage from './pages/AuditLogPage'
+import SettingsPage from './pages/SettingsPage'
 
 /** Every authenticated route renders inside the global AppShell. */
 function ShellRoute({
@@ -126,7 +126,7 @@ function App() {
         <Route path="/receipts" element={<ShellRoute><ReceiptsPage /></ShellRoute>} />
         <Route path="/rules" element={<ShellRoute requiredRole={['admin']}><ValidationRulesPage /></ShellRoute>} />
         <Route path="/audit" element={<ShellRoute requiredRole={['admin']}><AuditLogPage /></ShellRoute>} />
-        <Route path="/settings" element={<ShellRoute><RedesignPlaceholder title="Settings" subtitle="Profile, Users, Owners, and Open PO prefixes consolidated into one tabbed screen." /></ShellRoute>} />
+        <Route path="/settings" element={<ShellRoute><SettingsPage /></ShellRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
