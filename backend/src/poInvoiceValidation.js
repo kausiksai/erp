@@ -931,17 +931,23 @@ export async function runFullValidation(invoiceId) {
     if (dcCount === 0 && scheduleCount === 0) {
       errors.push('Open PO: at least one Delivery Challan or Schedule record must exist for this purchase order.')   // E074
     }
-    if (dcCount > 0 && sumDcQty > TOL_QTY && Math.abs(thisInvQty - sumDcQty) > TOL_QTY) {
+    // E075 — DC is a ceiling, not an exact match. One Open-PO order can be
+    // drawn down by multiple invoices until the cumulative DC qty is met, so
+    // an individual invoice only fails when it BILLS MORE than the DC total.
+    // Being under is normal (more invoices will follow). Only GRN (E071) is
+    // an exact match.
+    if (dcCount > 0 && sumDcQty > TOL_QTY && thisInvQty > sumDcQty + TOL_QTY) {
       errors.push(                                                                // E075
-        `Open PO: invoice quantity (${thisInvQty}) must match Delivery Challan total (${sumDcQty}).`
+        `Open PO: invoice quantity (${thisInvQty}) exceeds Delivery Challan total (${sumDcQty}).`
       )
     }
-    // E076 — Schedule qty mismatch. Scope to THIS invoice's (ss_pfx, ss_no)
-    // not the cumulative schedule total (same bug class as E071).
+    // E076 — Schedule is also a ceiling, not an exact match (same multi-draw
+    // reasoning as DC). Scope to THIS invoice's (ss_pfx, ss_no). Fails only
+    // when the invoice qty exceeds the scheduled qty.
     const thisInvSchedQty = parseFloat(thisInvoiceSchedRes.rows[0]?.q ?? 0)
-    if (scheduleCount > 0 && thisInvSchedQty > TOL_QTY && Math.abs(thisInvQty - thisInvSchedQty) > TOL_QTY) {
+    if (scheduleCount > 0 && thisInvSchedQty > TOL_QTY && thisInvQty > thisInvSchedQty + TOL_QTY) {
       errors.push(
-        `Open PO: invoice quantity (${thisInvQty}) must match Schedule total for this invoice (${thisInvSchedQty}).`
+        `Open PO: invoice quantity (${thisInvQty}) exceeds Schedule total for this invoice (${thisInvSchedQty}).`
       )
     }
   }

@@ -795,21 +795,24 @@ def check_open_po_requirements(ctx: InvoiceContext) -> List[Finding]:
             "E074_OPEN_PO_NO_DC_OR_SCHEDULE", SEVERITY_ERROR, CAT_OPEN_PO,
             "Open PO: at least one Delivery Challan or Schedule must exist",
         ))
-    if ctx.dc_count > 0 and ctx.dc_qty_total > 0 and abs(ctx.this_inv_qty - ctx.dc_qty_total) > TOL_QTY:
+    # E075 — DC is a CEILING, not an exact match. An Open PO order is drawn
+    # down by multiple invoices until the cumulative DC qty is met, so an
+    # individual invoice only fails when it bills MORE than the DC total.
+    # Being under is normal (more invoices follow). Only GRN (E071) is exact.
+    if ctx.dc_count > 0 and ctx.dc_qty_total > 0 and ctx.this_inv_qty > ctx.dc_qty_total + TOL_QTY:
         out.append(Finding(
             "E075_OPEN_PO_DC_QTY_MISMATCH", SEVERITY_ERROR, CAT_OPEN_PO,
-            f"Open PO: invoice qty ({ctx.this_inv_qty}) must match DC total "
+            f"Open PO: invoice qty ({ctx.this_inv_qty}) exceeds DC total "
             f"({ctx.dc_qty_total})",
         ))
-    # Schedule qty match — use the invoice-scoped schedule total (matched
-    # via the invoice's own ss_pfx/ss_no). The cumulative schedule_qty_total
-    # spans every shipment scheduled against the open PO and would never
-    # match a single invoice's qty, exactly like the original E071 bug.
+    # E076 — Schedule is also a ceiling, not an exact match (same multi-draw
+    # reasoning as DC). Scoped to the invoice's own ss_pfx/ss_no. Fails only
+    # when the invoice qty exceeds the scheduled qty.
     sched_for_invoice = ctx.this_invoice_schedule_qty_total
-    if ctx.schedule_count > 0 and sched_for_invoice > 0 and abs(ctx.this_inv_qty - sched_for_invoice) > TOL_QTY:
+    if ctx.schedule_count > 0 and sched_for_invoice > 0 and ctx.this_inv_qty > sched_for_invoice + TOL_QTY:
         out.append(Finding(
             "E076_OPEN_PO_SCHED_QTY_MISMATCH", SEVERITY_ERROR, CAT_OPEN_PO,
-            f"Open PO: invoice qty ({ctx.this_inv_qty}) must match Schedule total "
+            f"Open PO: invoice qty ({ctx.this_inv_qty}) exceeds Schedule total "
             f"for this invoice ({sched_for_invoice})",
         ))
     return out
