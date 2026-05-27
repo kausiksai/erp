@@ -259,20 +259,37 @@ function ReconciliationPage() {
         </div>
       </section>
 
-      {/* 4-up KPI strip */}
+      {/* 4-up KPI strip. The first three cards deep-link to the invoice list
+          filtered to the matching status(es) so the user can drill from a
+          category straight into the rows. */}
       <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
-        <div className="kpi kpi--rs">
+        <div
+          className="kpi kpi--rs"
+          style={{ cursor: 'pointer' }}
+          onClick={() => navigate('/invoices/validate?status=waiting_for_validation,waiting_for_re_validation')}
+          title="View all invoices in the queue"
+        >
           <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-exclamation-triangle" /></div></div>
           <p className="kpi__l">Total in queue</p>
           <div className="kpi__v">{loading ? '—' : totalAffected.toLocaleString('en-IN')}</div>
           <div className="kpi__f">distinct invoices with errors</div>
         </div>
-        <div className="kpi kpi--am">
+        <div
+          className="kpi kpi--am"
+          style={{ cursor: 'pointer' }}
+          onClick={() => navigate('/invoices/validate?status=waiting_for_validation')}
+          title="View invoices awaiting reference data"
+        >
           <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-clock" /></div></div>
           <p className="kpi__l">Awaiting reference data</p>
           <div className="kpi__v">{loading ? '—' : awaiting.toLocaleString('en-IN')}</div>
         </div>
-        <div className="kpi kpi--rs">
+        <div
+          className="kpi kpi--rs"
+          style={{ cursor: 'pointer' }}
+          onClick={() => navigate('/invoices/validate?status=waiting_for_re_validation')}
+          title="View invoices needing re-validation"
+        >
           <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-times-circle" /></div></div>
           <p className="kpi__l">Re-validation needed</p>
           <div className="kpi__v">{loading ? '—' : reval.toLocaleString('en-IN')}</div>

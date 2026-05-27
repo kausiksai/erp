@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import SlideOver from '../components/SlideOver'
 import InvoiceExpansion from '../components/InvoiceExpansion'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
@@ -77,8 +77,9 @@ function InvoicesPage() {
   const [openInv, setOpenInv] = useState<Invoice | null>(null)
 
   /* Toolbar filter state */
+  const [searchParams] = useSearchParams()
   const [search,   setSearch]   = useState('')
-  const [statusFl, setStatusFl] = useState<'all' | 'validated' | 'awaiting' | 'reconcile' | 'debit_note' | 'exception'>('all')
+  const [statusFl, setStatusFl] = useState<'all' | 'validated' | 'awaiting' | 'reconcile' | 'queue' | 'debit_note' | 'exception'>('all')
   const [sourceFl, setSourceFl] = useState<'all' | 'excel' | 'ocr'>('all')
   const [supplierFl, setSupplierFl] = useState<string>('all')
   const [activeView, setActiveView] = useState<ViewKey>('all')
@@ -169,6 +170,28 @@ function InvoicesPage() {
     return () => { alive = false }
   }, [])
 
+  /* Deep-link support: ?status=… (raw DB status, comma-separated allowed)
+     lets other pages — e.g. the Needs Attention KPI cards — route straight
+     to a filtered invoice list. Maps the raw status(es) onto the toolbar's
+     statusFl key so the chip + query stay in sync. Runs on mount and when
+     the param changes. */
+  useEffect(() => {
+    const raw = (searchParams.get('status') || '').trim().toLowerCase()
+    if (!raw) return
+    const set = new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))
+    const key: typeof statusFl =
+      set.has('waiting_for_validation') && set.has('waiting_for_re_validation') ? 'queue' :
+      set.has('waiting_for_validation')    ? 'awaiting' :
+      set.has('waiting_for_re_validation') ? 'reconcile' :
+      set.has('validated')                 ? 'validated' :
+      set.has('debit_note_approval')       ? 'debit_note' :
+      set.has('exception_approval')        ? 'exception' :
+      'all'
+    setStatusFl(key)
+    setActiveView('all')
+    setPage(1)
+  }, [searchParams])
+
   /* Map active view + toolbar filters into a single querystring for the
      /api/invoices endpoint. Saved views translate to status / source
      scopes; toolbar filters narrow inside that scope. */
@@ -190,6 +213,7 @@ function InvoicesPage() {
       statusFl === 'validated'  ? 'validated' :
       statusFl === 'awaiting'   ? 'waiting_for_validation' :
       statusFl === 'reconcile'  ? 'waiting_for_re_validation' :
+      statusFl === 'queue'      ? 'waiting_for_validation,waiting_for_re_validation' :
       statusFl === 'debit_note' ? 'debit_note_approval' :
       statusFl === 'exception'  ? 'exception_approval' :
       viewStatus
@@ -443,6 +467,7 @@ function InvoicesPage() {
         </div>
         <select value={statusFl} onChange={(e) => setStatusFl(e.target.value as typeof statusFl)}>
           <option value="all">All statuses</option>
+          <option value="queue">In queue (needs attention)</option>
           <option value="validated">Validated</option>
           <option value="awaiting">Waiting for validation</option>
           <option value="reconcile">Waiting for re-validation</option>
