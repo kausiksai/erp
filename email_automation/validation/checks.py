@@ -251,9 +251,12 @@ def check_dates(ctx: InvoiceContext) -> List[Finding]:
             f"Invoice date {inv_date} is in the future",
         ))
 
+    # E011 — invoice predates PO. Common for urgent buys (goods purchased
+    # first, PO raised afterward), so this is a WARNING, not a blocker. The
+    # invoice still validates on GRN / qty / price / GST checks.
     if ctx.po is not None and ctx.po.date is not None and inv_date < ctx.po.date:
         out.append(Finding(
-            "E011_INVOICE_BEFORE_PO", SEVERITY_ERROR, CAT_DATE,
+            "E011_INVOICE_BEFORE_PO", SEVERITY_WARNING, CAT_DATE,
             f"Invoice date {inv_date} is earlier than PO date {ctx.po.date}",
         ))
 

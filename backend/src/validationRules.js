@@ -29,7 +29,7 @@ const RULES = [
   { code: 'E006_PO_ALREADY_FULFILLED',    name: 'PO already fulfilled',             severity: 'error',   category: 'reference', owner: 'Procurement',              description: 'PO is closed / fully invoiced — new invoice not allowed.' },
   // ---- Date ----
   { code: 'E010_INVOICE_DATE_IN_FUTURE',  name: 'Invoice date in future',           severity: 'error',   category: 'date',      owner: 'Supplier',                 description: 'Invoice date is later than today.' },
-  { code: 'E011_INVOICE_BEFORE_PO',       name: 'Invoice before PO',                severity: 'info',    category: 'date',      owner: 'Finance',                  description: 'Invoice date is earlier than the PO date.' },
+  { code: 'E011_INVOICE_BEFORE_PO',       name: 'Invoice before PO',                severity: 'warning', category: 'date',      owner: 'Finance',                  description: 'Invoice date is earlier than the PO date (e.g. urgent buy, PO raised after). Non-blocking.' },
   // ---- Line ----
   { code: 'E020_NO_MATCHING_PO_LINE',     name: 'No matching PO line',              severity: 'warning', category: 'line',      owner: 'Procurement',              description: 'Invoice item code/description doesn\'t match any PO line.' },
   { code: 'E021_LINE_QTY_OVER_PO',        name: 'Line qty exceeds PO line',         severity: 'warning', category: 'line',      owner: 'Procurement',              description: 'Invoice line qty > PO line qty.' },

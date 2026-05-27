@@ -411,14 +411,15 @@ export async function runFullValidation(invoiceId) {
     details.header.warnings.push(`Invoice PO number (${invoice.po_number}) does not match PO (${po.po_number})`)
   }
 
-  // E011_INVOICE_BEFORE_PO — invoice predates PO. Either the PO was
-  // back-dated on entry or the invoice is for something not on this PO.
-  // Block until reconciled.
+  // E011_INVOICE_BEFORE_PO — invoice predates PO. Common for urgent buys
+  // where goods are purchased first and the PO is raised afterward, so this
+  // is a WARNING (recorded for visibility), not a blocker. The invoice still
+  // validates on the strength of GRN / qty / price / GST checks.
   if (invoice.invoice_date && po.po_date) {
     const invDate = new Date(invoice.invoice_date)
     const poDate  = new Date(po.po_date)
     if (invDate.getTime() < poDate.getTime()) {
-      errors.push(
+      details.header.warnings.push(
         `Invoice date ${String(invoice.invoice_date).slice(0, 10)} is earlier than ` +
         `PO date ${String(po.po_date).slice(0, 10)}`
       )
