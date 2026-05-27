@@ -133,48 +133,31 @@ async function fetchOverrides() {
 }
 
 /**
- * Distinct-invoice rollups for the Reconciliation page's KPI strip.
+ * Status-based rollups for the Reconciliation ("Needs attention") KPI strip.
  *
- * The previous frontend computed totals by summing per-rule counts, which
- * double-counts every invoice that fails more than one rule (1 invoice with
- * 3 errors → counted 3 times). These queries use COUNT(DISTINCT invoice_id)
- * over the live `validation_errors->errors[]` JSONB so the topline numbers
- * always match what the user sees in the invoice list.
+ * These count by invoice STATUS, the same axis the Invoices page KPI cards
+ * use, so the two pages always agree:
+ *   total_in_queue          = every pending invoice (sums to awaiting + reval)
+ *   awaiting_reference_data = status 'waiting_for_validation'
+ *   re_validation_needed    = status 'waiting_for_re_validation'
+ *
+ * (The earlier version split by error-CODE category, which double-counted
+ *  invoices that fail both a reference-data rule and a mismatch rule — that's
+ *  why "awaiting + reval" summed to more than "total". Status is one-per-
+ *  invoice, so the numbers line up with the invoice list the cards link to.)
  */
 async function fetchReconcileStats() {
   const empty = { total_in_queue: 0, awaiting_reference_data: 0, re_validation_needed: 0 }
   try {
     const { rows } = await pool.query(`
-      WITH inv_with_codes AS (
-        SELECT i.invoice_id,
-               array_agg(DISTINCT split_part(e->>'code','_',1)) AS codes
-          FROM invoices i,
-               LATERAL jsonb_array_elements(
-                 COALESCE(i.validation_errors->'errors', '[]'::jsonb)
-               ) AS e
-         WHERE e->>'code' IS NOT NULL
-           AND e->>'code' <> 'EXXX'
-           AND i.status IN ('waiting_for_validation', 'waiting_for_re_validation',
-                            'exception_approval',    'debit_note_approval')
-         GROUP BY i.invoice_id
-      )
       SELECT
-        COUNT(*)::int AS total_in_queue,
-        -- Awaiting reference data: invoices whose only blockers are missing
-        -- master data (PO / supplier). These are unblocked by reloading
-        -- reference data, not by code fixes.
         COUNT(*) FILTER (
-          WHERE codes && ARRAY['E002','E003','E004']
-        )::int AS awaiting_reference_data,
-        -- Re-validation needed: has at least one code OTHER than the
-        -- reference-data set (qty / price / GST / GRN / open-PO etc.).
-        COUNT(*) FILTER (
-          WHERE EXISTS (
-            SELECT 1 FROM unnest(codes) c
-             WHERE c NOT IN ('E002','E003','E004')
-          )
-        )::int AS re_validation_needed
-      FROM inv_with_codes
+          WHERE status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                           'exception_approval',    'debit_note_approval')
+        )::int AS total_in_queue,
+        COUNT(*) FILTER (WHERE status = 'waiting_for_validation')::int    AS awaiting_reference_data,
+        COUNT(*) FILTER (WHERE status = 'waiting_for_re_validation')::int AS re_validation_needed
+      FROM invoices
     `)
     const row = rows[0] || {}
     return {

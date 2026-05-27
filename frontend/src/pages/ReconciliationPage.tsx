@@ -71,6 +71,12 @@ function ReconciliationPage() {
   const [filterOwner, setFilterOwner] = useState('all')
   const [filterSev, setFilterSev] = useState<'all' | 'error' | 'warning' | 'info'>('all')
   const [filterSource, setFilterSource] = useState<'all' | 'excel' | 'ocr'>('all')
+  /* Inline drill-down — clicking a KPI card loads the matching invoices
+     into a table on THIS page (no navigation away). */
+  const [drill, setDrill] = useState<{ status: string; label: string } | null>(null)
+  const [drillRows, setDrillRows] = useState<RuleSample[]>([])
+  const [drillLoading, setDrillLoading] = useState(false)
+
   const [stats, setStats] = useState<{ total_in_queue: number; awaiting_reference_data: number; re_validation_needed: number }>(
     { total_in_queue: 0, awaiting_reference_data: 0, re_validation_needed: 0 }
   )
@@ -90,6 +96,33 @@ function ReconciliationPage() {
     })()
     return () => { alive = false }
   }, [])
+
+  /* Load the invoice rows for a KPI card's status filter into the inline
+     drill table. Toggles off if the same card is clicked again. */
+  const openDrill = useCallback(async (status: string, label: string) => {
+    if (drill?.status === status) { setDrill(null); return }
+    setDrill({ status, label })
+    setDrillLoading(true)
+    setDrillRows([])
+    try {
+      const res = await apiFetch(`invoices?status=${encodeURIComponent(status)}&limit=500`)
+      if (!res.ok) return
+      const body = await res.json()
+      const items = Array.isArray(body) ? body : (body.items || [])
+      setDrillRows(items.map((r: Record<string, unknown>) => ({
+        invoice_id:     r.invoice_id as number,
+        invoice_number: (r.invoice_number as string) ?? '',
+        invoice_date:   (r.invoice_date as string) ?? null,
+        total_amount:   (r.total_amount as string | number) ?? null,
+        po_number:      (r.po_number as string) ?? null,
+        status:         (r.status as string) ?? null,
+        source:         (r.source as 'excel' | 'ocr' | 'both') ?? null,
+        supplier_name:  (r.supplier_name as string) ?? null,
+      })))
+    } finally {
+      setDrillLoading(false)
+    }
+  }, [drill])
 
   const toggle = useCallback(async (code: string) => {
     setExpanded((prev) => ({ ...prev, [code]: !prev[code] }))
@@ -265,33 +298,33 @@ function ReconciliationPage() {
       <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
         <div
           className="kpi kpi--rs"
-          style={{ cursor: 'pointer' }}
-          onClick={() => navigate('/invoices/validate?status=waiting_for_validation,waiting_for_re_validation')}
-          title="View all invoices in the queue"
+          style={{ cursor: 'pointer', outline: drill?.status === 'waiting_for_validation,waiting_for_re_validation' ? '2px solid var(--brand-600)' : undefined }}
+          onClick={() => openDrill('waiting_for_validation,waiting_for_re_validation', 'Total in queue')}
+          title="Show all invoices in the queue below"
         >
           <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-exclamation-triangle" /></div></div>
           <p className="kpi__l">Total in queue</p>
           <div className="kpi__v">{loading ? '—' : totalAffected.toLocaleString('en-IN')}</div>
-          <div className="kpi__f">distinct invoices with errors</div>
+          <div className="kpi__f">invoices waiting for validation or re-validation</div>
         </div>
         <div
           className="kpi kpi--am"
-          style={{ cursor: 'pointer' }}
-          onClick={() => navigate('/invoices/validate?status=waiting_for_validation')}
-          title="View invoices awaiting reference data"
+          style={{ cursor: 'pointer', outline: drill?.status === 'waiting_for_validation' ? '2px solid var(--brand-600)' : undefined }}
+          onClick={() => openDrill('waiting_for_validation', 'Waiting for validation')}
+          title="Show invoices waiting for validation below"
         >
           <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-clock" /></div></div>
-          <p className="kpi__l">Awaiting reference data</p>
+          <p className="kpi__l">Waiting for validation</p>
           <div className="kpi__v">{loading ? '—' : awaiting.toLocaleString('en-IN')}</div>
         </div>
         <div
           className="kpi kpi--rs"
-          style={{ cursor: 'pointer' }}
-          onClick={() => navigate('/invoices/validate?status=waiting_for_re_validation')}
-          title="View invoices needing re-validation"
+          style={{ cursor: 'pointer', outline: drill?.status === 'waiting_for_re_validation' ? '2px solid var(--brand-600)' : undefined }}
+          onClick={() => openDrill('waiting_for_re_validation', 'Waiting for re-validation')}
+          title="Show invoices waiting for re-validation below"
         >
           <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-times-circle" /></div></div>
-          <p className="kpi__l">Re-validation needed</p>
+          <p className="kpi__l">Waiting for re-validation</p>
           <div className="kpi__v">{loading ? '—' : reval.toLocaleString('en-IN')}</div>
         </div>
         <div className="kpi kpi--vio">
@@ -300,6 +333,59 @@ function ReconciliationPage() {
           <div className="kpi__v">{loading ? '—' : activeRulesAll.length.toLocaleString('en-IN')}</div>
         </div>
       </div>
+
+      {/* Inline drill table — appears when a KPI card is clicked. Lists the
+          matching invoices right here; clicking a row opens the detail
+          slide-over (same as the per-code samples). */}
+      {drill && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card__h" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div className="card__t">
+              <i className="pi pi-filter" /> {drill.label}
+              <span className="muted" style={{ marginLeft: 8, fontWeight: 500 }}>
+                {drillLoading ? 'loading…' : `${drillRows.length.toLocaleString('en-IN')} invoice${drillRows.length === 1 ? '' : 's'}`}
+              </span>
+            </div>
+            <button className="btn btn--g btn--xs" onClick={() => setDrill(null)}>
+              <i className="pi pi-times" /> Close
+            </button>
+          </div>
+          {drillLoading ? (
+            <div className="ph"><i className="pi pi-spin pi-spinner" /> Loading invoices…</div>
+          ) : drillRows.length === 0 ? (
+            <div className="ph"><i className="pi pi-inbox" /> No invoices in this bucket.</div>
+          ) : (
+            <table className="tbl compact">
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Date</th>
+                  <th>Supplier</th>
+                  <th>PO ref</th>
+                  <th>Source</th>
+                  <th className="num">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {drillRows.map((s) => (
+                  <tr key={s.invoice_id} style={{ cursor: 'pointer' }} onClick={() => setOpenInv(s)}>
+                    <td className="bold">{s.invoice_number}</td>
+                    <td>{formatDate(s.invoice_date)}</td>
+                    <td>{s.supplier_name || '—'}</td>
+                    <td className="mono">{s.po_number || '—'}</td>
+                    <td>
+                      {s.source === 'ocr'   ? <span className="chip chip--vio">OCR</span>
+                        : s.source === 'excel' ? <span className="chip chip--info">Excel</span>
+                        : <span className="muted">—</span>}
+                    </td>
+                    <td className="num">{formatINRSymbol(s.total_amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="toolbar">
