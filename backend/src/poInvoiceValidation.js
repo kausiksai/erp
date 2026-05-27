@@ -562,6 +562,12 @@ export async function runFullValidation(invoiceId) {
   const { poQty, grnQty } = cumul
   details.totals.poQty = parseFloat(poQty)
   details.grn.grnQty = parseFloat(grnQty)
+  // GRN scoped to THIS invoice (supplier_doc_no = invoice_number) — the same
+  // value E071 checks and the Receipts tab shows. grnQty above is the
+  // PO-cumulative total (every invoice's GRN on an open PO), which is
+  // misleading in the per-invoice "What's different" panel. Surface both so
+  // the UI can show the per-invoice figure.
+  details.grn.thisInvoiceGrnQty = parseFloat(thisInvoiceGrnRes.rows[0]?.aq ?? 0)
   details.asn.asnCount = parseInt(asnRes.rows[0]?.cnt ?? 0, 10)
   details.asn.asnQty   = parseFloat(asnRes.rows[0]?.qty_total ?? 0)
   const otherInvQty = parseFloat(otherInvQtyRes.rows[0]?.qty ?? 0)
@@ -1033,6 +1039,7 @@ export async function validateInvoiceAgainstPoGrn(invoiceId) {
       thisInvQty: full.details.thisInvQty,
       poQty: full.details.poQty,
       grnQty: full.details.grnQty,
+      thisInvoiceGrnQty: full.details.grn?.thisInvoiceGrnQty,
       errors: full.errors,
       warnings: full.warnings,
       details: full.details

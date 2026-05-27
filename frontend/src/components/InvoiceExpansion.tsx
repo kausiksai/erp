@@ -209,6 +209,7 @@ interface ValidationDetails {
   }
   grn?: {
     grnQty?: number | string | null
+    thisInvoiceGrnQty?: number | string | null
     invLteGrn?: boolean | null
     errors?: string[]
   }
@@ -228,6 +229,7 @@ interface ValidationSummary {
   thisInvQty?: number | string | null
   poQty?: number | string | null
   grnQty?: number | string | null
+  thisInvoiceGrnQty?: number | string | null
   errors?: ValidationIssue[]
   warnings?: ValidationIssue[]
   info?: ValidationIssue[]
@@ -1786,7 +1788,13 @@ function ValidationTab({
      quantity / amount on its side and the invoice total is known. */
   const invQty   = numOrNull(summary?.thisInvQty)  ?? numOrNull(details.totals?.thisInvQty)
   const poQty    = numOrNull(summary?.poQty)       ?? numOrNull(details.totals?.poQty)
-  const grnQty   = numOrNull(summary?.grnQty)      ?? numOrNull(details.totals?.grnQty)
+  // Prefer the GRN scoped to THIS invoice (matches the Receipts tab + E071).
+  // Fall back to the PO-cumulative grnQty only when the per-invoice figure is
+  // absent/zero (e.g. standard POs whose GRN rows have no supplier_doc_no).
+  const thisInvGrn = numOrNull(summary?.thisInvoiceGrnQty) ?? numOrNull(details.grn?.thisInvoiceGrnQty)
+  const grnQty   = (thisInvGrn != null && thisInvGrn > 0)
+    ? thisInvGrn
+    : (numOrNull(summary?.grnQty) ?? numOrNull(details.grn?.grnQty) ?? numOrNull(details.totals?.grnQty))
   const invAmt   = numOrNull(invoiceTotal)         ?? numOrNull(details.totals?.thisInvAmount)
   const poAmt    = numOrNull(details.totals?.poAmount)
   const hasTotalsRow = [invQty, poQty, grnQty, invAmt, poAmt].some((v) => v != null)
