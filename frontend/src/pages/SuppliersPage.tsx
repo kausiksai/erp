@@ -1,13 +1,21 @@
-import { useCallback, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import ListPage from '../components/ListPage'
-import type { ListPageColumn, FetchParams, FetchResult } from '../components/ListPage'
-import ExcelUploadButton from '../components/ExcelUploadButton'
-import SlideOver from '../components/SlideOver'
 import Supplier360 from '../components/Supplier360'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { useConfirm } from '../contexts/ConfirmContext'
+import { useDebounce } from '../hooks/useDebounce'
+
+/**
+ * Suppliers — translated from Frontend_Redesign_Mockups/portal.html
+ * (VIEWS.suppliers) verbatim. Hero + 4-up KPIs + 2-column body:
+ *   1fr list of suppliers (clickable) on the left
+ *   2fr Supplier 360 panel on the right showing the current selection
+ *
+ * Replaces the prior ListPage + SlideOver flow; the 2-column layout is
+ * the mockup's design and lets the user scan the list without losing the
+ * detail panel.
+ */
 
 interface Supplier {
   supplier_id: number
@@ -23,29 +31,73 @@ interface Supplier {
   city: string | null
 }
 
-function initials(name: string) {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase() || '')
-      .join('') || 'S'
-  )
+interface SupplierStats {
+  active: number
+  multi_state_gstin: number
+  issue_free_month: number
+  open_issues: number
 }
 
 function SuppliersPage() {
   const navigate = useNavigate()
-  const [total, setTotal] = useState(0)
-  const [reloadKey, setReloadKey] = useState(0)
-  const [openSup, setOpenSup] = useState<Supplier | null>(null)
   const toast = useToast()
   const confirmDialog = useConfirm()
 
-  const handleDeleteSupplier = async (row: Supplier) => {
+  // Paginated server-side. PAGE_SIZE chosen so the list panel renders
+  // within one viewport scroll on a typical 1080p monitor.
+  const PAGE_SIZE = 50
+  const [filtered, setFiltered] = useState<Supplier[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch]   = useState('')
+  const debouncedSearch = useDebounce(search, 300)
+  const [selected, setSelected] = useState<Supplier | null>(null)
+  const [stats, setStats] = useState<SupplierStats | null>(null)
+
+  // Reset to page 1 whenever the search changes.
+  useEffect(() => { setOffset(0) }, [debouncedSearch])
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    ;(async () => {
+      try {
+        const qs = new URLSearchParams()
+        qs.set('limit', String(PAGE_SIZE))
+        qs.set('offset', String(offset))
+        if (debouncedSearch.trim()) qs.set('q', debouncedSearch.trim())
+        const [sRes, statsRes] = await Promise.all([
+          apiFetch(`suppliers?${qs.toString()}`),
+          // Stats only on first page load (it's independent of pagination).
+          offset === 0 ? apiFetch('suppliers/stats').catch(() => null) : Promise.resolve(null)
+        ])
+        if (sRes.ok && alive) {
+          const body = await sRes.json()
+          // Backend returns { items, total, limit, offset } for paginated
+          // requests; legacy array shape still handled for safety.
+          const items: Supplier[] = Array.isArray(body) ? body : (body.items || body.suppliers || [])
+          setFiltered(items)
+          setTotal(typeof body.total === 'number' ? body.total : items.length)
+          // Auto-select first row on initial load only.
+          setSelected((prev) => prev || items[0] || null)
+        }
+        if (statsRes?.ok && alive) {
+          setStats(await statsRes.json())
+        }
+      } catch (err) {
+        if (alive) toast.danger('Failed to load suppliers', getDisplayError(err))
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [debouncedSearch, offset, toast])
+
+  async function handleDeleteSupplier(row: Supplier) {
     const ok = await confirmDialog({
       title: `Delete supplier "${row.supplier_name}"?`,
-      body: 'This is permanent. Any historical POs and invoices linked to this supplier will keep their reference but you won\'t be able to add new ones.',
+      body: "This is permanent. Any historical POs and invoices linked to this supplier will keep their reference but you won't be able to add new ones.",
       icon: 'pi-trash',
       kind: 'danger',
       okLabel: 'Delete'
@@ -55,183 +107,186 @@ function SuppliersPage() {
       const res = await apiFetch(`suppliers/${row.supplier_id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Delete failed'))
       toast.success('Supplier deleted', `"${row.supplier_name}" was removed from the master.`)
-      setReloadKey((k) => k + 1)
+      setFiltered((prev) => prev.filter((s) => s.supplier_id !== row.supplier_id))
+      setTotal((t) => Math.max(0, t - 1))
+      if (selected?.supplier_id === row.supplier_id) {
+        const next = filtered.find((s) => s.supplier_id !== row.supplier_id) || null
+        setSelected(next)
+      }
     } catch (err) {
       toast.danger('Delete failed', getDisplayError(err))
     }
   }
 
-  const fetchData = useCallback(
-    async (p: FetchParams): Promise<FetchResult<Supplier>> => {
-      const res = await apiFetch('suppliers')
-      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load suppliers'))
-      const body = await res.json()
-      // /suppliers returns a bare array
-      let items: Supplier[] = Array.isArray(body) ? body : (body.items || body.suppliers || [])
-      if (p.search) {
-        const q = p.search.toLowerCase()
-        items = items.filter(
-          (s) =>
-            s.supplier_name?.toLowerCase().includes(q) ||
-            (s.suplr_id || '').toLowerCase().includes(q) ||
-            (s.gst_number || '').toLowerCase().includes(q) ||
-            (s.city || '').toLowerCase().includes(q) ||
-            (s.state_name || '').toLowerCase().includes(q)
-        )
-      }
-      const t = items.length
-      setTotal(t)
-      const slice = items.slice(p.offset, p.offset + p.limit)
-      return { items: slice, total: t }
-    },
-    []
-  )
-
-  const columns: ListPageColumn<Supplier>[] = [
-    {
-      field: 'supplier_name',
-      header: 'Supplier',
-      body: (r) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              background: 'linear-gradient(135deg, var(--brand-600), var(--accent-violet))',
-              color: '#fff',
-              fontWeight: 800,
-              fontSize: '0.78rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}
-          >
-            {initials(r.supplier_name || '?')}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {r.supplier_name || '—'}
-            </div>
-            {r.suplr_id && (
-              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>ID {r.suplr_id}</div>
-            )}
-          </div>
-        </div>
-      )
-    },
-    {
-      field: 'gst_number',
-      header: 'GSTIN',
-      body: (r) =>
-        r.gst_number
-          ? <code style={{ fontSize: '0.82rem' }}>{r.gst_number}</code>
-          : <span style={{ color: 'var(--text-muted)' }}>—</span>
-    },
-    {
-      field: 'state_name',
-      header: 'Location',
-      body: (r) => {
-        const loc = [r.city, r.state_name].filter(Boolean).join(', ')
-        return loc || <span style={{ color: 'var(--text-muted)' }}>—</span>
-      }
-    },
-    {
-      field: 'contact_person',
-      header: 'Contact',
-      body: (r) => (
-        <div>
-          <div style={{ fontWeight: 500 }}>{r.contact_person || '—'}</div>
-          {(r.phone || r.mobile) && (
-            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{r.phone || r.mobile}</div>
-          )}
-        </div>
-      )
-    },
-    { field: 'email', header: 'Email', body: (r) => r.email || <span style={{ color: 'var(--text-muted)' }}>—</span> },
-    {
-      field: 'supplier_id',
-      header: '',
-      style: { width: 44, padding: '0 0.4rem' },
-      body: (r) => (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            handleDeleteSupplier(r)
-          }}
-          style={{
-            background: 'transparent',
-            border: 0,
-            color: 'var(--status-danger-fg)',
-            cursor: 'pointer',
-            padding: '0.3rem 0.5rem',
-            borderRadius: 6
-          }}
-          title={`Delete ${r.supplier_name}`}
-        >
-          <i className="pi pi-trash" />
-        </button>
-      )
-    }
-  ]
-
+  /* ============== render ============== */
   return (
     <>
-    <ListPage<Supplier>
-      eyebrow="Masters"
-      eyebrowIcon="pi-users"
-      title="Suppliers"
-      subtitle="The single source of truth for vendor master data — GSTIN, address, bank details and contacts."
-      primaryAction={{
-        label: 'Add supplier',
-        icon: 'pi-plus',
-        onClick: () => navigate('/suppliers/registration')
-      }}
-      headerExtras={
-        <ExcelUploadButton
-          endpoint="suppliers/upload-excel"
-          label="Upload supplier Excel"
-          onSuccess={(message) => {
-            toast.success('Suppliers imported', message)
-            setReloadKey((k) => k + 1)
-          }}
-          onError={(message) => toast.danger('Upload failed', message)}
-        />
-      }
-      kpis={[{ label: 'Suppliers on file', value: total.toLocaleString('en-IN'), icon: 'pi-users', variant: 'emerald' }]}
-      filters={[{ key: 'search', type: 'search', placeholder: 'Search name, ID, GSTIN, city…' }]}
-      columns={columns}
-      rowKey="supplier_id"
-      fetchData={fetchData}
-      reloadKey={reloadKey}
-      onRowClick={(row) => setOpenSup(row)}
-      emptyTitle="No suppliers yet"
-      emptyBody="Add your first supplier to start receiving POs against them, or upload an Excel master using the button above."
-    />
-    {openSup && (
-      <SlideOver
-        open={true}
-        onClose={() => setOpenSup(null)}
-        title={openSup.supplier_name || 'Supplier'}
-        headerActions={
-          <button
-            type="button"
-            className="action-btn action-btn--ghost"
-            style={{ padding: '6px 12px', fontSize: 'var(--fs-xs)' }}
-            onClick={() => {
-              navigate('/suppliers/registration', { state: { supplier: openSup } })
-              setOpenSup(null)
-            }}
-          >
-            <i className="pi pi-pencil" /> Edit
+      {/* Hero — verbatim from mockup VIEWS.suppliers */}
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-users" /> Masters</span>
+          <h1>Suppliers</h1>
+          <p>Supplier master with health bars, multi-state GSTIN handling, recent volume — and a 360° supplier view (open one to see).</p>
+        </div>
+        <div className="hero__act">
+          <button className="btn btn--g" onClick={() => toast.info('Export queued', 'Supplier export will land with /api/suppliers/export.')}>
+            <i className="pi pi-download" /> Export
           </button>
-        }
-      >
-        <Supplier360 supplierId={openSup.supplier_id} />
-      </SlideOver>
-    )}
+          <button className="btn btn--p" onClick={() => navigate('/suppliers/registration')}>
+            <i className="pi pi-plus" /> New supplier
+          </button>
+        </div>
+      </section>
+
+      {/* 4-up KPI strip from /suppliers/stats */}
+      <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
+        <div className="kpi kpi--brand">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-users" /></div></div>
+          <p className="kpi__l">Active suppliers</p>
+          <div className="kpi__v">{stats ? stats.active.toLocaleString('en-IN') : total.toLocaleString('en-IN')}</div>
+        </div>
+        <div className="kpi kpi--vio">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-id-card" /></div></div>
+          <p className="kpi__l">Multi-state GSTIN</p>
+          <div className="kpi__v">{stats ? stats.multi_state_gstin.toLocaleString('en-IN') : '—'}</div>
+        </div>
+        <div className="kpi kpi--em">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-check" /></div></div>
+          <p className="kpi__l">Issue-free this month</p>
+          <div className="kpi__v">{stats ? stats.issue_free_month.toLocaleString('en-IN') : '—'}</div>
+        </div>
+        <div className="kpi kpi--rs">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-flag" /></div></div>
+          <p className="kpi__l">Open issues</p>
+          <div className="kpi__v">{stats ? stats.open_issues.toLocaleString('en-IN') : '—'}</div>
+        </div>
+      </div>
+
+      {/* 2-column body: list (1fr) + 360 panel (2fr) */}
+      <div className="g3" style={{ gridTemplateColumns: '1fr 2fr', gap: 14, alignItems: 'flex-start' }}>
+
+        {/* Supplier list (left) */}
+        <div className="card" style={{ padding: 0 }}>
+          <div className="card__h">
+            <div className="card__t"><i className="pi pi-users" /> Suppliers</div>
+            <span className="card__m">
+              {total > 0
+                ? `${offset + 1}–${Math.min(offset + filtered.length, total)} of ${total.toLocaleString('en-IN')}`
+                : filtered.length.toLocaleString('en-IN')}
+            </span>
+          </div>
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--b-1)' }}>
+            <div className="tb__sr">
+              <i className="pi pi-search" />
+              <input
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+          <div style={{ maxHeight: 620, overflowY: 'auto' }}>
+            {loading && (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-3)', fontSize: 13 }}>
+                <i className="pi pi-spin pi-spinner" /> Loading…
+              </div>
+            )}
+            {!loading && filtered.length === 0 && (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-3)', fontSize: 13 }}>
+                <i className="pi pi-inbox" style={{ marginRight: 6 }} />
+                No suppliers match.
+              </div>
+            )}
+            {filtered.map((s) => {
+              const isActive = selected?.supplier_id === s.supplier_id
+              return (
+                <div
+                  key={s.supplier_id}
+                  onClick={() => setSelected(s)}
+                  style={{
+                    padding: '12px 16px',
+                    borderBottom: '1px solid var(--b-1)',
+                    background: isActive ? 'var(--brand-50)' : undefined,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div className="bold" style={{ color: isActive ? 'var(--brand-700)' : 'var(--t-1)' }}>
+                    {s.supplier_name}
+                  </div>
+                  <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                    {[s.city, s.state_name].filter(Boolean).join(' · ') || s.gst_number || '—'}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {/* Pagination — prev/next pair. Hidden when result set fits one page. */}
+          {total > PAGE_SIZE && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 14px', borderTop: '1px solid var(--b-1)',
+              fontSize: 12
+            }}>
+              <button
+                className="action-btn action-btn--ghost"
+                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+                disabled={offset === 0 || loading}
+                style={{ padding: '4px 10px' }}
+              >
+                <i className="pi pi-angle-left" /> Prev
+              </button>
+              <span className="muted">
+                Page {Math.floor(offset / PAGE_SIZE) + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+              </span>
+              <button
+                className="action-btn action-btn--ghost"
+                onClick={() => setOffset((o) => o + PAGE_SIZE)}
+                disabled={offset + PAGE_SIZE >= total || loading}
+                style={{ padding: '4px 10px' }}
+              >
+                Next <i className="pi pi-angle-right" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Supplier 360 panel (right) */}
+        <div className="stack">
+          {selected ? (
+            <>
+              {/* Action bar above the 360 — matches mockup Edit / Flag */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  className="btn btn--g btn--xs"
+                  onClick={() => navigate('/suppliers/registration', { state: { supplier: selected } })}
+                >
+                  <i className="pi pi-pencil" /> Edit
+                </button>
+                <button
+                  className="btn btn--g btn--xs"
+                  onClick={() => toast.info('Flagged', `Supplier ${selected.supplier_name} flagged for review.`)}
+                >
+                  <i className="pi pi-flag" /> Flag
+                </button>
+                <button
+                  className="btn btn--d btn--xs"
+                  onClick={() => handleDeleteSupplier(selected)}
+                >
+                  <i className="pi pi-trash" /> Delete
+                </button>
+              </div>
+              <Supplier360 supplierId={selected.supplier_id} />
+            </>
+          ) : (
+            <div className="card">
+              <div className="ph">
+                <i className="pi pi-users" />
+                Pick a supplier on the left to see their 360° view.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   )
 }

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css'
 import 'react-pdf/dist/esm/Page/TextLayer.css'
-import PageHero from '../components/PageHero'
 import { apiFetch, apiUrl, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { formatINRSymbol, parseAmount } from '../utils/format'
@@ -60,6 +59,13 @@ interface InvoiceForm {
   totalAmountInWords: string
   termsAndConditions: string
   authorisedSignatory: string
+  // Free-form notes on the invoice header. Persisted to invoices.notes;
+  // termsAndConditions historically piggy-backed on this column, but with a
+  // dedicated UI field we treat them separately at the persistence layer.
+  notes: string
+  // Bill-Register scanning number (the unique workflow ID handed out by
+  // ERP). Persisted to invoices.scanning_number.
+  scanningNumber: string
   items: InvoiceItem[]
 }
 
@@ -78,6 +84,8 @@ const EMPTY_FORM: InvoiceForm = {
   totalAmountInWords: '',
   termsAndConditions: '',
   authorisedSignatory: '',
+  notes: '',
+  scanningNumber: '',
   items: []
 }
 
@@ -229,6 +237,8 @@ function InvoiceUploadPage() {
         totalAmountInWords: extracted.totalAmountInWords || '',
         termsAndConditions: extracted.termsAndConditions || '',
         authorisedSignatory: extracted.authorisedSignatory || '',
+        notes: extracted.notes || '',
+        scanningNumber: extracted.scanningNumber || '',
         items: Array.isArray(extracted.items)
           ? extracted.items.map((it: Record<string, unknown>) => ({
               itemName: (it.itemName as string) || '',
@@ -262,11 +272,21 @@ function InvoiceUploadPage() {
       const msg = getDisplayError(err)
       setError(msg)
       toast.danger('Extraction failed', msg)
-      setFile(null)
+      // Keep the file + preview on screen so the user can retry without
+      // re-selecting from disk. Cleared explicitly via "Cancel".
     } finally {
       setExtracting(false)
     }
   }, [])
+
+  /**
+   * Retry the OCR pipeline against the same file already in state. Useful
+   * when the first attempt failed (network blip, Landing AI rate-limit,
+   * template miss) and the user doesn't want to re-pick the PDF from disk.
+   */
+  const retryExtraction = useCallback(() => {
+    if (file) handleFile(file)
+  }, [file, handleFile])
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLLabelElement>) => {
@@ -493,7 +513,10 @@ function InvoiceUploadPage() {
         poNumber: form.poNumber.trim() || null,
         totalAmount: form.totalAmount ?? computedTotals.grand,
         taxAmount: form.taxAmount ?? computedTotals.tax,
-        notes: form.termsAndConditions || null,
+        scanningNumber: form.scanningNumber.trim() || null,
+        // Prefer the dedicated notes field; fall back to T&C so legacy
+        // uploads (which only had the T&C box) continue to land here.
+        notes: form.notes.trim() || form.termsAndConditions || null,
         pdfFileName,
         pdfBuffer,
         items: form.items.map((it) => ({
@@ -535,96 +558,130 @@ function InvoiceUploadPage() {
    *                         Render                              *
    * =========================================================== */
 
-  const stepNumber = savedInvoiceId ? 4 : validation ? 3 : hasExtracted ? 2 : 1
+  // 3-step pipeline (matches mockup invoice-upload):
+  //   1. Upload PDF              before file is staged
+  //   2. Verify extraction       after OCR has extracted fields
+  //   3. Save & validate         after the engine ran or invoice saved
+  const stepNumber = savedInvoiceId || validation ? 3 : hasExtracted ? 2 : 1
 
   return (
     <>
-      <PageHero
-        eyebrow="Workflow"
-        eyebrowIcon="pi-upload"
-        title="Upload invoice"
-        subtitle="Drop a PDF or image — we extract the header and line items automatically, you review &amp; edit, run a quick validation, then save."
-        actions={
-          <button className="action-btn action-btn--ghost" onClick={() => navigate('/invoices/validate')}>
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-upload" /> Workflow</span>
+          <h1>Upload invoice</h1>
+          <p>Drop a supplier invoice PDF here. OCR extracts the fields, you verify, and the validation engine runs immediately.</p>
+        </div>
+        <div className="hero__act">
+          <button className="btn btn--g" onClick={() => navigate('/invoices/validate')}>
             <i className="pi pi-list" /> All invoices
           </button>
-        }
-      />
+        </div>
+      </section>
 
       {/* ============ Stepper ============ */}
+      {/* 3-step horizontal pipeline matching mockup invoice-upload pane.
+          Single card with 14×18 padding; each step is a circle + label,
+          connecting lines fill green once the step is done, brand-coloured
+          glow on the active step, muted otherwise. */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          gap: '0.5rem',
-          padding: '0.5rem',
+          padding: '14px 18px',
           background: 'var(--surface-0)',
           border: '1px solid var(--border-subtle)',
           borderRadius: 'var(--radius-lg)',
           boxShadow: 'var(--shadow-sm)'
         }}
       >
-        {[
-          { n: 1, label: 'Upload PDF',          icon: 'pi-upload' },
-          { n: 2, label: 'Review & edit',       icon: 'pi-pencil' },
-          { n: 3, label: 'Validate',            icon: 'pi-shield' },
-          { n: 4, label: 'Save',                icon: 'pi-check' }
-        ].map((s) => {
-          const active = stepNumber === s.n
-          const done = stepNumber > s.n
-          return (
-            <div
-              key={s.n}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.55rem',
-                padding: '0.6rem 0.8rem',
-                borderRadius: 'var(--radius-md)',
-                background: active
-                  ? 'linear-gradient(135deg, var(--brand-600), var(--accent-violet))'
-                  : done
-                  ? 'var(--status-success-bg)'
-                  : 'var(--surface-1)',
-                color: active ? '#fff' : done ? 'var(--status-success-fg)' : 'var(--text-muted)',
-                border: `1px solid ${active ? 'transparent' : done ? 'var(--status-success-ring)' : 'var(--border-subtle)'}`,
-                boxShadow: active ? '0 10px 22px -12px rgba(99,102,241,0.55)' : 'none'
-              }}
-            >
-              <div
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
-                  background: active ? 'rgba(255,255,255,0.2)' : done ? 'var(--status-success-fg)' : 'var(--surface-2)',
-                  color: active || done ? '#fff' : 'var(--text-muted)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  flexShrink: 0
-                }}
-              >
-                {done ? <i className="pi pi-check" /> : s.n}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, opacity: 0.85 }}>
-                  Step {s.n}
-                </span>
-                <span style={{ fontSize: '0.84rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {s.label}
-                </span>
-              </div>
-            </div>
-          )
-        })}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {[
+            { n: 1, label: '1. Upload PDF' },
+            { n: 2, label: 'Verify extraction' },
+            { n: 3, label: 'Save & validate' }
+          ].map((s, idx, arr) => {
+            const active = stepNumber === s.n
+            const done   = stepNumber > s.n
+            const stepColor = active ? 'var(--brand-700)' : done ? 'var(--status-success-fg)' : 'var(--text-muted)'
+            return (
+              <span key={s.n} style={{ display: 'contents' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: stepColor }}>
+                  <div
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: '50%',
+                      background: done
+                        ? 'var(--accent-emerald)'
+                        : active
+                        ? 'var(--brand-600)'
+                        : 'var(--surface-2)',
+                      color: done || active ? '#fff' : 'var(--text-muted)',
+                      border: !done && !active ? '1px solid var(--border-default)' : '0',
+                      boxShadow: active ? '0 0 0 4px rgba(37,99,235,0.16)' : 'none',
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      flexShrink: 0
+                    }}
+                  >
+                    {done ? <i className="pi pi-check" style={{ fontSize: 10 }} /> : s.n}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 13,
+                      fontWeight: active || done ? 700 : 500,
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+                {idx < arr.length - 1 && (
+                  <div
+                    style={{
+                      flex: 1,
+                      height: 2,
+                      background: done ? 'var(--accent-emerald)' : 'var(--surface-3)'
+                    }}
+                  />
+                )}
+              </span>
+            )
+          })}
+        </div>
       </div>
 
       {/* Messages */}
       {error && (
         <div className="glass-card" style={{ borderColor: 'var(--status-danger-ring)', color: 'var(--status-danger-fg)' }}>
-          <i className="pi pi-exclamation-triangle" /> {error}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <i className="pi pi-exclamation-triangle" />
+            <span style={{ flex: 1, minWidth: 200 }}>{error}</span>
+            {/* Retry hatch — keeps the uploaded file in state so the user
+                doesn't have to re-pick the PDF from disk on a transient
+                OCR failure. Cleared via "Discard". */}
+            {file && !extracting && (
+              <button
+                type="button"
+                className="action-btn"
+                onClick={retryExtraction}
+                style={{ padding: '5px 11px', fontSize: 12 }}
+              >
+                <i className="pi pi-refresh" /> Retry extraction
+              </button>
+            )}
+            {file && !extracting && (
+              <button
+                type="button"
+                className="action-btn action-btn--ghost"
+                onClick={() => { setFile(null); setError(''); setPreviewUrl(null) }}
+                style={{ padding: '5px 11px', fontSize: 12 }}
+              >
+                Discard
+              </button>
+            )}
+          </div>
         </div>
       )}
       {info && !error && (
@@ -948,6 +1005,7 @@ function InvoiceUploadPage() {
               <TextField label="Invoice number *" value={form.invoiceNumber} onChange={(v) => updateField('invoiceNumber', v)} />
               <DateField  label="Invoice date *"   value={form.invoiceDate}   onChange={(v) => updateField('invoiceDate', v)} />
               <TextField label="PO number"         value={form.poNumber}      onChange={(v) => updateField('poNumber', v)} />
+              <TextField label="Scanning number"   value={form.scanningNumber} onChange={(v) => updateField('scanningNumber', v)} />
               <TextField label="Supplier name *"   value={form.supplierName}  onChange={(v) => updateField('supplierName', v)} />
               <TextField label="Bill to"           value={form.billTo}        onChange={(v) => updateField('billTo', v)} />
               <NumberField label="Subtotal"        value={form.subtotal}      onChange={(v) => updateField('subtotal', v)} />
@@ -959,9 +1017,14 @@ function InvoiceUploadPage() {
               <TextField label="Total in words"    value={form.totalAmountInWords} onChange={(v) => updateField('totalAmountInWords', v)} />
             </div>
 
-            <div style={{ marginTop: '0.9rem' }}>
+            <div style={{ marginTop: '0.9rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.9rem' }}>
               <TextAreaField
-                label="Terms & conditions / notes"
+                label="Internal notes"
+                value={form.notes}
+                onChange={(v) => updateField('notes', v)}
+              />
+              <TextAreaField
+                label="Terms & conditions"
                 value={form.termsAndConditions}
                 onChange={(v) => updateField('termsAndConditions', v)}
               />

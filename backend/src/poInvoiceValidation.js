@@ -28,6 +28,18 @@ function parsePaymentTermsDays(terms) {
   return 30
 }
 
+/**
+ * Extract the 2-digit state code from a GSTIN (first two characters).
+ * Mirrors Python's _state_code_from_gstin in context.py.
+ */
+function stateCodeFromGstin(gstin) {
+  if (!gstin) return ''
+  const s = String(gstin).trim()
+  if (s.length < 2) return ''
+  const head = s.slice(0, 2)
+  return /^\d{2}$/.test(head) ? head : ''
+}
+
 const INVOICE_STATUS = {
   WAITING_FOR_VALIDATION: 'waiting_for_validation',
   VALIDATED: 'validated',
@@ -131,18 +143,32 @@ function itemMatchScore(invItemName, pol) {
  * Pick PO line for one invoice line: explicit ids → best unused item/description match →
  * index fallback only if invoice line count equals PO line count (full parallel upload).
  */
-function resolvePoLineForInvoiceLine(il, poLines, poLineByLineId, poLineBySeq, usedPoLineIds, lineIndex, invLineCount) {
+/**
+ * Match an invoice line to its PO line. Resolution order **must** match
+ * Python's `_resolve_po_line()` in email_automation/validation/checks.py:
+ *   1. Explicit po_line_id (rare; never set by current loaders).
+ *   2. Item-code / description match (best unused match scoring ≥ 80).
+ *   3. Sequence-number match (positional fallback for unused lines).
+ *   4. Positional fallback when line counts agree.
+ *
+ * Item match must win over sequence — Bill Register and PO XLS often list
+ * the same items in different orders. Sequence-first matching pairs
+ * line N of the invoice with line N of the PO regardless of item,
+ * producing false E022/E021 mismatches on every reordered multi-line
+ * invoice. (This bug was previously fixed on the Python side; JS had it
+ * inverted.)
+ */
+function resolvePoLineForInvoiceLine(il, poLines, poLineByLineId, _poLineBySeq, usedPoLineIds, lineIndex, invLineCount) {
+  // 1. Explicit po_line_id
   if (il.po_line_id) {
     const pl = poLineByLineId.get(il.po_line_id)
     if (pl) return pl
   }
-  if (il.sequence_number != null) {
-    const pl = poLineBySeq.get(il.sequence_number)
-    if (pl) return pl
-  }
+  // 2. Item-text match — preferred over sequence to handle reordered invoices.
   const available = poLines.filter((p) => !usedPoLineIds.has(p.po_line_id))
   let best = null
   let bestScore = 0
+  const MIN_ITEM_SCORE = 80
   for (const p of available) {
     const sc = itemMatchScore(il.item_name, p)
     if (sc > bestScore) {
@@ -150,12 +176,21 @@ function resolvePoLineForInvoiceLine(il, poLines, poLineByLineId, poLineBySeq, u
       best = p
     }
   }
-  const MIN_ITEM_SCORE = 80
   if (best && bestScore >= MIN_ITEM_SCORE) {
     return best
   }
+  // 3. Sequence-number fallback (only on unused PO lines).
+  if (il.sequence_number != null) {
+    for (const p of poLines) {
+      if (p.sequence_number === il.sequence_number && !usedPoLineIds.has(p.po_line_id)) {
+        return p
+      }
+    }
+  }
+  // 4. Positional fallback only when line counts agree.
   if (lineIndex < poLines.length && invLineCount === poLines.length) {
-    return poLines[lineIndex]
+    const cand = poLines[lineIndex]
+    if (!usedPoLineIds.has(cand.po_line_id)) return cand
   }
   return null
 }
@@ -168,8 +203,12 @@ export async function enforceOpenPoStaysOpen (client, poId) {
   const { rows } = await client.query(`SELECT pfx FROM purchase_orders WHERE po_id = $1`, [poId])
   if (!rows[0]) return false
   if (!(await isOpenPoByPfx(rows[0].pfx, client))) return false
+  // purchase_orders has no updated_at column in this DB (unlike invoices).
+  // Touching it 500ms ago was the reason every Open-PO revalidate threw
+  // "column updated_at of relation purchase_orders does not exist" and left
+  // the invoice stuck on its old status.
   await client.query(
-    `UPDATE purchase_orders SET status = $1, updated_at = NOW() WHERE po_id = $2`,
+    `UPDATE purchase_orders SET status = $1 WHERE po_id = $2`,
     [PO_STATUS.OPEN, poId]
   )
   return true
@@ -210,9 +249,15 @@ export async function runFullValidation(invoiceId) {
   }
 
   const invRes = await pool.query(
-    `SELECT invoice_id, invoice_number, invoice_date, supplier_id, po_id,
-            total_amount, po_number, open_order_pfx, open_order_no
-     FROM invoices WHERE invoice_id = $1`,
+    `SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.supplier_id, i.po_id,
+            i.total_amount, i.po_number, i.open_order_pfx, i.open_order_no,
+            i.grn_pfx, i.grn_no, i.ss_pfx, i.ss_no,
+            i.place_of_supply, i.gstin AS invoice_gstin,
+            s.state_code AS supplier_state_code,
+            s.gst_number AS supplier_gst_number
+       FROM invoices i
+       LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+      WHERE i.invoice_id = $1`,
     [invoiceId]
   )
   if (!invRes.rows[0]) {
@@ -220,10 +265,84 @@ export async function runFullValidation(invoiceId) {
   }
   const invoice = invRes.rows[0]
   details.header.invoice = invoice
-  const poId = invoice.po_id
+
+  // 3-way PO resolution. Mirrors Python's load_invoice_context() in
+  // email_automation/validation/context.py — resolves PO via:
+  //   1. invoices.po_id (direct)
+  //   2. po_number text → purchase_orders.po_number (latest amendment)
+  //   3. GRN / ASN cross-reference (this invoice's grn_pfx+grn_no, this
+  //      invoice's invoice_number on GRN.supplier_doc_no, or ASN.inv_no).
+  //      Only resolves when the candidates collapse to a single PO under
+  //      the same supplier.
+  let poId = invoice.po_id
+  if (poId == null && invoice.po_number) {
+    const { rows } = await pool.query(
+      `SELECT po_id FROM purchase_orders
+        WHERE po_number = $1
+        ORDER BY amd_no DESC
+        LIMIT 1`,
+      [invoice.po_number]
+    )
+    if (rows[0]) poId = rows[0].po_id
+  }
+  if (poId == null && invoice.supplier_id != null) {
+    const { rows } = await pool.query(
+      `WITH cand AS (
+         SELECT g.po_id
+           FROM grn g JOIN purchase_orders po ON po.po_id = g.po_id
+          WHERE g.grn_pfx = $1 AND g.grn_no = $2
+            AND g.supplier_id = $3
+            AND po.supplier_id = $3
+            AND g.po_id IS NOT NULL
+         UNION
+         SELECT g.po_id
+           FROM grn g JOIN purchase_orders po ON po.po_id = g.po_id
+          WHERE TRIM(g.supplier_doc_no) = $4
+            AND g.supplier_id = $3
+            AND po.supplier_id = $3
+            AND g.po_id IS NOT NULL
+         UNION
+         SELECT po.po_id
+           FROM asn a
+           JOIN purchase_orders po
+             ON TRIM(po.pfx) = TRIM(a.po_pfx)
+            AND TRIM(po.po_number) = TRIM(a.po_no)
+            AND po.supplier_id = $3
+          WHERE TRIM(a.inv_no) = $4
+       )
+       SELECT po_id FROM cand GROUP BY po_id`,
+      [
+        invoice.grn_pfx || '',
+        invoice.grn_no || '',
+        invoice.supplier_id,
+        String(invoice.invoice_number || '').trim()
+      ]
+    )
+    // Only auto-resolve when the traversal collapses to a single PO —
+    // multiple candidates means ambiguous, leave po_id NULL.
+    if (rows.length === 1) poId = rows[0].po_id
+  }
+
+  // E004_NO_SUPPLIER — fires independent of PO resolution. Mirrors Python
+  // check_reference_data() which emits E004 alongside E002/E003 when an
+  // orphan invoice also has no resolvable supplier. Without this, every
+  // no-PO invoice missing a supplier loses the E004 signal.
+  if (invoice.supplier_id == null) {
+    errors.push('Supplier not identified — invoice has no resolvable supplier link')
+  }
 
   if (!poId) {
-    errors.push('Invoice is not linked to a PO')
+    // E002 vs E003 distinction — matches Python check_reference_data():
+    //   • Has any text reference (po_number / open_order_no) → E003 (PO
+    //     referenced but not loaded in master; usually upstream timing
+    //     issue, may arrive in a later sync).
+    //   • No reference at all → E002 (invoice never had a PO linked).
+    const textRef = invoice.po_number || invoice.open_order_no
+    if (textRef) {
+      errors.push(`PO not found: invoice references '${textRef}' but it isn't in our master`)
+    } else {
+      errors.push('Invoice is not linked to any PO or Open Order')
+    }
     return { valid: false, poAlreadyFulfilled: false, isShortfall: false, isOpenPo: false, reason: errors[0], errors, warnings: [], details }
   }
 
@@ -234,8 +353,21 @@ export async function runFullValidation(invoiceId) {
     details.header.warnings.push('Invoice date is missing')
   }
 
+  // E010_INVOICE_DATE_IN_FUTURE — sanity. A future-dated invoice shouldn't
+  // be accepted for payment.
+  if (invoice.invoice_date) {
+    const invDate = new Date(invoice.invoice_date)
+    invDate.setHours(0, 0, 0, 0)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    if (invDate.getTime() > today.getTime()) {
+      errors.push(`Invoice date ${invoice.invoice_date} is in the future`)
+    }
+  }
+
   const poRes = await pool.query(
-    `SELECT po_id, po_number, supplier_id, status, terms, pfx FROM purchase_orders WHERE po_id = $1`,
+    `SELECT po_id, po_number, supplier_id, status, terms, pfx, date AS po_date
+       FROM purchase_orders WHERE po_id = $1`,
     [poId]
   )
   if (!poRes.rows[0]) {
@@ -261,34 +393,70 @@ export async function runFullValidation(invoiceId) {
   // earlier validation cycle (status drift).
   const poStatusFulfilledBeforeCumulative = po.status === PO_STATUS.FULFILLED && !openPo
 
+  // E005_SUPPLIER_MISMATCH — matches Python check_header(): only fires when
+  // both sides have a supplier_id AND they differ. A null on either side
+  // is not E005 — missing invoice supplier is E004 (already raised), and
+  // a null po.supplier_id is a master-data gap we don't penalise the
+  // invoice for.
   const supplierMatch = invoice.supplier_id != null && po.supplier_id != null && Number(invoice.supplier_id) === Number(po.supplier_id)
   details.header.supplierMatch = supplierMatch
-  if (!supplierMatch) {
+  if (
+    invoice.supplier_id != null &&
+    po.supplier_id != null &&
+    Number(invoice.supplier_id) !== Number(po.supplier_id)
+  ) {
     errors.push('Invoice supplier does not match PO supplier')
   }
   if (invoice.po_number && po.po_number && String(invoice.po_number).trim() !== String(po.po_number).trim()) {
     details.header.warnings.push(`Invoice PO number (${invoice.po_number}) does not match PO (${po.po_number})`)
   }
 
-  const [invLinesRes, poLinesRes, cumul, asnRes, dcRes, schRes, dcSumRes, schSumRes, otherInvQtyRes] = await Promise.all([
+  // E011_INVOICE_BEFORE_PO — invoice predates PO. Either the PO was
+  // back-dated on entry or the invoice is for something not on this PO.
+  // Block until reconciled.
+  if (invoice.invoice_date && po.po_date) {
+    const invDate = new Date(invoice.invoice_date)
+    const poDate  = new Date(po.po_date)
+    if (invDate.getTime() < poDate.getTime()) {
+      errors.push(
+        `Invoice date ${String(invoice.invoice_date).slice(0, 10)} is earlier than ` +
+        `PO date ${String(po.po_date).slice(0, 10)}`
+      )
+    }
+  }
+
+  const [invLinesRes, poLinesRes, cumul, asnRes, dcRes, schRes, dcSumRes, schSumRes, otherInvQtyRes, otherInvAmtRes, thisInvoiceGrnRes, thisInvoiceSchedRes] = await Promise.all([
     pool.query(
-      `SELECT invoice_line_id, po_line_id, sequence_number, billed_qty, weight, count, rate, line_total, item_name
+      `SELECT invoice_line_id, po_line_id, sequence_number, billed_qty, weight, count, rate, line_total, item_name,
+              taxable_value, cgst_amount, sgst_amount, igst_amount,
+              cgst_9_amount, cgst_2_5_amount, sgst_9_amount, sgst_2_5_amount,
+              igst_18_amount, igst_5_amount, total_tax_amount
        FROM invoice_lines WHERE invoice_id = $1 ORDER BY sequence_number NULLS LAST, invoice_line_id`,
       [invoiceId]
     ),
     pool.query(
-      `SELECT po_line_id, sequence_number, qty, unit_cost, item_id, description1 FROM purchase_order_lines WHERE po_id = $1 ORDER BY sequence_number`,
+      `SELECT po_line_id, sequence_number, qty, unit_cost, disc_pct, item_id, description1
+         FROM purchase_order_lines WHERE po_id = $1 ORDER BY sequence_number`,
       [poId]
     ),
     getCumulativeQuantities(poId),
+    // ASN scope MUST be (inv_no = this invoice_number) AND (supplier_id =
+    // this invoice's supplier_id). The ASN export's inv_no field is just
+    // the supplier's short invoice number (e.g. "10", "118", "127") and
+    // collides across suppliers — one inv_no = "127" matches 18 ASN rows
+    // across 15 unrelated suppliers. Without the supplier filter, E052/E073
+    // over-fire ~4× (V3 dry-run: E052 146 vs Python 36; E073 211 vs 50).
+    // ASN doesn't carry supplier_id, so we filter via supplier_name match
+    // (mirrors Python context.py).
     pool.query(
       `SELECT COUNT(*)::int AS cnt,
               COALESCE(SUM(COALESCE(a.quantity, 0)), 0)::numeric AS qty_total
          FROM asn a
-         JOIN invoices inv ON TRIM(COALESCE(a.inv_no,'')) <> ''
-                          AND LOWER(TRIM(inv.invoice_number)) = LOWER(TRIM(a.inv_no))
-        WHERE inv.po_id = $1`,
-      [poId]
+         JOIN suppliers s ON LOWER(TRIM(s.supplier_name)) = LOWER(TRIM(a.supplier_name))
+        WHERE TRIM(COALESCE(a.inv_no, '')) <> ''
+          AND LOWER(TRIM(a.inv_no)) = LOWER(TRIM($1))
+          AND s.supplier_id = $2`,
+      [String(invoice.invoice_number || '').trim(), invoice.supplier_id]
     ),
     // DC Excel: ORDER NO. → ord_no + po_id when PO exists; OPEN ORDER NO. → open_order_no. TRANSACTION QTY. → dc_qty (sum).
     // Include rows linked by po_id OR by order / open-order number when po_id was null at import (same idea as schedules).
@@ -299,12 +467,26 @@ export async function runFullValidation(invoiceId) {
           OR (TRIM(COALESCE(open_order_no, '')) <> '' AND LOWER(TRIM(open_order_no)) = LOWER(TRIM($2)))`,
       [poId, po.po_number || '']
     ),
+    // Schedule presence count — match by po_id, po_number/doc_no text, OR
+    // by the invoice's own (ss_pfx, ss_no) reference. The supplier schedule
+    // export has no PO FK, so legacy data only carries ss_pfx/ss_no on the
+    // schedule row and on the invoice — matching via those is the only way
+    // to know a schedule exists. Without this branch, E074 over-fires on
+    // every legitimate scheduled shipment. Mirrors Python load_invoice_context.
     pool.query(
       `SELECT COUNT(*)::int AS c FROM po_schedules
        WHERE po_id = $1
           OR (COALESCE(po_number, '') <> '' AND LOWER(TRIM(po_number)) = LOWER(TRIM($2)))
-          OR (COALESCE(doc_no, '') <> '' AND LOWER(TRIM(doc_no)) = LOWER(TRIM($2)))`,
-      [poId, po.po_number || '']
+          OR (COALESCE(doc_no, '') <> '' AND LOWER(TRIM(doc_no)) = LOWER(TRIM($2)))
+          OR ($3 <> '' AND $4 <> ''
+              AND LOWER(TRIM(COALESCE(ss_pfx, ''))) = LOWER($3)
+              AND LOWER(TRIM(COALESCE(ss_no,  ''))) = LOWER($4))`,
+      [
+        poId,
+        po.po_number || '',
+        String(invoice.ss_pfx || '').trim(),
+        String(invoice.ss_no || '').trim(),
+      ]
     ),
     pool.query(
       `SELECT COALESCE(SUM(dc_qty), 0)::numeric AS total FROM delivery_challans
@@ -323,14 +505,55 @@ export async function runFullValidation(invoiceId) {
     // Sum of billed_qty across OTHER invoices for the same PO — used to
     // tell apart "PO genuinely consumed by another invoice" from "PO is
     // marked fulfilled because this invoice's earlier validation drifted
-    // the status".
+    // the status". Also sums OTHER invoices' total_amount for the E061
+    // cumulative-amount check.
     pool.query(
       `SELECT COALESCE(SUM(il.billed_qty), 0)::numeric AS qty
          FROM invoice_lines il
          JOIN invoices i2 ON i2.invoice_id = il.invoice_id
         WHERE i2.po_id = $1 AND i2.invoice_id <> $2`,
       [poId, invoiceId]
-    )
+    ),
+    // Sum of pre-tax (taxable_value) across OTHER invoices on this PO.
+    // The previous version summed total_amount and applied a 0.85 heuristic
+    // to back into pre-tax, which over-estimates spend when sibling invoices
+    // have inflated total_amount with missing taxable_value (a real data
+    // quality pattern in this DB — 15 of 47 E061 hits were false positives
+    // for that reason, blocking ~10 invoices that should validate).
+    // Reading taxable_value directly removes the heuristic.
+    pool.query(
+      `SELECT COALESCE(SUM(COALESCE(il.taxable_value, 0)), 0)::numeric AS amt
+         FROM invoices i2
+         JOIN invoice_lines il ON il.invoice_id = i2.invoice_id
+        WHERE i2.po_id = $1 AND i2.invoice_id <> $2`,
+      [poId, invoiceId]
+    ),
+    // GRN qty scoped to THIS invoice (matched via supplier_doc_no).
+    // Without this scoping, E071 compares this invoice's qty against the
+    // cumulative GRN total for the whole open PO (often huge sum across
+    // many invoices), producing spurious mismatches on every shipment.
+    // Mirrors Python's `this_invoice_grn_accepted_qty_total` in context.py.
+    pool.query(
+      `SELECT COALESCE(SUM(grn_qty), 0)::numeric AS q,
+              COALESCE(SUM(COALESCE(accepted_qty, grn_qty, 0)), 0)::numeric AS aq
+         FROM grn
+        WHERE po_id = $1
+          AND TRIM(COALESCE(supplier_doc_no, '')) <> ''
+          AND LOWER(TRIM(supplier_doc_no)) = LOWER(TRIM($2))`,
+      [poId, String(invoice.invoice_number || '')]
+    ),
+    // Schedule qty scoped to THIS invoice (matched via ss_pfx + ss_no).
+    // Cumulative schedule_qty_total across the whole open PO is also
+    // not comparable to a single invoice's qty (same bug class as E071).
+    invoice.ss_pfx && invoice.ss_no
+      ? pool.query(
+          `SELECT COALESCE(SUM(sched_qty), 0)::numeric AS q
+             FROM po_schedules
+            WHERE LOWER(TRIM(COALESCE(ss_pfx, ''))) = LOWER($1)
+              AND LOWER(TRIM(COALESCE(ss_no,  ''))) = LOWER($2)`,
+          [String(invoice.ss_pfx || '').trim(), String(invoice.ss_no || '').trim()]
+        )
+      : Promise.resolve({ rows: [{ q: 0 }] })
   ])
 
   const invLines = invLinesRes.rows
@@ -430,47 +653,146 @@ export async function runFullValidation(invoiceId) {
       } else {
         lineResult.errors.push('No matching PO line (by po_line_id, sequence, item text, or same line count as PO)')
       }
-    } else if (openPo) {
-      lineResult.quantityMatch = null
-      if (invRate != null && lineResult.poRate != null) {
-        const rateMatch = Math.abs(invRate - lineResult.poRate) <= TOL_AMOUNT || (lineResult.poRate !== 0 && Math.abs((invRate - lineResult.poRate) / lineResult.poRate) <= TOL_RATE_PCT)
-        lineResult.rateMatch = rateMatch
-        if (!rateMatch) {
-          lineResult.warnings.push(`Line rate (${invRate}) differs from PO unit cost (${lineResult.poRate})`)
-        }
-      }
-      if (invTotal != null && invQty != null && invRate != null) {
-        const expected = invQty * invRate
-        lineResult.lineTotalMatch = Math.abs(invTotal - expected) <= TOL_AMOUNT
-        if (!lineResult.lineTotalMatch) {
-          lineResult.warnings.push(`Line total (${invTotal}) does not match qty × rate (${expected.toFixed(2)})`)
-        }
-      }
     } else {
-      const qtyMatch = invQty != null && lineResult.poQty != null && Math.abs(invQty - lineResult.poQty) <= TOL_QTY
-      lineResult.quantityMatch = qtyMatch
-      if (!qtyMatch && invQty != null && lineResult.poQty != null) {
-        if (invQty > lineResult.poQty + TOL_QTY) {
-          lineResult.errors.push(`Line quantity (${invQty}) exceeds PO line qty (${lineResult.poQty})`)
+      // Compute effective PO rate (after contracted discount). Mirrors
+      // Python check_lines_and_resolution(): discount comes from
+      // purchase_order_lines.disc_pct.
+      const poDiscPct = poLine.disc_pct != null ? parseFloat(poLine.disc_pct) : 0
+      const effectivePoRate = lineResult.poRate != null
+        ? lineResult.poRate * (1 - poDiscPct / 100)
+        : null
+
+      if (openPo) {
+        lineResult.quantityMatch = null
+      } else {
+        const qtyMatch = invQty != null && lineResult.poQty != null && Math.abs(invQty - lineResult.poQty) <= TOL_QTY
+        lineResult.quantityMatch = qtyMatch
+        if (!qtyMatch && invQty != null && lineResult.poQty != null) {
+          if (invQty > lineResult.poQty + TOL_QTY) {
+            // E021_LINE_QTY_OVER_PO
+            lineResult.errors.push(`Line quantity (${invQty}) exceeds PO line qty (${lineResult.poQty})`)
+          } else {
+            // W020 — under PO qty is a warning, not blocking (matches Python)
+            lineResult.warnings.push(`Line quantity (${invQty}) differs from PO line qty (${lineResult.poQty})`)
+          }
+        }
+      }
+
+      // E022_LINE_RATE_MISMATCH — invoice rate vs effective PO rate (with
+      // discount applied). ERROR for standard PO, WARNING for Open PO
+      // (rate is advisory on blanket agreements). Matches Python.
+      if (invRate != null && effectivePoRate != null && effectivePoRate > 0) {
+        const driftAbs = Math.abs(invRate - effectivePoRate)
+        const driftRel = driftAbs / effectivePoRate
+        const rateOk = driftAbs <= TOL_AMOUNT || driftRel <= TOL_RATE_PCT
+        lineResult.rateMatch = rateOk
+        if (!rateOk) {
+          const msg =
+            `Line ${i + 1} rate (${invRate}) differs from PO effective rate ` +
+            `(${effectivePoRate.toFixed(4)}; unit_cost ${lineResult.poRate} with ${poDiscPct}% disc)`
+          if (openPo) {
+            lineResult.warnings.push(msg)
+          } else {
+            lineResult.errors.push(msg)
+          }
+        }
+      }
+
+      // E023_LINE_PRICE_MISMATCH — pre-tax assessable_value vs qty ×
+      // effective_rate. Skipped for Open POs (price determined at receipt).
+      // Mirrors Python check_lines_and_resolution() line-price block.
+      const lineAssbl = il.taxable_value != null ? parseFloat(il.taxable_value) : 0
+      if (!openPo && invQty != null && effectivePoRate != null && effectivePoRate > 0 && lineAssbl > 0) {
+        const expectedAssbl = invQty * effectivePoRate
+        const drift = Math.abs(lineAssbl - expectedAssbl)
+        // Python allows 0.01 absolute OR 0.1% relative drift.
+        if (drift > TOL_AMOUNT && drift > expectedAssbl * 0.001) {
+          lineResult.lineTotalMatch = false
+          lineResult.errors.push(
+            `Line ${i + 1} assessable_value (${lineAssbl}) does not match ` +
+            `qty (${invQty}) × PO effective rate (${effectivePoRate.toFixed(4)}) = ${expectedAssbl.toFixed(2)}`
+          )
         } else {
-          lineResult.warnings.push(`Line quantity (${invQty}) differs from PO line qty (${lineResult.poQty})`)
-        }
-      }
-      if (invRate != null && lineResult.poRate != null) {
-        const rateMatch = Math.abs(invRate - lineResult.poRate) <= TOL_AMOUNT || (lineResult.poRate !== 0 && Math.abs((invRate - lineResult.poRate) / lineResult.poRate) <= TOL_RATE_PCT)
-        lineResult.rateMatch = rateMatch
-        if (!rateMatch) {
-          lineResult.warnings.push(`Line rate (${invRate}) differs from PO unit cost (${lineResult.poRate})`)
-        }
-      }
-      if (invTotal != null && invQty != null && invRate != null) {
-        const expected = invQty * invRate
-        lineResult.lineTotalMatch = Math.abs(invTotal - expected) <= TOL_AMOUNT
-        if (!lineResult.lineTotalMatch) {
-          lineResult.warnings.push(`Line total (${invTotal}) does not match qty × rate (${expected.toFixed(2)})`)
+          lineResult.lineTotalMatch = true
         }
       }
     }
+
+    // GST self-consistency at the line level. Mirrors Python check_gst()
+    // in email_automation/validation/checks.py.
+    const cgstAmt = il.cgst_amount != null ? parseFloat(il.cgst_amount) : 0
+    const sgstAmt = il.sgst_amount != null ? parseFloat(il.sgst_amount) : 0
+    const igstAmt = il.igst_amount != null ? parseFloat(il.igst_amount) : 0
+
+    // E030/E031/E032 — slab sum mismatch. Only run when slab columns are
+    // populated (the bill-register Excel carries them; OCR-loaded rows
+    // don't — for those we silently skip, which matches Python).
+    const hasCgstSlabs = il.cgst_9_amount != null || il.cgst_2_5_amount != null
+    const hasSgstSlabs = il.sgst_9_amount != null || il.sgst_2_5_amount != null
+    const hasIgstSlabs = il.igst_18_amount != null || il.igst_5_amount != null
+    const cgstSlabSum = (il.cgst_9_amount != null ? parseFloat(il.cgst_9_amount) : 0)
+                      + (il.cgst_2_5_amount != null ? parseFloat(il.cgst_2_5_amount) : 0)
+    const sgstSlabSum = (il.sgst_9_amount != null ? parseFloat(il.sgst_9_amount) : 0)
+                      + (il.sgst_2_5_amount != null ? parseFloat(il.sgst_2_5_amount) : 0)
+    const igstSlabSum = (il.igst_18_amount != null ? parseFloat(il.igst_18_amount) : 0)
+                      + (il.igst_5_amount != null ? parseFloat(il.igst_5_amount) : 0)
+    if (hasCgstSlabs && cgstAmt > 0 && Math.abs(cgstSlabSum - cgstAmt) > TOL_AMOUNT) {
+      lineResult.errors.push(
+        `Line ${i + 1}: CGST slab sum (${cgstSlabSum.toFixed(2)}) does not match cgst_amount (${cgstAmt})`
+      )
+    }
+    if (hasSgstSlabs && sgstAmt > 0 && Math.abs(sgstSlabSum - sgstAmt) > TOL_AMOUNT) {
+      lineResult.errors.push(
+        `Line ${i + 1}: SGST slab sum (${sgstSlabSum.toFixed(2)}) does not match sgst_amount (${sgstAmt})`
+      )
+    }
+    if (hasIgstSlabs && igstAmt > 0 && Math.abs(igstSlabSum - igstAmt) > TOL_AMOUNT) {
+      lineResult.errors.push(
+        `Line ${i + 1}: IGST slab sum (${igstSlabSum.toFixed(2)}) does not match igst_amount (${igstAmt})`
+      )
+    }
+
+    // E033_CGST_SGST_NOT_EQUAL — Indian GST rule: when both CGST and SGST
+    // are charged on a line, they must be equal.
+    if (cgstAmt > 0 && sgstAmt > 0 && Math.abs(cgstAmt - sgstAmt) > TOL_AMOUNT) {
+      lineResult.errors.push(
+        `Line ${i + 1}: CGST (${cgstAmt}) and SGST (${sgstAmt}) must be equal under intra-state GST rules`
+      )
+    }
+
+    // E034/E035 — intra-state vs inter-state mismatch. Compares the
+    // invoice's place_of_supply against the supplier's state_code.
+    //
+    // Supplier state is derived from (mirrors Python load_invoice_context):
+    //   1. The invoice's own GSTIN (first 2 digits) — the authoritative
+    //      source for this particular transaction. Multi-state suppliers
+    //      commonly bill from a different state than the one on the master
+    //      record (e.g. PLASMATEK has Karnataka in master 29… but bills
+    //      from TN 33…), so the master state would mis-fire E034/E035 on
+    //      every invoice from that secondary registration.
+    //   2. suppliers.state_code (master).
+    //   3. suppliers.gst_number first 2 digits (final fallback).
+    const pos = (invoice.place_of_supply || '').toString().trim()
+    const supState = (
+      stateCodeFromGstin(invoice.invoice_gstin) ||
+      (invoice.supplier_state_code || '').toString().trim() ||
+      stateCodeFromGstin(invoice.supplier_gst_number) ||
+      ''
+    )
+    const intraState = pos !== '' && supState !== '' && pos === supState
+    if (intraState && igstAmt > 0) {
+      lineResult.errors.push(
+        `Line ${i + 1}: place_of_supply (${pos}) equals supplier state (${supState}) → intra-state, ` +
+        `but charged IGST ${igstAmt}. Supplier must re-issue with CGST + SGST.`
+      )
+    }
+    if (!intraState && pos !== '' && supState !== '' && (cgstAmt > 0 || sgstAmt > 0)) {
+      lineResult.errors.push(
+        `Line ${i + 1}: place_of_supply (${pos}) differs from supplier state (${supState}) → inter-state, ` +
+        `but charged CGST/SGST. Supplier must re-issue with IGST.`
+      )
+    }
+
     details.lines.push(lineResult)
   }
 
@@ -487,12 +809,26 @@ export async function runFullValidation(invoiceId) {
   if (!openPo) {
     if (!invMatchesPo) {
       if (thisInvQty < poQty - TOL_QTY) {
-        details.totals.errors.push(`Invoice total quantity (${thisInvQty}) is less than PO total (${poQty})`)
+        // Partial billing is a normal workflow — one PO can be split
+        // across multiple invoices (delivery in batches, partial
+        // shipments). The invoice validates for what it bills; the PO
+        // is correctly marked `partially_fulfilled` by
+        // applyStandardValidation. Only emit a warning so finance can
+        // still see the PO is under-billed cumulatively, but don't
+        // block payment for legitimate partial deliveries.
+        const cumulativeQtyForE041 = thisInvQty + otherInvQty
+        if (cumulativeQtyForE041 < poQty - TOL_QTY) {
+          details.totals.warnings.push(
+            `Partial billing: invoice qty (${thisInvQty}) is less than PO total (${poQty}); ` +
+            `cumulative across all invoices on this PO (${cumulativeQtyForE041}) still under PO total — PO will be marked partially_fulfilled.`
+          )
+        }
       } else if (thisInvQty > poQty + TOL_QTY) {
+        // E040 — over-billing on a single invoice is a real error.
         details.totals.errors.push(`Invoice total quantity (${thisInvQty}) exceeds PO total (${poQty})`)
-      } else {
-        details.totals.errors.push(`Invoice quantity (${thisInvQty}) does not match PO total (${poQty})`)
       }
+      // The exact-match-with-rounding-noise case (within TOL_QTY) is
+      // implicitly handled by `invMatchesPo` being true.
     }
     // Standard PO: GRN must exist (E051). The previous check only fired when
     // GRN existed but was short — it silently passed when GRN was missing
@@ -521,38 +857,102 @@ export async function runFullValidation(invoiceId) {
   // for standard PO is intentionally removed — ASN is optional per finance
   // policy, and we no longer surface absence as a flag.
 
-  if (openPo) {
-    if (grnQty <= TOL_QTY) {
-      errors.push('Open PO: GRN with quantity is required for this purchase order.')
-    } else if (!invMatchesGrnQty) {
-      details.grn.errors.push(
-        `Open PO: invoice quantity (${thisInvQty}) must match GRN total (${grnQty}).`
+  // E042_HEADER_AMOUNT_OVER_PO + E060/E061 cumulative checks.
+  //
+  // Cumulative qty / amount across all invoices on this PO (this + others)
+  // must not exceed PO limits. Open POs are exempted because they have no
+  // fixed qty/value ceiling. Mirrors Python check_cumulative() in
+  // email_automation/validation/checks.py.
+  if (!openPo) {
+    const otherInvAmt = parseFloat(otherInvAmtRes.rows[0]?.amt ?? 0)
+    const thisInvPreTax = invLines.reduce(
+      (acc, ln) => acc + (ln.taxable_value != null ? parseFloat(ln.taxable_value) : 0),
+      0
+    )
+    const poValueComputed = poLines.reduce((sum, l) => {
+      const q = l.qty != null ? parseFloat(l.qty) : 0
+      const r = l.unit_cost != null ? parseFloat(l.unit_cost) : 0
+      const d = l.disc_pct != null ? parseFloat(l.disc_pct) : 0
+      return sum + q * r * (1 - d / 100)
+    }, 0)
+
+    // E042 — this invoice's pre-tax total alone exceeds the PO computed
+    // value. Hard block; supplier needs to issue a corrected invoice.
+    if (poValueComputed > 0 && thisInvPreTax > poValueComputed + TOL_AMOUNT) {
+      details.totals.errors.push(
+        `Invoice pre-tax total (${thisInvPreTax.toFixed(2)}) exceeds PO value (${poValueComputed.toFixed(2)})`
       )
     }
-    // Open PO: ASN is now optional. Validate qty match only when ASN exists.
+
+    const cumulativeQty = otherInvQty + thisInvQty
+    if (poQty > 0 && cumulativeQty > poQty + TOL_QTY) {
+      details.totals.errors.push(
+        `Cumulative invoiced qty (${cumulativeQty.toFixed(2)}) exceeds PO qty (${poQty.toFixed(2)})`
+      )
+    }
+
+    // Cumulative pre-tax check using real Σ(taxable_value) of sibling
+    // invoices. The previous 0.85 heuristic on total_amount over-estimated
+    // sibling spend whenever sibling invoices had inflated total_amount
+    // with missing taxable_value, blocking 10+ invoices that legitimately
+    // fit inside the PO budget.
+    if (poValueComputed > 0) {
+      const remainingBudget = poValueComputed - otherInvAmt
+      if (remainingBudget > 0 && thisInvPreTax > remainingBudget + TOL_AMOUNT) {
+        details.totals.errors.push(
+          `Cumulative pre-tax invoiced amount exceeds PO value ` +
+          `(this invoice pre-tax=${thisInvPreTax.toFixed(2)}, remaining budget=${remainingBudget.toFixed(2)})`
+        )
+      }
+    }
+  }
+
+  if (openPo) {
+    // Use the THIS-invoice-scoped GRN total. The cumulative grnQty above
+    // spans every invoice ever drawn against this open PO — comparing it
+    // to a single invoice's qty produces spurious mismatches (this was
+    // the original E071 bug Python already fixed). Match supplier_doc_no
+    // = invoice_number to scope.
+    const thisInvGrnAcceptedQty = parseFloat(thisInvoiceGrnRes.rows[0]?.aq ?? 0)
+    if (thisInvGrnAcceptedQty <= TOL_QTY) {
+      errors.push('Open PO: GRN with quantity is required for this invoice.')   // E070
+    } else if (Math.abs(thisInvQty - thisInvGrnAcceptedQty) > TOL_QTY) {
+      details.grn.errors.push(                                                    // E071
+        `Open PO: invoice quantity (${thisInvQty}) must match GRN total for this invoice (${thisInvGrnAcceptedQty}).`
+      )
+    }
+    // Open PO: ASN is optional. Validate qty match only when ASN exists.
     if (details.asn.asnCount > 0 && asnQty > TOL_QTY && Math.abs(thisInvQty - asnQty) > TOL_QTY) {
       details.asn.errors = details.asn.errors || []
-      details.asn.errors.push(
+      details.asn.errors.push(                                                    // E073
         `Open PO: invoice quantity (${thisInvQty}) must match ASN total (${asnQty}).`
       )
     }
     if (dcCount === 0 && scheduleCount === 0) {
-      errors.push('Open PO: at least one Delivery Challan or Schedule record must exist for this purchase order.')
+      errors.push('Open PO: at least one Delivery Challan or Schedule record must exist for this purchase order.')   // E074
     }
     if (dcCount > 0 && sumDcQty > TOL_QTY && Math.abs(thisInvQty - sumDcQty) > TOL_QTY) {
-      errors.push(
+      errors.push(                                                                // E075
         `Open PO: invoice quantity (${thisInvQty}) must match Delivery Challan total (${sumDcQty}).`
       )
     }
-    if (scheduleCount > 0 && sumSchedQty > TOL_QTY && Math.abs(thisInvQty - sumSchedQty) > TOL_QTY) {
+    // E076 — Schedule qty mismatch. Scope to THIS invoice's (ss_pfx, ss_no)
+    // not the cumulative schedule total (same bug class as E071).
+    const thisInvSchedQty = parseFloat(thisInvoiceSchedRes.rows[0]?.q ?? 0)
+    if (scheduleCount > 0 && thisInvSchedQty > TOL_QTY && Math.abs(thisInvQty - thisInvSchedQty) > TOL_QTY) {
       errors.push(
-        `Open PO: invoice quantity (${thisInvQty}) must match Schedule total (${sumSchedQty}).`
+        `Open PO: invoice quantity (${thisInvQty}) must match Schedule total for this invoice (${thisInvSchedQty}).`
       )
     }
   }
 
   const allLineErrors = details.lines.flatMap(l => l.errors)
-  const totalErrors = [...details.totals.errors, ...details.grn.errors, ...allLineErrors]
+  // details.asn.errors holds E052 (Standard PO ASN qty mismatch) and E073
+  // (Open PO ASN qty mismatch). Without this aggregation those rules fire
+  // inside the engine but never surface to the caller, so the Reconciliation
+  // page and dry-run script both see 0 — even though Python finds 36 / 50.
+  const allAsnErrors = Array.isArray(details.asn.errors) ? details.asn.errors : []
+  const totalErrors = [...details.totals.errors, ...details.grn.errors, ...allLineErrors, ...allAsnErrors]
   if (errors.length > 0) {
     totalErrors.unshift(...errors)
   }
@@ -728,7 +1128,7 @@ export async function applyOpenPoValidation (client, invoiceId) {
     [INVOICE_STATUS.VALIDATED, paymentDueDate, invoiceId]
   )
   await client.query(
-    `UPDATE purchase_orders SET status = $1, updated_at = NOW() WHERE po_id = $2`,
+    `UPDATE purchase_orders SET status = $1 WHERE po_id = $2`,
     [PO_STATUS.OPEN, po_id]
   )
   return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate, poStatus: PO_STATUS.OPEN, openPo: true }
@@ -837,6 +1237,67 @@ export async function exceptionApprove(client, invoiceId) {
 }
 
 /**
+ * Admin override approval — manually mark an invoice `validated` despite
+ * unresolved validation errors. Used from the Needs Attention page when
+ * the user has reviewed the blockers (rate/qty/supplier mismatches etc.)
+ * and accepts them as legitimate. Sets payment_due_date from PO terms
+ * exactly like a normal validation, so the invoice flows straight into
+ * the approval queue.
+ *
+ * No engine call — we trust the human override. The validation_errors
+ * JSONB is preserved as-is for audit, but `manual_override_at` /
+ * `manual_override_by` columns (auto-created on first call) record who
+ * unstuck the invoice.
+ */
+export async function adminOverrideApprove(client, invoiceId, actor) {
+  const inv = await client.query(
+    `SELECT po_id, invoice_date FROM invoices WHERE invoice_id = $1`,
+    [invoiceId]
+  )
+  if (!inv.rows[0]) throw new Error('Invoice not found')
+  const { po_id, invoice_date } = inv.rows[0]
+  const po = await getPoForInvoice(po_id)
+  const termsDays = po?.payment_terms_days ?? 30
+  let paymentDueDate = null
+  if (invoice_date) {
+    const d = new Date(invoice_date)
+    d.setDate(d.getDate() + termsDays)
+    paymentDueDate = d.toISOString().slice(0, 10)
+  }
+  // Auto-create the override columns on first call so installs don't
+  // need a separate migration step (same idiom as validation_errors).
+  try {
+    await client.query(`
+      ALTER TABLE invoices
+        ADD COLUMN IF NOT EXISTS manual_override_at  TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS manual_override_by  TEXT,
+        ADD COLUMN IF NOT EXISTS manual_override_note TEXT
+    `)
+  } catch (err) {
+    // Non-fatal — column add may fail under stricter perms; the UPDATE
+    // below will surface the real error if columns truly aren't there.
+  }
+  await client.query(
+    `UPDATE invoices
+        SET status = $1,
+            payment_due_date = $2,
+            manual_override_at = NOW(),
+            manual_override_by = $3,
+            manual_override_note = $4,
+            updated_at = NOW()
+      WHERE invoice_id = $5`,
+    [
+      INVOICE_STATUS.VALIDATED,
+      paymentDueDate,
+      actor?.label || null,
+      actor?.note  || null,
+      invoiceId,
+    ]
+  )
+  return { invoiceStatus: INVOICE_STATUS.VALIDATED, paymentDueDate }
+}
+
+/**
  * Force close PO: set status to fulfilled (for partially_fulfilled POs).
  * Open PO cannot be force-closed; status must remain open.
  */
@@ -857,11 +1318,118 @@ export async function forceClosePo(client, poId) {
 /**
  * Run validation for an invoice and apply status updates (standard, shortfall, or exception).
  */
+/**
+ * Map a plain-string validation error to a short rule code (E001…E076).
+ *
+ * The engine pushes free-text errors like `'Invoice supplier does not match
+ * PO supplier'`, but the Reconciliation page aggregates by short rule
+ * code — so we have to bridge the two here. Order matters: more specific
+ * patterns first.
+ */
+function classifyErrorToCode(msg) {
+  if (!msg) return null
+  const s = String(msg).toLowerCase()
+  // ---- Open-PO specific (must come before generic GRN/PO checks) ----
+  // E070 must precede E071 because the E070 message ("GRN with quantity is
+  // required") contains the word "quantity" and would otherwise be
+  // misclassified as E071. Anchor E070 on the unique word "required".
+  if (s.startsWith('open po') && s.includes('grn') && s.includes('required'))             return 'E070'
+  if (s.startsWith('open po') && s.includes('grn') && s.includes('quantity'))             return 'E071'
+  if (s.startsWith('open po') && s.includes('grn'))                                        return 'E070'
+  if (s.startsWith('open po') && s.includes('asn'))                                        return 'E073'
+  if (s.startsWith('open po') && s.includes('challan') && s.includes('schedule'))         return 'E074'
+  if (s.startsWith('open po') && s.includes('challan'))                                   return 'E075'
+  if (s.startsWith('open po') && s.includes('schedule'))                                  return 'E076'
+  // ---- Cumulative (must come before generic header checks) ----
+  if (s.includes('cumulative') && s.includes('qty'))                                      return 'E060'
+  if (s.includes('cumulative') && (s.includes('amount') || s.includes('pre-tax')))        return 'E061'
+  // ---- Header / reference ----
+  if (s.includes('invoice number') && s.includes('missing'))                              return 'E001'
+  // E003 takes precedence over E002: invoices referencing a PO that
+  // doesn't exist in master use the "po not found" wording with a text
+  // reference; truly-no-PO invoices use "not linked to any PO or Open Order".
+  if (s.includes('po not found') || s.startsWith('po not found'))                         return 'E003'
+  if (s.includes('not linked to any po') || s.includes('not linked to a po'))             return 'E002'
+  if (s.includes('supplier not identified') || s.includes('no resolvable supplier'))      return 'E004'
+  if (s.includes('supplier does not match'))                                              return 'E005'
+  if (s.includes('po already fulfilled') || s.includes('po is fulfilled'))                return 'E006'
+  // ---- Date ----
+  if (s.includes('invoice date') && s.includes('future'))                                 return 'E010'
+  if (s.includes('invoice date') && s.includes('earlier than') && s.includes('po date'))  return 'E011'
+  // ---- Line ----
+  if (s.includes('no matching po line'))                                                  return 'E020'
+  if (s.includes('line') && s.includes('quantity') && s.includes('exceeds'))              return 'E021'
+  // E023 must be checked BEFORE E022 because "assessable_value … qty × PO
+  // effective rate" contains the word "rate" and would otherwise be
+  // misclassified as E022.
+  if (s.includes('assessable_value'))                                                     return 'E023'
+  if (s.includes('line total') && s.includes('does not match'))                           return 'E023'
+  if (s.includes('line') && s.includes('rate'))                                           return 'E022'
+  // ---- GST ----
+  if (s.includes('cgst slab sum'))                                                        return 'E030'
+  if (s.includes('sgst slab sum'))                                                        return 'E031'
+  if (s.includes('igst slab sum'))                                                        return 'E032'
+  if (s.includes('cgst') && s.includes('sgst') && s.includes('must be equal'))            return 'E033'
+  if (s.includes('intra-state') && s.includes('igst'))                                    return 'E034'
+  if (s.includes('inter-state') && (s.includes('cgst') || s.includes('sgst')))            return 'E035'
+  // ---- Header totals ----
+  if (s.includes('invoice total quantity') && s.includes('exceeds'))                      return 'E040'
+  if (s.includes('invoice total quantity') && (s.includes('less than') || s.includes('does not match'))) return 'E041'
+  if (s.includes('invoice total') && s.includes('exceeds') && s.includes('po'))           return 'E042'
+  if (s.includes('invoice pre-tax total') && s.includes('exceeds') && s.includes('po'))   return 'E042'
+  if (s.includes('sum of line totals'))                                                   return 'E042'
+  // ---- GRN ----
+  if (s.includes('grn') && (s.includes('shortfall') || s.includes('less than')))          return 'E050'
+  if (s.includes('grn') && s.includes('required'))                                        return 'E051'
+  // E052: Standard PO ASN qty mismatch. Distinct from E073 (Open PO + ASN)
+  // by the "standard po" prefix. Matches the message emitted in
+  // runFullValidation's standard-PO branch.
+  if (s.startsWith('standard po') && s.includes('asn') && s.includes('does not match'))   return 'E052'
+  return null
+}
+
+/**
+ * Persist a flattened `{errors, warnings}` payload into
+ * `invoices.validation_errors` (JSONB) so the Reconciliation page can
+ * aggregate by rule code without re-running the engine.
+ *
+ * The column is auto-created on first write — keeps deployments
+ * migration-free for installs that haven't applied the optional
+ * `migration_validation_errors_column.sql`.
+ */
+async function persistValidationResults(client, invoiceId, errors, warnings) {
+  // Auto-create the column once per process. Idempotent.
+  try {
+    await client.query(
+      `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS validation_errors JSONB`
+    )
+  } catch (err) {
+    console.warn('persistValidationResults: ADD COLUMN failed (non-fatal):', err.message)
+  }
+  const payload = {
+    errors: (errors || []).map((m) => ({ code: classifyErrorToCode(m) || 'EXXX', message: m })),
+    warnings: (warnings || []).map((m) => ({ code: classifyErrorToCode(m) || 'EXXX', message: m })),
+    computed_at: new Date().toISOString()
+  }
+  try {
+    await client.query(
+      `UPDATE invoices SET validation_errors = $1::jsonb WHERE invoice_id = $2`,
+      [JSON.stringify(payload), invoiceId]
+    )
+  } catch (err) {
+    console.warn('persistValidationResults: UPDATE failed (non-fatal):', err.message)
+  }
+}
+
 export async function validateAndUpdateInvoiceStatus(invoiceId) {
   const result = await validateInvoiceAgainstPoGrn(invoiceId)
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    // Persist whatever the engine produced so the Reconciliation page can
+    // aggregate by rule code without re-running validation. Runs inside
+    // the same txn as the status update so the two never drift.
+    await persistValidationResults(client, invoiceId, result.errors, result.warnings)
     if (result.poAlreadyFulfilled) {
       await client.query(
         `UPDATE invoices SET status = $1, updated_at = NOW() WHERE invoice_id = $2`,
@@ -895,6 +1463,28 @@ export async function validateAndUpdateInvoiceStatus(invoiceId) {
       await client.query('COMMIT')
       return { action: 'validated', ...applied }
     }
+
+    // Any other invalid outcome (errors present but not classified as
+    // shortfall / fulfilled / open-PO failure) — e.g. E001/E002/E003/E004
+    // /E010/E011/E022/E033/E034/E060 etc. — demote the invoice to
+    // waiting_for_re_validation. Previously the function fell through with
+    // `action: 'none'`, which left previously-validated invoices stuck on
+    // the wrong status when a new rule caught them on re-run.
+    if (Array.isArray(result.errors) && result.errors.length > 0) {
+      await client.query(
+        `UPDATE invoices SET status = $1, payment_due_date = NULL, updated_at = NOW() WHERE invoice_id = $2`,
+        [INVOICE_STATUS.WAITING_FOR_RE_VALIDATION, invoiceId]
+      )
+      await client.query('COMMIT')
+      return {
+        action: 'errors',
+        invoiceStatus: INVOICE_STATUS.WAITING_FOR_RE_VALIDATION,
+        reason: result.reason || result.errors[0],
+        errors: result.errors,
+        warnings: result.warnings
+      }
+    }
+
     await client.query('ROLLBACK')
     return { action: 'none', reason: result.reason }
   } catch (e) {

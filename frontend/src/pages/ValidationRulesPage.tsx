@@ -1,7 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import PageHero from '../components/PageHero'
-import KPICard from '../components/KPICard'
-import StatusChip from '../components/StatusChip'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { useConfirm } from '../contexts/ConfirmContext'
@@ -32,8 +29,8 @@ interface Rule {
   active: boolean
 }
 
-const SEVERITY_VARIANT: Record<Severity, 'danger' | 'warn' | 'info'> = {
-  error:   'danger',
+const SEVERITY_CHIP: Record<Severity, 'err' | 'warn' | 'info'> = {
+  error:   'err',
   warning: 'warn',
   info:    'info'
 }
@@ -52,6 +49,7 @@ function ValidationRulesPage() {
   const [search, setSearch] = useState('')
   const [severityFilter, setSeverityFilter] = useState<Severity | 'all'>('all')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [revalidating, setRevalidating] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -122,119 +120,180 @@ function ValidationRulesPage() {
     }
   }
 
+  async function revalidateAllPending() {
+    const ok = await confirmDialog({
+      title: 'Re-run validation on all pending invoices?',
+      body: 'After a rule change, existing pending invoices keep their cached mismatches. This re-runs the engine against every invoice currently in waiting_for_validation, waiting_for_re_validation, exception_approval, or debit_note_approval. Can take a minute on large datasets.',
+      icon: 'pi-refresh',
+      kind: 'warn',
+      okLabel: 'Re-validate all'
+    })
+    if (!ok) return
+    setRevalidating(true)
+    try {
+      const res = await apiFetch('validation-rules/revalidate-all-pending', { method: 'POST' })
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Re-validation failed'))
+      const body = await res.json()
+      toast.success(
+        'Re-validation complete',
+        `${body.succeeded.toLocaleString('en-IN')} ok · ${body.failed.toLocaleString('en-IN')} failed (of ${body.total.toLocaleString('en-IN')} pending)`
+      )
+    } catch (err) {
+      toast.danger('Re-validation failed', getDisplayError(err))
+    } finally {
+      setRevalidating(false)
+    }
+  }
+
+  function exportCsv() {
+    const rows = rules.map((r) => ({
+      code: r.code, name: r.name, severity: SEVERITY_LABEL[r.severity],
+      category: r.category, owner: r.owner, count: r.count,
+      active: r.active ? 'yes' : 'muted'
+    }))
+    if (rows.length === 0) return
+    const csv = [
+      Object.keys(rows[0]).join(','),
+      ...rows.map((row) => Object.values(row).map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    ].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `validation-rules-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <>
-      <PageHero
-        eyebrow="Validation rules"
-        eyebrowIcon="pi-shield"
-        title="Validation rules"
-        subtitle="Every check the engine runs against incoming invoices, with current count, owner, and severity. Mute a rule temporarily by toggling it off."
-      />
+      {/* Hero — verbatim from mockup VIEWS.rules */}
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-shield" /> System</span>
+          <h1>Validation rules</h1>
+          <p>Every check the engine runs, with what it does, why it fires, who owns the fix, and current count. Adjust severity or temporarily mute a rule from here.</p>
+        </div>
+        <div className="hero__act">
+          <button className="btn btn--g" onClick={exportCsv}>
+            <i className="pi pi-download" /> Export catalogue
+          </button>
+          <button
+            className="btn btn--g"
+            onClick={revalidateAllPending}
+            disabled={revalidating}
+            title="Re-run the validation engine on every currently-pending invoice. Use this after toggling a rule."
+          >
+            {revalidating
+              ? <><i className="pi pi-spin pi-spinner" /> Re-validating…</>
+              : <><i className="pi pi-refresh" /> Re-validate pending</>}
+          </button>
+          <button
+            className="btn btn--p"
+            onClick={() => toast.info('Coming next', 'Custom rules will land with /api/validation-rules POST.')}
+          >
+            <i className="pi pi-plus" /> New rule
+          </button>
+        </div>
+      </section>
 
-      <div className="grid-kpis" style={{ marginBottom: 'var(--space-6)' }}>
-        <KPICard label="Active rules"      value={counts.total - counts.muted} icon="pi-shield"           variant="brand" />
-        <KPICard label="Blockers"          value={counts.blockers}             icon="pi-exclamation-triangle" variant="rose" />
-        <KPICard label="Warnings"          value={counts.warnings}             icon="pi-exclamation-circle"   variant="amber" />
-        <KPICard label="Info"              value={counts.info}                 icon="pi-info-circle"          variant="violet" />
-        <KPICard label="Muted"             value={counts.muted}                icon="pi-eye-slash"            variant="slate" />
+      {/* 4-up KPI strip */}
+      <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
+        <div className="kpi kpi--brand">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-shield" /></div></div>
+          <p className="kpi__l">Active rules</p>
+          <div className="kpi__v">{loading ? '—' : (counts.total - counts.muted).toLocaleString('en-IN')}</div>
+        </div>
+        <div className="kpi kpi--rs">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-flag" /></div></div>
+          <p className="kpi__l">Blocker</p>
+          <div className="kpi__v">{loading ? '—' : counts.blockers.toLocaleString('en-IN')}</div>
+        </div>
+        <div className="kpi kpi--am">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-exclamation-triangle" /></div></div>
+          <p className="kpi__l">Warning</p>
+          <div className="kpi__v">{loading ? '—' : counts.warnings.toLocaleString('en-IN')}</div>
+        </div>
+        <div className="kpi kpi--sl">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-eye" /></div></div>
+          <p className="kpi__l">Info</p>
+          <div className="kpi__v">{loading ? '—' : counts.info.toLocaleString('en-IN')}</div>
+        </div>
       </div>
 
+      {/* Toolbar */}
       <div className="toolbar">
-        <div className="toolbar__search">
-          <i className="pi pi-search toolbar__searchIcon" />
+        <div className="tb__sr">
+          <i className="pi pi-search" />
           <input
-            className="toolbar__searchInput"
-            type="search"
-            placeholder="Search code, name, description…"
+            placeholder="Search rule code, name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-
-        <select
-          value={severityFilter}
-          onChange={(e) => setSeverityFilter(e.target.value as Severity | 'all')}
-          style={{ padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', fontSize: 'var(--fs-sm)' }}
-        >
+        <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value as Severity | 'all')}>
           <option value="all">All severities</option>
           <option value="error">Blocker</option>
           <option value="warning">Warning</option>
           <option value="info">Info</option>
         </select>
-
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          style={{ padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', fontSize: 'var(--fs-sm)' }}
-        >
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
           <option value="all">All categories</option>
           {categories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-
-        <div style={{ marginLeft: 'auto', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
-          {loading ? 'Loading…' : `Showing ${filtered.length} of ${rules.length} rules`}
-        </div>
+        <span className="tb__c">
+          {loading ? 'Loading…' : `${filtered.length.toLocaleString('en-IN')} rules`}
+        </span>
       </div>
 
-      <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Table */}
+      <div className="card" style={{ padding: 0 }}>
         {loading ? (
-          <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--text-muted)' }}>
-            <i className="pi pi-spin pi-spinner" /> Loading rule catalog…
-          </div>
+          <div className="ph"><i className="pi pi-spin pi-spinner" /> Loading rule catalog…</div>
         ) : filtered.length === 0 ? (
-          <div className="emptyState" style={{ border: 0, borderRadius: 0 }}>
-            <div className="emptyState__icon"><i className="pi pi-search" /></div>
-            <div className="emptyState__title">No rules match your filter</div>
-            <div className="emptyState__body">Clear the search above or pick a different severity / category.</div>
+          <div className="ph">
+            <i className="pi pi-search" />
+            No rules match your filter.
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Rule</th>
-                  <th>Severity</th>
-                  <th>Category</th>
-                  <th>Owner</th>
-                  <th className="tbl__num">Affected</th>
-                  <th className="tbl__num">Active</th>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Rule</th>
+                <th>Severity</th>
+                <th>Category</th>
+                <th>Owner</th>
+                <th className="num">Current count</th>
+                <th>State</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.code} style={{ opacity: r.active ? 1 : 0.55, cursor: 'default' }}>
+                  <td className="bold mono">{r.code}</td>
+                  <td>
+                    <div className="bold">{r.name}</div>
+                    <div className="muted" style={{ fontSize: 11.5 }}>{r.description}</div>
+                  </td>
+                  <td><span className={`chip chip--${SEVERITY_CHIP[r.severity]}`}>{SEVERITY_LABEL[r.severity]}</span></td>
+                  <td>{r.category}</td>
+                  <td>{r.owner}</td>
+                  <td className="num">{r.count.toLocaleString('en-IN')}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => toggleRule(r)}
+                      title={r.active ? 'Mute this rule' : 'Re-enable this rule'}
+                      className={`btn ${r.active ? 'btn--ok' : 'btn--g'} btn--xs`}
+                    >
+                      <i className={`pi ${r.active ? 'pi-check' : 'pi-eye-slash'}`} /> {r.active ? 'Active' : 'Muted'}
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.code} style={{ opacity: r.active ? 1 : 0.55 }}>
-                    <td className="tbl__mono tbl__bold">{r.code}</td>
-                    <td>
-                      <div className="tbl__bold">{r.name}</div>
-                      <div className="tbl__muted" style={{ fontSize: 'var(--fs-xs)', marginTop: 2 }}>{r.description}</div>
-                    </td>
-                    <td>
-                      <StatusChip
-                        status={r.severity}
-                        variant={SEVERITY_VARIANT[r.severity]}
-                        label={SEVERITY_LABEL[r.severity]}
-                      />
-                    </td>
-                    <td className="tbl__muted">{r.category}</td>
-                    <td className="tbl__muted">{r.owner}</td>
-                    <td className="tbl__num">{r.count.toLocaleString('en-IN')}</td>
-                    <td className="tbl__num">
-                      <button
-                        type="button"
-                        onClick={() => toggleRule(r)}
-                        title={r.active ? 'Mute this rule' : 'Re-enable this rule'}
-                        className={`action-btn ${r.active ? '' : 'action-btn--ghost'}`}
-                        style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}
-                      >
-                        <i className={`pi ${r.active ? 'pi-check' : 'pi-eye-slash'}`} /> {r.active ? 'Active' : 'Muted'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </>

@@ -141,72 +141,61 @@ export default function PoExpansion({ po }: { po: PoHeader }) {
   })
   const [error, setError] = useState<{ [k in TabKey]?: string }>({})
 
-  /* ---------- fetch lines (PO-id keyed) ---------- */
+  /* ---------- ONE consolidated fetch (mockup parity) ----------
+   * /api/purchase-orders/:poId/detail returns:
+   *   { po, lines, invoices, grn, asn, dc, schedules, totals }
+   * in a single round-trip instead of 6 parallel calls. Keeps the
+   * existing per-tab caches so re-expanding the same PO is instant. */
   useEffect(() => {
     let alive = true
-    if (linesCache.has(po.po_id)) return
+    const allCached =
+      linesCache.has(po.po_id) &&
+      invoicesCache.has(po.po_id) &&
+      grnCache.has(po.po_id) &&
+      asnCache.has(po.po_id) &&
+      dcCache.has(po.po_id) &&
+      scheduleCache.has(po.po_id)
+    if (allCached) return
+
     ;(async () => {
       try {
-        const res = await apiFetch(`purchase-orders/${po.po_id}/line-items`)
-        if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load PO lines'))
-        const body = await res.json()
-        const rows: PoLine[] = Array.isArray(body) ? body : body.items || []
-        linesCache.set(po.po_id, rows)
-        if (alive) setLines(rows)
+        const res = await apiFetch(`purchase-orders/${po.po_id}/detail`)
+        if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to load PO detail'))
+        const body = await res.json() as {
+          lines?: PoLine[]
+          invoices?: InvoiceRow[]
+          grn?: GrnRow[]
+          asn?: AsnRow[]
+          dc?: DcRow[]
+          schedules?: ScheduleRow[]
+        }
+        if (!alive) return
+        const linesData    = body.lines    || []
+        const invoicesData = body.invoices || []
+        const grnData      = body.grn      || []
+        const asnData      = body.asn      || []
+        const dcData       = body.dc       || []
+        const schedData    = body.schedules|| []
+        linesCache.set(po.po_id, linesData)
+        invoicesCache.set(po.po_id, invoicesData)
+        grnCache.set(po.po_id, grnData)
+        asnCache.set(po.po_id, asnData)
+        dcCache.set(po.po_id, dcData)
+        scheduleCache.set(po.po_id, schedData)
+        setLines(linesData)
+        setInvoices(invoicesData)
+        setGrns(grnData)
+        setAsns(asnData)
+        setDcs(dcData)
+        setSchedules(schedData)
       } catch (err) {
         if (alive) setError((e) => ({ ...e, lines: getDisplayError(err) }))
       } finally {
-        if (alive) setLoading((l) => ({ ...l, lines: false }))
+        if (alive) setLoading({ lines: false, invoices: false, grn: false, asn: false, dc: false, schedule: false })
       }
     })()
     return () => { alive = false }
   }, [po.po_id])
-
-  /* ---------- fetch all linked-doc tabs in parallel (po_number keyed) ---------- */
-  useEffect(() => {
-    let alive = true
-    const poNum = po.po_number
-    if (!poNum) {
-      // Without a PO number we can't fetch linked docs.
-      setLoading((l) => ({ ...l, invoices: false, grn: false, asn: false, dc: false, schedule: false }))
-      return
-    }
-    const q = encodeURIComponent(poNum)
-
-    type TabFetch<T> = {
-      key: TabKey
-      url: string
-      cache: Map<number, T[]>
-      setter: (rows: T[]) => void
-    }
-    const jobs: Array<TabFetch<unknown>> = [
-      { key: 'invoices', url: `invoices?poNumber=${q}&limit=500`, cache: invoicesCache as Map<number, unknown[]>, setter: (r) => setInvoices(r as InvoiceRow[]) },
-      { key: 'grn',      url: `grn?poNumber=${q}&limit=1000`,     cache: grnCache as Map<number, unknown[]>,      setter: (r) => setGrns(r as GrnRow[]) },
-      { key: 'asn',      url: `asn?poNumber=${q}&limit=1000`,     cache: asnCache as Map<number, unknown[]>,      setter: (r) => setAsns(r as AsnRow[]) },
-      { key: 'dc',       url: `delivery-challans?poNumber=${q}&limit=1000`, cache: dcCache as Map<number, unknown[]>, setter: (r) => setDcs(r as DcRow[]) },
-      { key: 'schedule', url: `po-schedules?poNumber=${q}&limit=1000`,      cache: scheduleCache as Map<number, unknown[]>, setter: (r) => setSchedules(r as ScheduleRow[]) },
-    ] as Array<TabFetch<unknown>>
-
-    jobs.forEach((job) => {
-      if (job.cache.has(po.po_id)) return
-      ;(async () => {
-        try {
-          const res = await apiFetch(job.url)
-          if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, `Failed to load ${job.key}`))
-          const body = await res.json()
-          const rows: unknown[] = Array.isArray(body) ? body : body.items || body.invoices || body.rows || []
-          job.cache.set(po.po_id, rows)
-          if (alive) job.setter(rows)
-        } catch (err) {
-          if (alive) setError((e) => ({ ...e, [job.key]: getDisplayError(err) }))
-        } finally {
-          if (alive) setLoading((l) => ({ ...l, [job.key]: false }))
-        }
-      })()
-    })
-
-    return () => { alive = false }
-  }, [po.po_id, po.po_number])
 
   /* ---------- derived ---------- */
   const poValue = useMemo(

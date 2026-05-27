@@ -4,13 +4,20 @@ Writes the invoice status, optionally computes payment_due_date, marks PO
 fulfilled on valid invoices, and stores the full result JSON in
 `invoices.notes` (as a structured string) / audit log. The caller controls
 the transaction; this function runs inside it.
+
+Also persists every Finding into `invoices.validation_errors` (JSONB)
+in the exact same shape the Node validator uses
+(`{errors: [{code, message}], warnings: [{code, message}], computed_at}`),
+so the Reconciliation page sees a consistent per-rule rollup regardless
+of which engine validated the invoice.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from psycopg2.extensions import connection as PGConnection
@@ -38,9 +45,44 @@ def _parse_payment_terms_days(terms: Optional[str], default: int = 30) -> int:
     return default
 
 
+def _persist_validation_errors(cur, result: ValidationResult) -> None:
+    """Write findings into `invoices.validation_errors` (JSONB).
+
+    Same shape the Node engine produces — keeps the Reconciliation page's
+    per-rule rollup consistent regardless of which engine validated the
+    invoice.
+
+    The column is auto-created on first write (idempotent ALTER TABLE) so
+    fresh installs don't need a separate migration step.
+    """
+    try:
+        cur.execute(
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS validation_errors JSONB"
+        )
+    except Exception as err:  # noqa: BLE001 — best-effort, never fatal
+        log.warning("_persist_validation_errors: ADD COLUMN failed: %s", err)
+        return
+
+    payload = {
+        "errors":   [{"code": f.code, "message": f.message} for f in (result.errors or [])],
+        "warnings": [{"code": f.code, "message": f.message} for f in (result.warnings or [])],
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        cur.execute(
+            "UPDATE invoices SET validation_errors = %s::jsonb WHERE invoice_id = %s",
+            (json.dumps(payload), result.invoice_id),
+        )
+    except Exception as err:  # noqa: BLE001
+        log.warning("_persist_validation_errors: UPDATE failed: %s", err)
+
+
 def apply_validation_result(conn: PGConnection, result: ValidationResult) -> None:
     """Persist the validation outcome for one invoice."""
     with conn.cursor() as cur:
+        # Always persist the per-rule findings, regardless of valid/invalid
+        # outcome. Runs inside the same txn as the status update.
+        _persist_validation_errors(cur, result)
         if result.valid:
             # Compute payment_due_date from PO terms + invoice date
             cur.execute(

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import PageHero from '../components/PageHero'
 import StatTile from '../components/StatTile'
 import ChartCard from '../components/ChartCard'
 import StatusChip from '../components/StatusChip'
@@ -94,6 +93,12 @@ interface DashboardSummary {
   dataQuality?: Array<{ code: string; category: string; affected: number | string }>
 }
 
+interface RuleCount { code: string; count: number; severity?: string }
+
+interface DashboardSummaryFull extends DashboardSummary {
+  gstBreakdown?: Array<{ month: string; month_date: string; cgst: number | string; sgst: number | string; igst: number | string }>
+}
+
 function Analytics() {
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('overview')
@@ -101,7 +106,8 @@ function Analytics() {
   const [error, setError] = useState('')
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null)
   const [suppliers, setSuppliers] = useState<SuppliersSummary | null>(null)
-  const [quality, setQuality] = useState<DashboardSummary | null>(null)
+  const [quality, setQuality] = useState<DashboardSummaryFull | null>(null)
+  const [ruleCounts, setRuleCounts] = useState<RuleCount[]>([])
 
   useEffect(() => {
     let alive = true
@@ -109,21 +115,24 @@ function Analytics() {
       try {
         setLoading(true)
         setError('')
-        const [d, s, q] = await Promise.all([
+        const [d, s, q, r] = await Promise.all([
           apiFetch('reports/dashboard'),
           apiFetch('reports/suppliers-summary'),
-          apiFetch('reports/dashboard-summary')
+          apiFetch('reports/dashboard-summary'),
+          apiFetch('validation-rules')
         ])
         if (!d.ok) throw new Error('Dashboard report failed')
-        const [dj, sj, qj] = await Promise.all([
+        const [dj, sj, qj, rj] = await Promise.all([
           d.json(),
           s.ok ? s.json() : Promise.resolve({}),
-          q.ok ? q.json() : Promise.resolve({})
+          q.ok ? q.json() : Promise.resolve({}),
+          r.ok ? r.json() : Promise.resolve({ rules: [] })
         ])
         if (!alive) return
         setDashboard(dj)
         setSuppliers(sj)
         setQuality(qj)
+        setRuleCounts(Array.isArray(rj?.rules) ? rj.rules : [])
       } catch (err) {
         if (alive) setError(getDisplayError(err))
       } finally {
@@ -366,38 +375,70 @@ function Analytics() {
 
   return (
     <>
-      <PageHero
-        eyebrow="Insights"
-        eyebrowIcon="pi-chart-line"
-        title="Insights"
-        subtitle="Trends across the billing pipeline — cashflow, suppliers, procurement, compliance. Spot patterns before they become problems."
-        actions={
-          <button className="action-btn action-btn--ghost" onClick={() => navigate('/')}>
+      {/* Hero — verbatim from mockup VIEWS.insights */}
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-chart-line" /> Insights</span>
+          <h1>Insights</h1>
+          <p>Trends across the billing pipeline. Use these to spot supplier patterns, OCR drift, GST anomalies, and where automation is paying off.</p>
+        </div>
+        <div className="hero__act">
+          <select
+            style={{
+              padding: '7px 11px',
+              border: '1px solid var(--b-2)',
+              borderRadius: 8,
+              background: 'var(--s-0)',
+              fontSize: 12.5,
+              color: 'var(--t-1)',
+              cursor: 'pointer',
+              fontFamily: 'inherit'
+            }}
+            defaultValue="30"
+          >
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="ytd">This year</option>
+          </select>
+          <button className="btn btn--g" onClick={() => navigate('/')}>
             <i className="pi pi-home" /> Workspace
           </button>
-        }
-      />
+          <button
+            className="btn btn--g"
+            onClick={() => {
+              const win = window.open('', '_blank')
+              if (win) {
+                win.document.title = 'Insights export'
+                win.document.body.innerText = 'Insights CSV export will land with /api/reports/insights/export.'
+              }
+            }}
+          >
+            <i className="pi pi-download" /> Export
+          </button>
+        </div>
+      </section>
 
       {error && (
-        <div className="glass-card" style={{ borderColor: 'var(--status-danger-ring)', color: 'var(--status-danger-fg)' }}>
+        <div className="card" style={{ padding: '10px 14px', marginBottom: 12, borderColor: 'var(--err-line)', color: 'var(--err-fg)' }}>
           <i className="pi pi-exclamation-triangle" /> {error}
         </div>
       )}
 
-      <div className="tab-row">
+      {/* Mockup tabs row */}
+      <div className="tabs" style={{ marginBottom: 14 }}>
         {([
-          { k: 'overview',   l: 'Overview',    i: 'pi-chart-pie' },
-          { k: 'cashflow',   l: 'Cashflow',    i: 'pi-indian-rupee' },
-          { k: 'suppliers',  l: 'Suppliers',   i: 'pi-users' },
-          { k: 'procurement',l: 'Procurement', i: 'pi-shopping-cart' },
-          { k: 'quality',    l: 'Quality',     i: 'pi-shield' }
-        ] as Array<{ k: Tab; l: string; i: string }>).map((t) => (
+          { k: 'overview',   l: 'Overview' },
+          { k: 'cashflow',   l: 'Cashflow' },
+          { k: 'suppliers',  l: 'Suppliers' },
+          { k: 'procurement',l: 'Procurement' },
+          { k: 'quality',    l: 'Quality' }
+        ] as Array<{ k: Tab; l: string }>).map((t) => (
           <button
             key={t.k}
-            className={`tab-row__btn ${tab === t.k ? 'tab-row__btn--active' : ''}`}
+            type="button"
+            className={`tab ${tab === t.k ? 'active' : ''}`}
             onClick={() => setTab(t.k)}
           >
-            <i className={`pi ${t.i}`} style={{ marginRight: '0.4rem' }} />
             {t.l}
           </button>
         ))}
@@ -413,115 +454,22 @@ function Analytics() {
       {/* ========================= OVERVIEW ========================= */}
       {tab === 'overview' && (
         <>
-          <div className="grid-kpis fade-in-up--stagger">
-            <StatTile label="Total invoices" value={formatInt(fin.total_invoices)} icon="pi-file" variant="brand" sublabel="All time" />
-            <StatTile label="Total billed"    value={formatINRCompact(fin.total_billed)} icon="pi-indian-rupee" variant="emerald" sublabel={`YTD ${formatINRCompact(fin.ytd_billed)}`} />
-            <StatTile label="Avg ticket"      value={formatINRSymbol(fin.avg_invoice_amount)} icon="pi-calculator" variant="violet" sublabel="Per invoice" />
-            <StatTile label="Effective tax"   value={`${Number(fin.tax_pct || 0).toFixed(1)}%`} icon="pi-percentage" variant="amber" sublabel={`${formatINRCompact(fin.total_tax)} collected`} />
-            <StatTile label="This month"      value={formatINRCompact(fin.current_month_billed)} icon="pi-calendar" variant="rose" sublabel="Month-to-date" />
-            <StatTile label="Validation rate" value={`${validationRate}%`} icon="pi-check-circle" variant="slate" sublabel={`${formatInt(qualityTotals.validated)} validated`} />
-          </div>
-
-          <div className="grid-charts">
-            <ChartCard title="Monthly volume & value" subtitle="Last 12 months · invoice count (bars) + amount (line)" config={monthlyTrend} height={340} icon="pi-chart-bar" />
-            <ChartCard title="Status mix" subtitle="By count — doughnut" config={statusDonut} height={340} icon="pi-chart-pie" />
-          </div>
-
-          <div className="grid-charts">
-            <section className="glass-card">
-              <h3 className="glass-card__title"><i className="pi pi-users" style={{ color: 'var(--accent-violet)' }} /> Top 10 suppliers</h3>
-              <div className="glass-card__subtitle">By invoice value</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
-                {topSuppliers.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>No suppliers yet.</div>}
-                {topSuppliers.map((s, i) => (
-                  <div
-                    key={s.supplier_name}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.7rem',
-                      padding: '0.5rem 0.65rem',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--surface-1)',
-                      border: '1px solid var(--border-subtle)'
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: 6,
-                        background: 'linear-gradient(135deg, var(--brand-600), var(--accent-violet))',
-                        color: '#fff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '0.74rem',
-                        fontWeight: 800
-                      }}
-                    >
-                      {i + 1}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {s.supplier_name}
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                        {formatInt(s.invoice_count)} invoice{Number(s.invoice_count) === 1 ? '' : 's'}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                      {formatINRCompact(s.total_amount)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="glass-card">
-              <h3 className="glass-card__title"><i className="pi pi-history" style={{ color: 'var(--accent-emerald)' }} /> Recent payments</h3>
-              <div className="glass-card__subtitle">Latest 10 executed</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
-                {(dashboard?.recentPayments || []).length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>No payments recorded yet.</div>}
-                {(dashboard?.recentPayments || []).map((p) => (
-                  <div
-                    key={p.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.7rem',
-                      padding: '0.5rem 0.65rem',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--surface-1)',
-                      border: '1px solid var(--border-subtle)'
-                    }}
-                  >
-                    <div style={{
-                      width: 30, height: 30, borderRadius: 8,
-                      background: 'var(--status-success-bg)', color: 'var(--status-success-fg)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem'
-                    }}>
-                      <i className="pi pi-check" />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {p.invoice_number}
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {p.supplier_name || '—'} · {formatDate(p.payment_done_at)}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                      {formatINRSymbol(p.amount)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
+          {/* Mockup highlights — Validation rate / Errors per category /
+              OCR accuracy / GST split / Avg time to payment */}
+          <MockupHighlights
+            validationRate={validationRate}
+            validatedCount={Number(qualityTotals.validated) || 0}
+            totalForRate={
+              (Number(qualityTotals.validated) || 0) +
+              (Number(qualityTotals.waiting_for_validation) || 0) +
+              (Number(qualityTotals.waiting_for_re_validation) || 0)
+            }
+            ruleCounts={ruleCounts}
+            totalInvoices={Number(fin.total_invoices) || 0}
+            gstBreakdown={quality?.gstBreakdown || []}
+          />
         </>
       )}
-
       {/* ========================= CASHFLOW ========================= */}
       {tab === 'cashflow' && (
         <>
@@ -779,6 +727,263 @@ function Analytics() {
         </>
       )}
     </>
+  )
+}
+
+/* =========================================================================
+ *   Mockup-aligned highlights row — surfaces the 5 cards from the design
+ *   mockup (Validation rate · Errors per category · OCR accuracy ·
+ *   GST split · Avg time to payment) above the existing tab body.
+ *
+ *   Wire-up:
+ *   - Validation rate: derived from `qualityTotals` (validated / open total).
+ *   - Errors per category: live `validation-rules` counts.
+ *   - GST split: 12-month aggregated CGST+SGST vs IGST from `gstBreakdown`.
+ *   - OCR accuracy + Avg time to payment: not yet exposed by an endpoint —
+ *     rendered with a "no live data" stub so the mockup layout is still
+ *     visible until the corresponding APIs land.
+ * ========================================================================= */
+function MockupHighlights({
+  validationRate,
+  validatedCount,
+  totalForRate,
+  ruleCounts,
+  totalInvoices,
+  gstBreakdown,
+}: {
+  validationRate: number
+  validatedCount: number
+  totalForRate: number
+  ruleCounts: RuleCount[]
+  totalInvoices: number
+  gstBreakdown: Array<{ cgst: number | string; sgst: number | string; igst: number | string }>
+}) {
+  /* ----- Errors per category — top 10 short codes by count ----- */
+  const sortedRules = [...ruleCounts]
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+  const shortCodeOf = (c: string) => (c || '').split('_')[0]
+  const maxBar = sortedRules.reduce((m, r) => Math.max(m, r.count), 0) || 1
+
+  /* ----- GST split — intra (CGST+SGST) vs inter (IGST) ----- */
+  const cgstTotal = gstBreakdown.reduce((s, r) => s + (parseAmount(r.cgst) ?? 0), 0)
+  const sgstTotal = gstBreakdown.reduce((s, r) => s + (parseAmount(r.sgst) ?? 0), 0)
+  const igstTotal = gstBreakdown.reduce((s, r) => s + (parseAmount(r.igst) ?? 0), 0)
+  const intraTax = cgstTotal + sgstTotal
+  const interTax = igstTotal
+  const totalTax = intraTax + interTax
+  const intraPct = totalTax > 0 ? Math.round((intraTax / totalTax) * 100) : 0
+  const interPct = totalTax > 0 ? 100 - intraPct : 0
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 14 }}>
+      {/* Row 1: Validation rate + Errors per category */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)', gap: 14 }}>
+        {/* Validation rate */}
+        <div className="card">
+          <div className="card__h">
+            <div className="card__t"><i className="pi pi-chart-line" /> Validation rate</div>
+            <span className="card__m">live snapshot</span>
+          </div>
+          <div className="card__b" style={{ padding: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+              <div style={{ fontSize: 38, fontWeight: 800, color: 'var(--ok-fg)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+                {validationRate}%
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--t-3)' }}>
+                {formatInt(validatedCount)} of {formatInt(totalForRate)} open
+              </div>
+            </div>
+            {/* Sparkline-style flat indicator — single live value, trend backend not yet wired */}
+            <svg viewBox="0 0 400 70" width="100%" height={70} preserveAspectRatio="none" style={{ marginTop: 12 }}>
+              <defs>
+                <linearGradient id="vr-grad" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+                </linearGradient>
+              </defs>
+              {(() => {
+                const y = 70 - (validationRate / 100) * 60
+                return (
+                  <>
+                    <path d={`M0,${y} L400,${y} L400,70 L0,70 Z`} fill="url(#vr-grad)" />
+                    <path d={`M0,${y} L400,${y}`} stroke="#10b981" strokeWidth={2.2} fill="none" />
+                  </>
+                )
+              })()}
+            </svg>
+            <div style={{ fontSize: 11.5, color: 'var(--t-4)', marginTop: 6 }}>
+              14-day trend lands with <code>/api/reports/validation-rate-trend</code>.
+            </div>
+          </div>
+        </div>
+
+        {/* Errors per category */}
+        <div className="card">
+          <div className="card__h">
+            <div className="card__t"><i className="pi pi-chart-bar" /> Errors per category</div>
+            <span className="card__m">distinct invoices · top 10</span>
+          </div>
+          <div className="card__b" style={{ padding: 18 }}>
+            {sortedRules.length === 0 ? (
+              <div style={{ color: 'var(--t-3)', fontSize: 13 }}>
+                <i className="pi pi-check-circle" style={{ color: 'var(--ok-fg)' }} /> No active validation errors.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 160, padding: '0 4px' }}>
+                {sortedRules.map((r, i) => {
+                  const h = (r.count / maxBar) * 130
+                  const altColor = i % 2 === 0
+                    ? 'linear-gradient(180deg, #3b82f6, #06b6d4)'
+                    : 'linear-gradient(180deg, #f59e0b, #fbbf24)'
+                  return (
+                    <div key={r.code} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: '100%',
+                          maxWidth: 40,
+                          height: h,
+                          background: altColor,
+                          borderRadius: '6px 6px 2px 2px',
+                          minHeight: 4,
+                        }}
+                        title={`${shortCodeOf(r.code)}: ${formatInt(r.count)}`}
+                      />
+                      <div style={{ fontSize: 10.5, color: 'var(--t-2)', fontWeight: 700, fontFamily: 'var(--font-mono, monospace)' }}>
+                        {shortCodeOf(r.code)}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: 'var(--t-3)', fontVariantNumeric: 'tabular-nums' }}>
+                        {formatInt(r.count)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: OCR accuracy + GST split + Avg time to payment */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
+        {/* OCR accuracy — stubbed until /api/ocr/health exists */}
+        <div className="card">
+          <div className="card__h">
+            <div className="card__t"><i className="pi pi-image" /> OCR accuracy</div>
+            <span className="card__m">field-level match</span>
+          </div>
+          <div className="card__b" style={{ padding: 18 }}>
+            <div style={{ fontSize: 38, fontWeight: 800, color: 'var(--ok-fg)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>—</div>
+            <div style={{ fontSize: 12, color: 'var(--t-3)', marginTop: 4 }}>
+              across — invoices
+            </div>
+            <div style={{ marginTop: 12, padding: '10px 12px', background: 'var(--vio-bg)', border: '1px solid var(--b-1)', borderRadius: 'var(--r-md)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <i className="pi pi-info-circle" style={{ color: 'var(--vio-fg)', fontSize: 16, marginTop: 2 }} />
+              <div style={{ fontSize: 12, color: 'var(--t-2)', lineHeight: 1.5 }}>
+                <strong>Drop driver</strong> instrumentation lands with <code>/api/ocr/health</code>.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* GST split — donut */}
+        <div className="card">
+          <div className="card__h">
+            <div className="card__t"><i className="pi pi-percentage" /> GST split</div>
+            <span className="card__m">last 12 months · by tax</span>
+          </div>
+          <div className="card__b" style={{ padding: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
+            <GstDonut interPct={interPct} intraPct={intraPct} total={totalInvoices} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5, flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: '#3b82f6' }} />
+                <span style={{ flex: 1, color: 'var(--t-2)' }}>Inter-state (IGST)</span>
+                <strong style={{ color: 'var(--t-1)', fontVariantNumeric: 'tabular-nums' }}>{interPct}%</strong>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: '#8b5cf6' }} />
+                <span style={{ flex: 1, color: 'var(--t-2)' }}>Intra-state</span>
+                <strong style={{ color: 'var(--t-1)', fontVariantNumeric: 'tabular-nums' }}>{intraPct}%</strong>
+              </div>
+              {totalTax === 0 && (
+                <div style={{ fontSize: 11.5, color: 'var(--t-4)' }}>
+                  No GST recorded in the last 12 months.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Avg time to payment — stubbed until lifecycle metrics exist */}
+        <div className="card">
+          <div className="card__h">
+            <div className="card__t"><i className="pi pi-clock" /> Avg time to payment</div>
+            <span className="card__m">from load to bank · target 21d</span>
+          </div>
+          <div className="card__b" style={{ padding: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <div style={{ fontSize: 38, fontWeight: 800, color: 'var(--t-1)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>—</div>
+              <div style={{ fontSize: 14, color: 'var(--t-3)', fontWeight: 600 }}>days</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+              {[
+                { l: 'Load → validate', v: '—' },
+                { l: 'Validate → approve', v: '—' },
+                { l: 'Approve → bank', v: '—' },
+                { l: 'Bank → confirmed', v: '—' },
+              ].map((c) => (
+                <div key={c.l} style={{ padding: '8px 10px', background: 'var(--s-1)', border: '1px solid var(--b-1)', borderRadius: 'var(--r-md)' }}>
+                  <div style={{ fontSize: 10.5, color: 'var(--t-3)', fontWeight: 600 }}>{c.l}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--t-2)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{c.v}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--t-4)', marginTop: 8 }}>
+              Lifecycle metrics land with <code>/api/reports/avg-time-to-payment</code>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GstDonut({ interPct, intraPct, total }: { interPct: number; intraPct: number; total: number }) {
+  const r = 42
+  const c = 2 * Math.PI * r
+  const dashInter = (interPct / 100) * c
+  const dashIntra = (intraPct / 100) * c
+  return (
+    <svg viewBox="0 0 110 110" width={120} height={120}>
+      <circle cx={55} cy={55} r={r} fill="none" stroke="var(--s-2)" strokeWidth={14} />
+      {interPct > 0 && (
+        <circle
+          cx={55}
+          cy={55}
+          r={r}
+          fill="none"
+          stroke="#3b82f6"
+          strokeWidth={14}
+          strokeDasharray={`${dashInter} ${c}`}
+          transform="rotate(-90 55 55)"
+        />
+      )}
+      {intraPct > 0 && (
+        <circle
+          cx={55}
+          cy={55}
+          r={r}
+          fill="none"
+          stroke="#8b5cf6"
+          strokeWidth={14}
+          strokeDasharray={`${dashIntra} ${c}`}
+          strokeDashoffset={-dashInter}
+          transform="rotate(-90 55 55)"
+        />
+      )}
+      <text x={55} y={59} textAnchor="middle" fontSize={16} fontWeight={800} fill="var(--t-1)">{formatInt(total)}</text>
+    </svg>
   )
 }
 

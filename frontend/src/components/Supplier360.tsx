@@ -28,12 +28,16 @@ interface Supplier360Data {
     gst_number: string | null
     pan_number: string | null
     state_name: string | null
+    state_code: string | null
     city: string | null
-    address1: string | null
+    pincode: string | null
+    supplier_address: string | null
     contact_person: string | null
     phone: string | null
     mobile: string | null
     email: string | null
+    website: string | null
+    msme_number: string | null
     bank_account_name: string | null
     bank_account_number: string | null
     bank_ifsc_code: string | null
@@ -133,7 +137,7 @@ function Supplier360({ supplierId }: Props) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>{s.supplier_name}</div>
             <div className="muted" style={{ fontSize: 'var(--fs-sm)', marginTop: 2 }}>
-              {[s.address1, s.city, s.state_name].filter(Boolean).join(', ') || '—'}
+              {[s.supplier_address, s.city, s.state_name, s.pincode].filter(Boolean).join(', ') || '—'}
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {s.gst_number && <code style={{ fontSize: 'var(--fs-xs)' }}>{s.gst_number}</code>}
@@ -162,7 +166,17 @@ function Supplier360({ supplierId }: Props) {
       <div className="grid-kpis">
         <Kpi label="Invoices (30d)"   value={m.invoices_30d.toLocaleString('en-IN')}        icon="pi-file"       variant="brand" />
         <Kpi label="Validated"        value={m.invoices_validated.toLocaleString('en-IN')}  icon="pi-check"      variant="emerald" footer={`of ${m.invoices_total} total`} />
-        <Kpi label="Open issues"      value={m.open_issues.toLocaleString('en-IN')}         icon="pi-flag"       variant="rose" />
+        <Kpi
+          label="Open issues"
+          value={m.open_issues.toLocaleString('en-IN')}
+          icon="pi-flag"
+          variant="rose"
+          onClick={
+            m.open_issues > 0
+              ? () => navigate(`/invoices/validate?supplier=${encodeURIComponent(s.supplier_name || '')}&status=waiting_for_re_validation`)
+              : undefined
+          }
+        />
         <Kpi label="Spend (30d)"      value={formatINRSymbol(m.spend_30d)}                  icon="pi-rupee"      variant="violet" />
       </div>
 
@@ -187,11 +201,22 @@ function Supplier360({ supplierId }: Props) {
             <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>None — clean record.</div>
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {top_error_codes.map((e) => (
-                <span key={e.code} className="status-chip status-chip--danger">
-                  <code style={{ fontSize: 'var(--fs-xs)' }}>{e.code.split('_')[0]}</code> · {e.n}
-                </span>
-              ))}
+              {top_error_codes.map((e) => {
+                const codeShort = e.code.split('_')[0]
+                return (
+                  <span
+                    key={e.code}
+                    className="status-chip status-chip--danger"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => navigate(`/invoices/reconciliation?code=${encodeURIComponent(codeShort)}&supplier=${encodeURIComponent(s.supplier_name || '')}`)}
+                    style={{ cursor: 'pointer' }}
+                    title={`Open ${codeShort} reconciliation queue filtered to this supplier`}
+                  >
+                    <code style={{ fontSize: 'var(--fs-xs)' }}>{codeShort}</code> · {e.n}
+                  </span>
+                )
+              })}
             </div>
           )}
         </SectionPanel>
@@ -234,12 +259,17 @@ function Supplier360({ supplierId }: Props) {
       </SectionPanel>
 
       {/* ====== Banking + payment terms ====== */}
-      <SectionPanel title="Banking & terms" icon="pi-credit-card">
+      <SectionPanel title="Banking & contact" icon="pi-credit-card">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-3) var(--space-5)', fontSize: 'var(--fs-sm)' }}>
           <Field label="Account holder">{s.bank_account_name || '—'}</Field>
           <Field label="Account number">{s.bank_account_number ? <code>{s.bank_account_number}</code> : '—'}</Field>
           <Field label="IFSC">{s.bank_ifsc_code ? <code>{s.bank_ifsc_code}</code> : '—'}</Field>
           <Field label="Bank">{s.bank_name || '—'}{s.branch_name ? ` · ${s.branch_name}` : ''}</Field>
+          <Field label="Contact person">{s.contact_person || '—'}</Field>
+          <Field label="Phone">{s.phone || s.mobile || '—'}</Field>
+          <Field label="Email">{s.email || '—'}</Field>
+          <Field label="Website">{s.website ? <a href={s.website.startsWith('http') ? s.website : `https://${s.website}`} target="_blank" rel="noreferrer">{s.website}</a> : '—'}</Field>
+          <Field label="MSME">{s.msme_number ? <code>{s.msme_number}</code> : '—'}</Field>
           <Field label="Payment terms">{s.payment_term_days != null ? `Net ${s.payment_term_days} days` : '—'}</Field>
           <Field label="Default mode">{s.payment_mode || '—'}</Field>
           <Field label="Avg. days to pay">
@@ -253,12 +283,19 @@ function Supplier360({ supplierId }: Props) {
 }
 
 /* ---------- tiny helpers ---------- */
-function Kpi({ label, value, icon, variant, footer }: {
+function Kpi({ label, value, icon, variant, footer, onClick }: {
   label: string; value: React.ReactNode; icon: string;
-  variant: 'brand' | 'emerald' | 'rose' | 'violet'; footer?: React.ReactNode
+  variant: 'brand' | 'emerald' | 'rose' | 'violet'; footer?: React.ReactNode;
+  onClick?: () => void
 }) {
   return (
-    <div className={`stat-card stat-card--${variant}`}>
+    <div
+      className={`stat-card stat-card--${variant}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      style={onClick ? { cursor: 'pointer' } : undefined}
+    >
       <div className="stat-card__icon"><i className={`pi ${icon}`} /></div>
       <div className="stat-card__label">{label}</div>
       <div className="stat-card__value">{value}</div>

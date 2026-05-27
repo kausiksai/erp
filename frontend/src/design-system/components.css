@@ -485,13 +485,14 @@
   line-height: 1.5;
 }
 
-/* --- Section card header (used by <SectionCard>) ---------------------- */
+/* --- Section card header (used by <SectionCard>) ----------------------
+   Mockup .card__h: 14px 18px padding (was 12px × 20px), 10px gap. */
 .section-card__header {
-  padding: var(--space-3) var(--space-5);
+  padding: 14px 18px;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 10px;
   background: linear-gradient(180deg, var(--surface-0), var(--surface-1));
 }
 .section-card__title {
@@ -515,13 +516,17 @@
   gap: var(--space-2);
   align-items: center;
 }
-.section-card__body { padding: var(--space-5); }
+.section-card__body { padding: 18px; }
 
 /* --- Grid helpers ------------------------------------------------------- */
 .grid-kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--space-4);
+  /* auto-fit (not auto-fill) collapses empty tracks so the 5 KPIs on
+     Workspace always span the full row evenly. Tightened min from 220 →
+     200 so 5 × 200 + 4 × 12 = 1048px fits inside the main column at
+     typical 1366+ px widths once the sidebar's 240px is taken out. */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
 }
 .grid-charts {
   display: grid;
@@ -735,19 +740,21 @@
 /* --- Tab row ------------------------------------------------------------ */
 .tab-row {
   display: inline-flex;
-  padding: 0.25rem;
+  /* Mockup .tabs: padding 3px, gap 2px between buttons */
+  padding: 3px;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
-  gap: 0.2rem;
+  gap: 2px;
 }
 .tab-row__btn {
-  padding: 0.45rem 0.95rem;
+  /* Mockup .tab: padding 6px 14px, font 12.5px, weight 500 */
+  padding: 6px 14px;
   border-radius: var(--radius-full);
   border: 0;
   background: transparent;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),

@@ -38,7 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/',                          label: 'Workspace',      icon: 'pi-home' },
       { to: '/invoices/validate',         label: 'Invoices',       icon: 'pi-file' },
       { to: '/invoices/upload',           label: 'Upload invoice', icon: 'pi-upload' },
-      { to: '/invoices/reconciliation',   label: 'Reconciliation', icon: 'pi-sync' },
+      { to: '/invoices/reconciliation',   label: 'Needs attention', icon: 'pi-sync' },
       { to: '/payments/approve',          label: 'Payments',       icon: 'pi-wallet' }
     ]
   },
@@ -61,9 +61,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { to: '/rules',    label: 'Validation rules', icon: 'pi-shield' },
-      { to: '/audit',    label: 'Audit log',        icon: 'pi-history' },
-      { to: '/settings', label: 'Settings',         icon: 'pi-cog' }
+      { to: '/rules',      label: 'Validation rules', icon: 'pi-shield' },
+      { to: '/audit',      label: 'Audit log',        icon: 'pi-history' },
+      { to: '/automation', label: 'Automation',       icon: 'pi-server', roles: ['admin'] },
+      { to: '/settings',   label: 'Settings',         icon: 'pi-cog' }
     ]
   }
 ]
@@ -108,6 +109,15 @@ function AppShell({ children }: AppShellProps) {
     }
     document.addEventListener('mousedown', handle)
     return () => document.removeEventListener('mousedown', handle)
+  }, [userMenuOpen])
+
+  // Escape closes the user menu overlay.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && userMenuOpen) setUserMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
   }, [userMenuOpen])
 
   const role = (user?.role || 'user').toLowerCase()
@@ -186,15 +196,6 @@ function AppShell({ children }: AppShellProps) {
             >
               <i className={`pi ${collapsed ? 'pi-angle-double-right' : 'pi-angle-double-left'}`} />
             </button>
-            <button
-              type="button"
-              className="sidebar__footerBtn"
-              onClick={toggleTheme}
-              title={theme === 'light' ? 'Switch to dark' : 'Switch to light'}
-              aria-label="Toggle theme"
-            >
-              <i className={`pi ${theme === 'light' ? 'pi-moon' : 'pi-sun'}`} />
-            </button>
           </div>
         </nav>
       </aside>
@@ -211,21 +212,7 @@ function AppShell({ children }: AppShellProps) {
             <i className="pi pi-bars" />
           </button>
 
-          <div className="shellTopbar__search">
-            <i className="pi pi-search shellTopbar__searchIcon" aria-hidden />
-            <input
-              type="search"
-              className="shellTopbar__searchInput"
-              placeholder="Search invoices, POs, suppliers…"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
-                  const q = (e.target as HTMLInputElement).value.trim()
-                  navigate(`/invoices/validate?q=${encodeURIComponent(q)}`)
-                }
-              }}
-            />
-            <kbd className="shellTopbar__kbd">⌘K</kbd>
-          </div>
+          <div style={{ flex: 1 }} />
 
           <div className="shellTopbar__actions">
             <button
@@ -237,16 +224,6 @@ function AppShell({ children }: AppShellProps) {
             >
               <i className={`pi ${theme === 'light' ? 'pi-moon' : 'pi-sun'}`} />
             </button>
-            <button
-              type="button"
-              className="shellTopbar__iconBtn"
-              aria-label="Notifications"
-              title="Notifications"
-            >
-              <i className="pi pi-bell" />
-              <span className="shellTopbar__dot" aria-hidden />
-            </button>
-
             <div className="shellTopbar__user" ref={userMenuRef}>
               <button
                 type="button"

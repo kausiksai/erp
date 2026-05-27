@@ -85,16 +85,19 @@
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
+  /* Mockup: padding 14px 12px on the panel, 14px gap between brand → groups → footer. */
+  padding: 14px 12px 0;
+  gap: 14px;
   overflow: hidden;
 }
 
 .sidebar__brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-5);
-  height: var(--topbar-h);
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 10px;
+  /* Mockup: compact 4px/8px padding, no border-bottom, no fixed topbar-h.
+     Brand sits in normal flow as the first flex child of the sidebar. */
+  padding: 4px 8px;
   flex-shrink: 0;
   text-decoration: none;
   color: var(--text-primary);
@@ -102,15 +105,16 @@
 .sidebar__brand:hover { text-decoration: none; color: var(--text-primary); }
 
 .sidebar__mark {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   background: linear-gradient(135deg, var(--brand-600), var(--accent-cyan));
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
+  font-size: 14px;
+  font-weight: 800;
   box-shadow: 0 6px 14px -6px rgba(37, 99, 235, 0.55);
   flex-shrink: 0;
 }
@@ -122,59 +126,78 @@
   min-width: 0;
 }
 .sidebar__brandCompany {
-  font-size: 0.66rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .sidebar__brandProduct {
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .shell--collapsed .sidebar__brandText { display: none; }
 
 .sidebar__nav {
   flex: 1;
-  padding: var(--space-4) var(--space-3) var(--space-6);
+  /* Padding handled by .sidebar; nav just consumes remaining space. */
+  padding: 0 0 var(--space-3);
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 6px;
+  /* Thin 6px scrollbar so it sits inside the sidebar instead of the
+     10px global one — matches the mockup .sidebar treatment. Track is
+     transparent so the bar disappears against the panel background
+     when not in use. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+.sidebar__nav::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar__nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar__nav::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 3px;
+  border: 0;
+}
+.sidebar__nav::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
 }
 
 .sidebar__group {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 1px;
 }
 
 .sidebar__groupLabel {
-  font-size: 0.65rem;
+  font-size: 10.5px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-faint);
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
   font-weight: 700;
-  padding: 0 var(--space-3);
-  margin-bottom: var(--space-2);
+  padding: 6px 10px 4px;
+  margin-bottom: 0;
 }
 .shell--collapsed .sidebar__groupLabel { display: none; }
 
 .sidebar__link {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0.75rem;
-  border-radius: var(--radius-md);
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
   color: var(--text-secondary);
-  font-size: var(--fs-sm);
+  font-size: 13px;
   font-weight: 500;
   text-decoration: none;
   transition: background var(--dur-fast) var(--ease-out),
@@ -208,9 +231,9 @@
 [data-theme="dark"] .sidebar__link--active:hover { color: var(--brand-300); }
 
 .sidebar__linkIcon {
-  width: 20px;
+  width: 16px;
   text-align: center;
-  font-size: 0.95rem;
+  font-size: 14px;
   flex-shrink: 0;
 }
 .sidebar__linkLabel {
@@ -220,9 +243,10 @@
   white-space: nowrap;
 }
 .sidebar__linkBadge {
-  padding: 0.1rem 0.5rem;
-  border-radius: var(--radius-full);
-  font-size: 0.65rem;
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
   font-weight: 700;
   background: var(--brand-100);
   color: var(--brand-800);
@@ -233,31 +257,34 @@
   color: var(--brand-300);
 }
 .shell--collapsed .sidebar__link {
-  padding: 0.6rem;
+  padding: 9px 0;
   justify-content: center;
 }
 .shell--collapsed .sidebar__linkLabel { display: none; }
 .shell--collapsed .sidebar__linkBadge { display: none; }
 
 .sidebar__footer {
-  padding: var(--space-3) var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  /* Mockup: foot is just a small button row, no top border, sits flush
+     with the panel padding. margin-top:auto pushes it to the bottom. */
+  margin-top: auto;
+  padding: 6px 4px 8px;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 6px;
   flex-shrink: 0;
 }
 .sidebar__footerBtn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
+  flex: 1;
+  height: 32px;
+  border-radius: 8px;
   border: 1px solid var(--border-subtle);
-  background: var(--surface-0);
-  color: var(--text-secondary);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
+  font-size: 13px;
   transition: background var(--dur-fast) var(--ease-out),
               color var(--dur-fast) var(--ease-out);
 }
@@ -449,16 +476,19 @@
 .shellMain {
   min-width: 0;
   min-height: calc(100vh - var(--topbar-h));
-  padding: var(--space-6) var(--gutter) var(--space-12);
+  /* Mockup .main: padding 22px 26px 40px, max-width 1500px, centered.
+     Was using --space-6 (24) / --gutter (clamp 16–32) / --space-12 (48). */
+  padding: 22px 26px 40px;
+  max-width: 1500px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
-  max-width: 100%;
 }
-@media (min-width: 1280px) {
+@media (max-width: 768px) {
   .shellMain {
-    padding-left: var(--space-8);
-    padding-right: var(--space-8);
+    padding-left: 16px;
+    padding-right: 16px;
   }
 }
 
@@ -471,7 +501,8 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-6);
+  /* Mockup .hero: padding 20px 22px (was var(--space-6) = 24px) */
+  padding: 20px 22px;
   border-radius: var(--radius-xl);
   background: linear-gradient(135deg,
               rgba(37, 99, 235, 0.08) 0%,
@@ -497,25 +528,29 @@
 .pageHero__eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: var(--fs-xs);
+  gap: 6px;
+  /* Mockup .eyebrow: 11px (was 12px), 0.08em letter-spacing (was 0.10em),
+     padding 4px 10px, no bottom margin (the title gets margin-top instead). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: var(--brand-700);
   background: rgba(37, 99, 235, 0.1);
-  padding: 0.25rem 0.6rem;
+  padding: 4px 10px;
   border-radius: var(--radius-full);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
 }
 [data-theme="dark"] .pageHero__eyebrow {
   color: var(--brand-300);
   background: rgba(59, 130, 246, 0.14);
 }
 .pageHero__title {
-  margin: 0;
-  font-size: clamp(1.5rem, 2.6vw, 2rem);
-  font-weight: 800;
+  /* Mockup .hero h1: 24px fixed (was clamp 24-32), 700 weight (was 800),
+     margin 8px 0 4px to give the eyebrow a tighter visual rhythm. */
+  margin: 8px 0 4px;
+  font-size: 24px;
+  font-weight: 700;
   letter-spacing: -0.02em;
   background: linear-gradient(135deg, var(--text-primary) 0%, var(--brand-700) 100%);
   background-clip: text;
@@ -529,10 +564,12 @@
   -webkit-text-fill-color: transparent;
 }
 .pageHero__subtitle {
-  margin: var(--space-2) 0 0;
+  /* Mockup .hero p: 13.5px (was var(--fs-md) = 15px), max 62ch, line-height 1.5 */
+  margin: 0;
   color: var(--text-muted);
-  font-size: var(--fs-md);
-  line-height: var(--lh-snug);
+  font-size: 13.5px;
+  max-width: 62ch;
+  line-height: 1.5;
 }
 .pageHero__actions {
   display: flex;
@@ -546,10 +583,11 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  /* Mockup .toolbar: gap 8px, padding 10px 12px, full-rounded (xl) */
+  gap: 8px;
   flex-wrap: wrap;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  border-radius: var(--radius-xl);
   background: var(--surface-0);
   border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-xs);
@@ -561,13 +599,14 @@
 }
 .toolbar__searchInput {
   width: 100%;
-  height: 38px;
-  padding: 0 0.9rem 0 2.3rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-1);
+  /* Mockup search input: padding 7px 12px 7px 34px, 13px font, ~34px tall */
+  height: 34px;
+  padding: 0 12px 0 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--surface-0);
   color: var(--text-primary);
-  font-size: var(--fs-sm);
+  font-size: 13px;
   transition: border-color var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out);
 }
@@ -577,13 +616,35 @@
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
+/* Mockup .toolbar select: 7px 11px padding, 12.5px font, 8px radius, surface-0 bg */
+.toolbar select {
+  padding: 7px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.toolbar select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+.toolbar__count {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .toolbar__searchIcon {
   position: absolute;
-  left: 0.8rem;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-faint);
-  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-size: 13px;
   pointer-events: none;
 }
 

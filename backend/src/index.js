@@ -43,6 +43,7 @@ import {
   moveToDebitNoteApproval,
   forceClosePo,
   exceptionApprove,
+  adminOverrideApprove,
   debitNoteApprove,
   updatePoStatusFromCumulative
 } from './poInvoiceValidation.js'
@@ -66,9 +67,10 @@ import { getWorkspaceQueueRoute, getValidationTrendRoute, getInsightsSuggestions
 import {
   getValidationRulesRoute,
   patchValidationRuleRoute,
+  revalidateAllPendingRoute,
   getInvoicesByErrorCodeRoute
 } from './validationRules.js'
-import { getAuditEventsRoute } from './auditEvents.js'
+import { getAuditEventsRoute, recordAudit } from './auditEvents.js'
 import {
   listSavedViewsRoute,
   createSavedViewRoute,
@@ -78,7 +80,9 @@ import {
 import {
   getNotificationsRoute,
   markNotificationReadRoute,
-  markAllNotificationsReadRoute
+  markAllNotificationsReadRoute,
+  pushNotification,
+  pushNotificationToRoles
 } from './notifications.js'
 import { getReceiptsRoute } from './receipts.js'
 import { getSearchRoute } from './search.js'
@@ -1053,6 +1057,16 @@ router.post('/invoices/:id/reconcile', authenticateToken, async (req, res) => {
     const result = await applyReconciliationDecision(client, req.params.id, approvals, req.user?.user_id)
     await client.query('COMMIT')
     if (!result) return res.status(404).json({ error: 'not_found' })
+    recordAudit({
+      actorKind: 'user',
+      actorId: req.user?.user_id,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'reconciliation_decided',
+      entityKind: 'invoice',
+      entityId: req.params.id,
+      summary: `Reviewer approved Excel/OCR reconciliation (${Object.keys(approvals).length} field${Object.keys(approvals).length === 1 ? '' : 's'})`,
+      meta: { approvals }
+    })
     res.json({ success: true, ...result })
   } catch (err) {
     await client.query('ROLLBACK')
@@ -3143,6 +3157,288 @@ router.patch('/purchase-orders/:poId/force-close', authenticateToken, authorize(
 })
 
 // Validation summary (read-only): reason and quantities; includes full details (errors, warnings, header, lines, totals, GRN, ASN) when invalid
+// ---------------------------------------------------------------------------
+// Consolidated invoice detail — one round-trip for the invoice slide-over.
+//
+// Returns:
+//   invoice        – header row (incl. supplier + PO joins, same shape as
+//                    GET /invoices/:id)
+//   items          – invoice_lines for this invoice
+//   poLineItems    – PO lines for the linked PO (if any)
+//   grn            – every GRN row matching this invoice's PO
+//   asn            – every ASN row whose inv_no matches this invoice
+//   dc             – delivery_challans on this invoice's PO
+//   attachments    – every attachment uploaded for this invoice
+//   validation     – live engine result (28 rules) when computable
+//   reconciliation – dual-source Excel ↔ OCR snapshot diff
+//
+// Replaces 6 sequential calls from InvoiceExpansion with 1 parallel
+// fan-out. The older single-purpose endpoints stay live.
+// ---------------------------------------------------------------------------
+router.get('/invoices/:id/full', authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'bad_request', message: 'id must be numeric' })
+    }
+
+    /* 1. Header — same join as /invoices/:id so the response shape stays
+       compatible. Short-circuit if the invoice doesn't exist. */
+    const invRes = await pool.query(
+      `SELECT
+         i.*,
+         s.supplier_name,
+         s.gst_number AS supplier_gst,
+         s.pan_number AS supplier_pan,
+         s.supplier_address,
+         s.city AS supplier_city,
+         s.state_code AS supplier_state_code,
+         s.state_name AS supplier_state_name,
+         s.pincode AS supplier_pincode,
+         s.email AS supplier_email,
+         s.phone AS supplier_phone,
+         s.mobile AS supplier_mobile,
+         s.msme_number AS supplier_msme_number,
+         s.website AS supplier_website,
+         s.contact_person AS supplier_contact_person,
+         s.bank_account_name AS supplier_bank_account_name,
+         s.bank_account_number AS supplier_bank_account_number,
+         s.bank_ifsc_code AS supplier_bank_ifsc_code,
+         s.bank_name AS supplier_bank_name,
+         s.branch_name AS supplier_branch_name,
+         po.po_id AS linked_po_id,
+         po.po_number AS po_number_ref,
+         po.date AS po_date,
+         po.unit AS po_unit,
+         po.ref_unit AS po_ref_unit,
+         po.pfx AS po_pfx,
+         po.amd_no AS po_amd_no,
+         po.terms AS po_terms,
+         po.status AS po_status
+       FROM invoices i
+       LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+       LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+       WHERE i.invoice_id = $1`,
+      [id]
+    )
+    if (invRes.rows.length === 0) {
+      return res.status(404).json({ error: 'not_found' })
+    }
+    const invoice = invRes.rows[0]
+
+    /* 2. Fan out the supporting reads in parallel. */
+    const [
+      linesRes,
+      poLinesRes,
+      grnRes,
+      asnRes,
+      dcRes,
+      attachmentsRes,
+      debitNotesRes,
+      debitNoteDetailsRes,
+      poContextRes,
+      reviewerRes
+    ] = await Promise.all([
+      pool.query(
+        `SELECT * FROM invoice_lines
+          WHERE invoice_id = $1
+          ORDER BY sequence_number ASC NULLS LAST, invoice_line_id ASC`,
+        [id]
+      ),
+      invoice.po_id
+        ? pool.query(
+            `SELECT pol.po_line_id, pol.po_id, pol.sequence_number, pol.item_id,
+                    COALESCE(pol.description1, pol.item_id) AS item_name,
+                    pol.description1 AS item_description,
+                    pol.qty AS quantity, pol.unit_cost, pol.disc_pct,
+                    pol.raw_material, pol.process_description, pol.norms, pol.process_cost
+               FROM purchase_order_lines pol
+              WHERE pol.po_id = $1
+              ORDER BY pol.sequence_number ASC NULLS LAST, pol.po_line_id ASC`,
+            [invoice.po_id]
+          )
+        : Promise.resolve({ rows: [] }),
+      invoice.po_id
+        ? pool.query(
+            `SELECT g.id, g.grn_no, g.grn_date, g.dc_no, g.dc_date,
+                    g.supplier_doc_no, g.supplier_doc_date,
+                    g.grn_qty, g.accepted_qty, g.rejected_qty, g.unit_cost,
+                    g.uom, g.item, g.description_1 AS description,
+                    g.gross_weight, g.tare_weight, g.nett_weight,
+                    g.header_status, g.line_status
+               FROM grn g
+              WHERE g.po_id = $1
+              ORDER BY g.grn_date DESC NULLS LAST, g.id DESC`,
+            [invoice.po_id]
+          )
+        : Promise.resolve({ rows: [] }),
+      pool.query(
+        `SELECT a.id, a.asn_no, a.dc_no, a.dc_date, a.inv_no, a.inv_date,
+                a.lr_no, a.transporter_name, a.transporter, a.item_code,
+                a.quantity, a.uom, a.status
+           FROM asn a
+          WHERE LOWER(TRIM(COALESCE(a.inv_no, ''))) = LOWER(TRIM($1))
+          ORDER BY a.dc_date DESC NULLS LAST, a.id DESC`,
+        [invoice.invoice_number]
+      ),
+      invoice.po_id
+        ? pool.query(
+            `SELECT dc.id, dc.dc_no, dc.dc_date, dc.item, dc.description,
+                    dc.uom, dc.dc_qty, dc.consumed, dc.balance,
+                    dc.suplr_dc_no, dc.suplr_dc_date
+               FROM delivery_challans dc
+              WHERE dc.po_id = $1
+              ORDER BY dc.dc_date DESC NULLS LAST, dc.id DESC`,
+            [invoice.po_id]
+          )
+        : Promise.resolve({ rows: [] }),
+      pool.query(
+        /* invoice_attachments may not exist on every install; LEFT JOIN
+           a static empty set if the table is absent. The try/catch on
+           the outer route catches the schema error. */
+        `SELECT a.id, 'invoice'::text AS type,
+                COALESCE(a.attachment_type, 'invoice') AS attachment_type,
+                a.file_name, a.file_path, a.uploaded_at,
+                OCTET_LENGTH(a.file_data) AS file_size
+           FROM invoice_attachments a
+          WHERE a.invoice_id = $1
+          ORDER BY a.uploaded_at DESC NULLS LAST, a.id DESC`,
+        [id]
+      ).catch(() => ({ rows: [] })),
+      // Debit-note file rows (one or many) so the approver can preview the
+      // PDF before entering a value.
+      pool.query(
+        `SELECT debit_note_id, file_name, notes, uploaded_at, created_at
+           FROM debit_notes
+          WHERE invoice_id = $1
+          ORDER BY uploaded_at DESC NULLS LAST, debit_note_id DESC`,
+        [id]
+      ).catch(() => ({ rows: [] })),
+      // Line items for those debit notes.
+      pool.query(
+        `SELECT dnd.debit_note_id, dnd.debit_note_detail_id,
+                dnd.line_number, dnd.description, dnd.quantity, dnd.unit_price, dnd.amount,
+                dnd.notes
+           FROM debit_note_details dnd
+           JOIN debit_notes dn ON dn.debit_note_id = dnd.debit_note_id
+          WHERE dn.invoice_id = $1
+          ORDER BY dnd.debit_note_id, dnd.line_number NULLS LAST`,
+        [id]
+      ).catch(() => ({ rows: [] })),
+      // PO fulfillment context for the exception-approval strip:
+      //   * po_value      = Σ(qty * unit_cost * (1 − disc_pct/100)) on PO lines
+      //   * invoiced_amt  = Σ invoices.total_amount linked to this PO
+      //   * sibling_excpt = # other invoices on this PO in exception_approval
+      invoice.po_id
+        ? pool.query(
+            `WITH lines AS (
+               SELECT COALESCE(SUM(qty * unit_cost * (1 - COALESCE(disc_pct,0)/100.0)), 0)::numeric(15,2) AS po_value
+                 FROM purchase_order_lines
+                WHERE po_id = $1
+             ),
+             invs AS (
+               SELECT COALESCE(SUM(total_amount), 0)::numeric(15,2) AS invoiced_amount,
+                      COUNT(*) FILTER (
+                        WHERE status = 'exception_approval' AND invoice_id <> $2
+                      )::int AS sibling_exceptions_count
+                 FROM invoices
+                WHERE po_id = $1
+             )
+             SELECT lines.po_value, invs.invoiced_amount, invs.sibling_exceptions_count
+               FROM lines, invs`,
+            [invoice.po_id, id]
+          ).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+      // Reviewer + status-change attribution. reviewed_by is the
+      // reconciliation reviewer; we also surface the latest invoice_status_audit
+      // row (if the trigger is installed) so the UI can show "validated by …".
+      invoice.reviewed_by
+        ? pool.query(
+            `SELECT user_id, username, full_name FROM users WHERE user_id = $1`,
+            [invoice.reviewed_by]
+          ).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] })
+    ])
+
+    /* 3. Validation summary — re-uses the engine. Best-effort; the
+       slide-over can render without it. */
+    let validation = null
+    try {
+      validation = await validateInvoiceAgainstPoGrn(id)
+    } catch (err) {
+      console.warn('validation summary in /invoices/:id/full:', err.message)
+    }
+
+    /* 4. Reconciliation snapshot — same shape as /invoices/:id/reconciliation. */
+    let reconciliation = null
+    if (invoice.excel_snapshot || invoice.ocr_snapshot) {
+      reconciliation = {
+        invoice_id: id,
+        reconciliation_status: invoice.reconciliation_status,
+        source: invoice.source,
+        excel_snapshot: invoice.excel_snapshot,
+        ocr_snapshot: invoice.ocr_snapshot,
+        excel_received_at: invoice.excel_received_at,
+        ocr_received_at: invoice.ocr_received_at,
+        mismatches: invoice.mismatches?.mismatches || invoice.mismatches || null,
+        reviewed_at: invoice.reviewed_at,
+        reviewed_by: invoice.reviewed_by
+      }
+    }
+
+    // Assemble debit_notes with their nested details for the review panel.
+    const detailsByNote = new Map()
+    for (const d of debitNoteDetailsRes.rows) {
+      if (!detailsByNote.has(d.debit_note_id)) detailsByNote.set(d.debit_note_id, [])
+      detailsByNote.get(d.debit_note_id).push(d)
+    }
+    const debit_notes = debitNotesRes.rows.map((dn) => ({
+      ...dn,
+      details: detailsByNote.get(dn.debit_note_id) || []
+    }))
+    const debit_note_total = debitNoteDetailsRes.rows.reduce(
+      (sum, d) => sum + (Number(d.amount) || 0),
+      0
+    )
+
+    // PO fulfillment % for the exception-approval context.
+    const poCtx = poContextRes.rows[0] || {}
+    const poValue = Number(poCtx.po_value || 0)
+    const invoicedAmount = Number(poCtx.invoiced_amount || 0)
+    const po_fulfillment = invoice.po_id
+      ? {
+          po_value: poValue,
+          invoiced_amount: invoicedAmount,
+          pct_consumed: poValue > 0
+            ? Math.round((invoicedAmount / poValue) * 100)
+            : null,
+          sibling_exceptions_count: Number(poCtx.sibling_exceptions_count || 0)
+        }
+      : null
+
+    const reviewer = reviewerRes.rows[0] || null
+
+    res.json({
+      ...invoice,
+      items: linesRes.rows,
+      poLineItems: poLinesRes.rows,
+      grn: grnRes.rows,
+      asn: asnRes.rows,
+      dc:  dcRes.rows,
+      attachments: attachmentsRes.rows,
+      debit_notes,
+      debit_note_total,
+      po_fulfillment,
+      reviewer,
+      validation,
+      reconciliation
+    })
+  } catch (err) {
+    console.error('Invoice full detail error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 router.get('/invoices/:id/validation-summary', authenticateToken, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10)
@@ -3185,6 +3481,57 @@ router.post('/invoices/:id/validate', authenticateToken, async (req, res) => {
       })
     }
     const result = await validateAndUpdateInvoiceStatus(id)
+    recordAudit({
+      actorKind: req.user ? 'user' : 'system',
+      actorId: req.user?.user_id,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'invoice_validated',
+      entityKind: 'invoice',
+      entityId: id,
+      summary: result?.invoiceStatus
+        ? `Validation finished — status now ${result.invoiceStatus}`
+        : 'Validation finished',
+      meta: {
+        invoiceStatus: result?.invoiceStatus || null,
+        action: result?.action || null,
+        errors_count: Array.isArray(result?.errors) ? result.errors.length : null,
+        warnings_count: Array.isArray(result?.warnings) ? result.warnings.length : null
+      }
+    })
+    // Notify approvers when the engine pushed the invoice into a queue
+    // that requires human attention. Fire-and-forget; the response to the
+    // caller doesn't wait.
+    if (result?.invoiceStatus === 'debit_note_approval') {
+      pushNotificationToRoles({
+        roles: ['admin', 'manager', 'finance'],
+        excludeUserId: req.user?.user_id,
+        variant: 'warn',
+        title: 'Debit-note approval needed',
+        body: `Invoice ${result?.invoiceNumber || `#${id}`} moved to debit-note approval after validation.`,
+        link: `/invoices/validate/${id}`,
+        meta: { invoice_id: id, status: result.invoiceStatus }
+      })
+    } else if (result?.invoiceStatus === 'exception_approval') {
+      pushNotificationToRoles({
+        roles: ['admin', 'manager', 'finance'],
+        excludeUserId: req.user?.user_id,
+        variant: 'warn',
+        title: 'Exception approval needed',
+        body: `Invoice ${result?.invoiceNumber || `#${id}`} flagged — PO is already fulfilled.`,
+        link: `/invoices/validate/${id}`,
+        meta: { invoice_id: id, status: result.invoiceStatus }
+      })
+    } else if (result?.invoiceStatus === 'validated') {
+      pushNotificationToRoles({
+        roles: ['admin', 'manager', 'finance'],
+        excludeUserId: req.user?.user_id,
+        variant: 'success',
+        title: 'Invoice ready for payment approval',
+        body: `Invoice ${result?.invoiceNumber || `#${id}`} passed validation.`,
+        link: `/payments/approve`,
+        meta: { invoice_id: id }
+      })
+    }
     res.json(result)
   } catch (err) {
     res.status(500).json({ error: 'server_error', message: err.message })
@@ -3205,10 +3552,30 @@ router.post('/invoices/:id/validate-resolution', authenticateToken, async (req, 
     if (resolution === 'proceed_to_payment') {
       const applied = await proceedToPaymentFromMismatch(client, id)
       await client.query('COMMIT')
+      recordAudit({
+        actorKind: 'user',
+        actorId: req.user?.user_id,
+        actorLabel: req.user?.username || req.user?.full_name || null,
+        action: 'invoice_resolution_chosen',
+        entityKind: 'invoice',
+        entityId: id,
+        summary: 'Mismatch overridden — invoice proceeds to payment',
+        meta: { resolution: 'proceed_to_payment' }
+      })
       return res.json({ action: 'validated', ...applied })
     }
     await moveToDebitNoteApproval(client, id)
     await client.query('COMMIT')
+    recordAudit({
+      actorKind: 'user',
+      actorId: req.user?.user_id,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'invoice_resolution_chosen',
+      entityKind: 'invoice',
+      entityId: id,
+      summary: 'Mismatch routed to debit-note approval',
+      meta: { resolution: 'send_to_debit_note' }
+    })
     return res.json({ action: 'debit_note_approval', invoiceStatus: 'debit_note_approval' })
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
@@ -3228,6 +3595,74 @@ router.patch('/invoices/:id/exception-approve', authenticateToken, authorize(['a
     await client.query('BEGIN')
     const result = await exceptionApprove(client, id)
     await client.query('COMMIT')
+    recordAudit({
+      actorKind: 'user',
+      actorId: req.user?.user_id,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'invoice_exception_approved',
+      entityKind: 'invoice',
+      entityId: id,
+      summary: 'Exception approved — invoice moved to ready_for_payment despite PO already fulfilled',
+      meta: { invoiceStatus: result?.invoiceStatus || null }
+    })
+    pushNotificationToRoles({
+      roles: ['admin', 'manager', 'finance'],
+      excludeUserId: req.user?.user_id,
+      variant: 'success',
+      title: 'Exception approved',
+      body: `Invoice #${id} cleared by exception — ready for payment.`,
+      link: '/payments/approve',
+      meta: { invoice_id: id }
+    })
+    res.json(result)
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    if (err.message?.includes('not found')) return res.status(404).json({ error: 'invoice_not_found', message: err.message })
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
+  }
+})
+
+/**
+ * Admin override: manually mark an invoice `validated` despite open
+ * validation errors. The frontend gates visibility to invoices that have
+ * full reference data (PO/GRN/etc.) and only soft mismatches (rate/qty/
+ * supplier/GST), but the route enforces the role gate and otherwise
+ * trusts the human override. The override + actor are recorded in the
+ * audit log and on the invoices.manual_override_* columns.
+ */
+router.post('/invoices/:id/admin-approve', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const id = parseInt(req.params.id, 10)
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 500) : null
+    await client.query('BEGIN')
+    const result = await adminOverrideApprove(client, id, {
+      label: req.user?.username || req.user?.full_name || null,
+      note,
+    })
+    await client.query('COMMIT')
+    recordAudit({
+      actorKind: 'user',
+      actorId: req.user?.user_id,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'invoice_admin_override_approved',
+      entityKind: 'invoice',
+      entityId: id,
+      summary: 'Admin override — invoice manually validated despite open blockers',
+      meta: { invoiceStatus: result?.invoiceStatus || null, note }
+    })
+    pushNotificationToRoles({
+      roles: ['admin', 'manager', 'finance'],
+      excludeUserId: req.user?.user_id,
+      variant: 'warn',
+      title: 'Manual override',
+      body: `Invoice #${id} validated by admin override (blockers ignored).`,
+      link: '/payments/approve',
+      meta: { invoice_id: id }
+    })
     res.json(result)
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
@@ -3245,9 +3680,50 @@ router.patch('/invoices/:id/debit-note-approve', authenticateToken, authorize(['
     const id = parseInt(req.params.id, 10)
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid_invoice_id' })
     const { debit_note_value } = req.body || {}
+    let numericValue = debit_note_value != null ? parseFloat(debit_note_value) : null
+    // If the caller omitted a value, auto-compute it from existing
+    // debit_note_details.amount sum so bulk approval flows (e.g. the
+    // Reconciliation page's "Approve all debit notes" action) don't have
+    // to fetch each invoice's lines client-side first.
+    if (numericValue == null || !Number.isFinite(numericValue) || numericValue <= 0) {
+      const { rows } = await pool.query(
+        `SELECT COALESCE(SUM(dnd.amount), 0)::numeric(15,2) AS computed
+           FROM debit_notes dn
+           LEFT JOIN debit_note_details dnd ON dnd.debit_note_id = dn.debit_note_id
+          WHERE dn.invoice_id = $1`,
+        [id]
+      )
+      const computed = parseFloat(rows[0]?.computed || 0)
+      if (Number.isFinite(computed) && computed > 0) {
+        numericValue = computed
+      }
+    }
     await client.query('BEGIN')
-    const result = await debitNoteApprove(client, id, debit_note_value != null ? parseFloat(debit_note_value) : null)
+    const result = await debitNoteApprove(client, id, numericValue)
     await client.query('COMMIT')
+    recordAudit({
+      actorKind: 'user',
+      actorId: req.user?.user_id,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'invoice_debit_note_approved',
+      entityKind: 'invoice',
+      entityId: id,
+      summary: numericValue != null && Number.isFinite(numericValue)
+        ? `Debit note approved at ₹${numericValue.toLocaleString('en-IN')}`
+        : 'Debit note approved',
+      meta: { debit_note_value: numericValue }
+    })
+    pushNotificationToRoles({
+      roles: ['admin', 'manager', 'finance'],
+      excludeUserId: req.user?.user_id,
+      variant: 'success',
+      title: 'Debit note approved',
+      body: numericValue != null && Number.isFinite(numericValue)
+        ? `Invoice #${id} debit note approved at ₹${numericValue.toLocaleString('en-IN')}.`
+        : `Invoice #${id} debit note approved.`,
+      link: '/payments/approve',
+      meta: { invoice_id: id, debit_note_value: numericValue }
+    })
     res.json(result)
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
@@ -3259,6 +3735,169 @@ router.patch('/invoices/:id/debit-note-approve', authenticateToken, authorize(['
 })
 
 // Get purchase order line items by PO ID – all columns from purchase_order_lines schema only
+// ---------------------------------------------------------------------------
+// Consolidated PO detail — one round-trip for the PO slide-over.
+//
+// Returns:
+//   po          – header row from purchase_orders + supplier basics
+//   supplier    – full supplier master (gst, address, contact, bank)
+//   lines       – purchase_order_lines for this PO (sequence order)
+//   invoices    – every invoice keyed to this PO, with totals + status
+//   grn         – all GRN rows on this PO
+//   asn         – all ASN rows whose inv_no matches one of the PO's invoices
+//   dc          – all delivery_challans on this PO
+//   schedules   – all po_schedules on this PO
+//   totals      – { po_value, invoiced_amount, paid_amount, pct_consumed }
+//
+// Replaces 6 sequential round-trips from PoExpansion with 1 parallel
+// fan-out of 8 SQL queries. Old per-tab endpoints stay live so other
+// consumers (and the existing list filter `?poNumber=…`) keep working.
+// ---------------------------------------------------------------------------
+router.get('/purchase-orders/:poId/detail', authenticateToken, async (req, res) => {
+  try {
+    const poId = parseInt(req.params.poId, 10)
+    if (!Number.isFinite(poId)) {
+      return res.status(400).json({ error: 'bad_request', message: 'poId must be numeric' })
+    }
+
+    /* 1. PO + supplier (joined) — base header. If this comes back empty we
+       short-circuit because nothing else makes sense without it. */
+    const poRes = await pool.query(
+      `SELECT
+         po.po_id, po.po_number, po.date AS po_date, po.unit, po.ref_unit,
+         po.pfx, po.amd_no, po.suplr_id, po.supplier_id, po.terms, po.status,
+         s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan,
+         s.supplier_address, s.city AS supplier_city,
+         s.state_name AS supplier_state_name, s.state_code AS supplier_state_code,
+         s.pincode AS supplier_pincode,
+         s.email AS supplier_email, s.phone AS supplier_phone, s.mobile AS supplier_mobile,
+         s.contact_person AS supplier_contact_person,
+         s.msme_number AS supplier_msme_number, s.website AS supplier_website,
+         s.bank_account_name AS supplier_bank_account_name,
+         s.bank_account_number AS supplier_bank_account_number,
+         s.bank_ifsc_code AS supplier_bank_ifsc_code,
+         s.bank_name AS supplier_bank_name, s.branch_name AS supplier_branch_name
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON s.supplier_id = po.supplier_id
+       WHERE po.po_id = $1`,
+      [poId]
+    )
+    if (poRes.rows.length === 0) {
+      return res.status(404).json({ error: 'not_found', message: `PO ${poId} does not exist` })
+    }
+    const po = poRes.rows[0]
+
+    /* 2. Fan-out everything else in parallel. Each query is keyed on
+       po_id (or invoice_id for the ASN-via-invoice join). */
+    const [linesRes, invRes, grnRes, dcRes, schedRes] = await Promise.all([
+      pool.query(
+        `SELECT pol.po_line_id, pol.po_id, pol.sequence_number, pol.item_id,
+                pol.description1, pol.qty, pol.unit_cost, pol.disc_pct,
+                pol.raw_material, pol.process_description, pol.norms, pol.process_cost
+           FROM purchase_order_lines pol
+          WHERE pol.po_id = $1
+          ORDER BY pol.sequence_number ASC NULLS LAST, pol.po_line_id ASC`,
+        [poId]
+      ),
+      pool.query(
+        `SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.po_number,
+                i.total_amount, i.tax_amount, i.status, i.payment_due_date,
+                i.debit_note_value, i.source,
+                s.supplier_name
+           FROM invoices i
+           LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+          WHERE i.po_id = $1
+          ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC`,
+        [poId]
+      ),
+      pool.query(
+        `SELECT g.id, g.po_id, g.grn_no, g.grn_date, g.dc_no, g.dc_date,
+                g.supplier_doc_no, g.supplier_doc_date,
+                g.grn_qty, g.accepted_qty, g.rejected_qty, g.unit_cost,
+                g.uom, g.item, g.description_1 AS description,
+                g.gross_weight, g.tare_weight, g.nett_weight,
+                g.header_status, g.line_status
+           FROM grn g
+          WHERE g.po_id = $1
+          ORDER BY g.grn_date DESC NULLS LAST, g.id DESC`,
+        [poId]
+      ),
+      pool.query(
+        `SELECT dc.id, dc.po_id, dc.dc_no, dc.dc_date, dc.item, dc.description,
+                dc.uom, dc.dc_qty, dc.consumed, dc.in_process, dc.balance,
+                dc.suplr_dc_no, dc.suplr_dc_date
+           FROM delivery_challans dc
+          WHERE dc.po_id = $1
+          ORDER BY dc.dc_date DESC NULLS LAST, dc.id DESC`,
+        [poId]
+      ),
+      pool.query(
+        `SELECT s.id, s.po_id, s.schedule_ref, s.line_no, s.item_id, s.description,
+                s.sched_qty, s.sched_date, s.promise_date, s.required_date,
+                s.uom, s.status
+           FROM po_schedules s
+          WHERE s.po_id = $1
+          ORDER BY s.sched_date DESC NULLS LAST, s.id DESC`,
+        [poId]
+      )
+    ])
+
+    /* 3. ASN — join via invoice number (no direct po_id link in asn). */
+    let asnRows = []
+    if (invRes.rows.length > 0) {
+      const invNos = invRes.rows.map((r) => r.invoice_number).filter(Boolean)
+      if (invNos.length > 0) {
+        const asnRes = await pool.query(
+          `SELECT a.id, a.asn_no, a.dc_no, a.dc_date, a.inv_no, a.inv_date,
+                  a.lr_no, a.transporter_name, a.transporter, a.item_code,
+                  a.quantity, a.uom, a.status
+             FROM asn a
+            WHERE LOWER(TRIM(a.inv_no)) = ANY($1::text[])
+            ORDER BY a.dc_date DESC NULLS LAST, a.id DESC`,
+          [invNos.map((n) => String(n).toLowerCase().trim())]
+        )
+        asnRows = asnRes.rows
+      }
+    }
+
+    /* 4. Compute totals.
+       po_value      = Σ (line.qty * line.unit_cost * (1 − disc_pct/100))
+       invoiced_amt  = Σ invoices.total_amount
+       paid_amt      = Σ invoices.total_amount WHERE status='paid'
+       pct_consumed  = invoiced / po_value */
+    const poValue = linesRes.rows.reduce((sum, l) => {
+      const q = Number(l.qty) || 0
+      const r = Number(l.unit_cost) || 0
+      const d = Number(l.disc_pct) || 0
+      return sum + q * r * (1 - d / 100)
+    }, 0)
+    const invoicedAmount = invRes.rows.reduce((s, i) => s + (Number(i.total_amount) || 0), 0)
+    const paidAmount = invRes.rows
+      .filter((i) => String(i.status || '').toLowerCase() === 'paid')
+      .reduce((s, i) => s + (Number(i.total_amount) || 0), 0)
+    const pctConsumed = poValue > 0 ? Math.min(100, Math.round((invoicedAmount / poValue) * 100)) : 0
+
+    res.json({
+      po,
+      lines:     linesRes.rows,
+      invoices:  invRes.rows,
+      grn:       grnRes.rows,
+      asn:       asnRows,
+      dc:        dcRes.rows,
+      schedules: schedRes.rows,
+      totals: {
+        po_value: poValue,
+        invoiced_amount: invoicedAmount,
+        paid_amount: paidAmount,
+        pct_consumed: pctConsumed
+      }
+    })
+  } catch (err) {
+    console.error('PO detail error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
 router.get('/purchase-orders/:poId/line-items', async (req, res) => {
   try {
     const { poId } = req.params
@@ -4439,7 +5078,14 @@ router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 
               s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
               s.bank_account_name, s.bank_account_number, s.bank_ifsc_code, s.bank_name, s.branch_name,
               po.po_number AS po_number_ref, po.date AS po_date, po.terms AS po_terms, po.status AS po_status,
-              pa.id AS payment_approval_id, pa.status AS payment_approval_status
+              pa.id AS payment_approval_id, pa.status AS payment_approval_status,
+              -- Per-invoice debit-note rollup so the approver can see the
+              -- dispute amount + line count before clicking through.
+              (SELECT COUNT(*)::int FROM debit_notes dn WHERE dn.invoice_id = i.invoice_id) AS debit_note_count,
+              (SELECT COALESCE(SUM(dnd.amount), 0)::numeric(15,2)
+                 FROM debit_notes dn
+                 LEFT JOIN debit_note_details dnd ON dnd.debit_note_id = dn.debit_note_id
+                WHERE dn.invoice_id = i.invoice_id) AS debit_note_total
        ${baseFrom}
        ORDER BY i.payment_due_date ASC NULLS LAST, i.invoice_id ASC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -4458,10 +5104,11 @@ router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 
     const invoiceIds = invoices.map((r) => r.invoice_id).filter((v) => v != null)
     const poIds = [...new Set(invoices.map((r) => r.po_id).filter((v) => v != null))]
 
-    const [grnRes, asnRes, poLinesRes, invoiceLinesRes] = await Promise.all([
+    const [grnRes, asnRes, poLinesRes, invoiceLinesRes, debitNotesRes] = await Promise.all([
       poIds.length
         ? pool.query(
-            `SELECT g.po_id, g.id, g.grn_no, g.grn_date, g.dc_no, g.dc_date, g.grn_qty, g.accepted_qty, g.unit_cost
+            `SELECT g.po_id, g.id, g.grn_no, g.grn_date, g.dc_no, g.dc_date, g.grn_qty, g.accepted_qty,
+                    g.rejected_qty, g.rework_qty, g.excess_qty, g.unit_cost
              FROM grn g WHERE g.po_id = ANY($1::bigint[])
              ORDER BY g.grn_date DESC NULLS LAST`,
             [poIds]
@@ -4489,17 +5136,32 @@ router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 
             [poIds]
           )
         : Promise.resolve({ rows: [] }),
+      // invoice_lines: schema has cgst_*, sgst_*, total_tax_amount only.
+      // igst_* columns don't exist; we leave them off so this query stops
+      // failing on every page load.
       pool.query(
         `SELECT il.invoice_id, il.invoice_line_id, il.sequence_number, il.po_line_id,
                 il.item_name, il.hsn_sac, il.uom,
                 il.billed_qty, il.weight, il.count, il.rate, il.rate_per, il.line_total,
                 il.taxable_value, il.cgst_rate, il.cgst_amount, il.sgst_rate, il.sgst_amount,
-                il.igst_rate, il.igst_amount, il.total_tax_amount
+                il.total_tax_amount
          FROM invoice_lines il
          WHERE il.invoice_id = ANY($1::bigint[])
          ORDER BY il.invoice_id, il.sequence_number ASC NULLS LAST, il.invoice_line_id ASC`,
         [invoiceIds]
-      )
+      ),
+      // Debit-note line details, scoped to this page, so the approver can
+      // expand each invoice and see what they're paying around.
+      pool.query(
+        `SELECT dn.invoice_id, dn.debit_note_id, dn.file_name, dn.notes AS dn_notes, dn.uploaded_at,
+                dnd.line_number, dnd.description, dnd.quantity, dnd.unit_price, dnd.amount,
+                dnd.notes AS line_notes
+         FROM debit_notes dn
+         LEFT JOIN debit_note_details dnd ON dnd.debit_note_id = dn.debit_note_id
+         WHERE dn.invoice_id = ANY($1::bigint[])
+         ORDER BY dn.invoice_id, dn.debit_note_id, dnd.line_number NULLS LAST`,
+        [invoiceIds]
+      ).catch(() => ({ rows: [] }))
     ])
 
     // Group helpers
@@ -4521,13 +5183,15 @@ router.get('/payments/pending-approval', authenticateToken, authorize(['admin', 
     const asnByPo = groupByKey(asnRes.rows, 'po_id')
     const polByPo = groupByKey(poLinesRes.rows, 'po_id')
     const ilByInv = groupByKey(invoiceLinesRes.rows, 'invoice_id')
+    const dnByInv = groupByKey(debitNotesRes.rows, 'invoice_id')
 
     const items = invoices.map((inv) => ({
       ...inv,
       grn_list: inv.po_id ? grnByPo.get(inv.po_id) || [] : [],
       asn_list: inv.po_id ? asnByPo.get(inv.po_id) || [] : [],
       po_lines: inv.po_id ? polByPo.get(inv.po_id) || [] : [],
-      invoice_lines: ilByInv.get(inv.invoice_id) || []
+      invoice_lines: ilByInv.get(inv.invoice_id) || [],
+      debit_note_details: dnByInv.get(inv.invoice_id) || []
     }))
 
     res.json({ items, total, limit, offset })
@@ -4599,6 +5263,33 @@ router.post('/payments/approve', authenticateToken, authorize(['admin', 'manager
       [invId]
     )
     await client.query('COMMIT')
+    recordAudit({
+      actorKind: 'user',
+      actorId: userId,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'payment_approved',
+      entityKind: 'invoice',
+      entityId: invId,
+      summary: `Approved payment for ₹${Number(totalAmount || 0).toLocaleString('en-IN')}`,
+      meta: {
+        total_amount: Number(totalAmount) || 0,
+        debit_note_value: row.debit_note_value != null ? Number(row.debit_note_value) : null,
+        po_id: row.po_id,
+        supplier_id: row.supplier_id,
+        bank_account_number: bankNo || null,
+        bank_ifsc_code: ifsc || null
+      }
+    })
+    // Notify finance/admin so the Ready-for-payment queue grows visibly.
+    pushNotificationToRoles({
+      roles: ['admin', 'manager', 'finance'],
+      excludeUserId: userId,
+      variant: 'success',
+      title: 'Invoice ready for payment',
+      body: `₹${Number(totalAmount || 0).toLocaleString('en-IN')} approved on invoice #${invId}.`,
+      link: '/payments/ready',
+      meta: { invoice_id: invId, amount: Number(totalAmount) || 0 }
+    })
     res.json({ success: true, message: 'Payment approved' })
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
@@ -4642,10 +5333,113 @@ router.patch('/payments/reject', authenticateToken, authorize(['admin', 'manager
       "UPDATE invoices SET status = 'rejected', updated_at = NOW() WHERE invoice_id = $1",
       [invId]
     )
+    recordAudit({
+      actorKind: 'user',
+      actorId: userId,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'payment_rejected',
+      entityKind: 'invoice',
+      entityId: invId,
+      summary: rejection_reason
+        ? `Rejected: ${String(rejection_reason).slice(0, 240)}`
+        : 'Payment rejected',
+      meta: {
+        rejection_reason: rejection_reason || null,
+        total_amount: Number(totalAmount) || 0,
+        po_id: row.po_id,
+        supplier_id: row.supplier_id
+      }
+    })
+    pushNotificationToRoles({
+      roles: ['admin', 'manager', 'finance'],
+      excludeUserId: userId,
+      variant: 'danger',
+      title: 'Invoice rejected',
+      body: `Invoice #${invId} rejected${rejection_reason ? ': ' + String(rejection_reason).slice(0, 120) : ''}.`,
+      link: '/payments/history',
+      meta: { invoice_id: invId, reason: rejection_reason || null }
+    })
     res.json({ success: true, message: 'Payment rejected' })
   } catch (err) {
     console.error('Reject payment error:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// Re-open a rejected payment_approvals row → flips the invoice back to
+// `validated` so it re-enters the pending-approval queue. The approval row
+// is updated (not deleted) so the rejection audit trail is preserved on
+// payment_approvals.rejected_by / rejected_at / rejection_reason — these
+// stay readable in the History view as historical context.
+router.patch('/payments/reopen', authenticateToken, authorize(['admin', 'manager', 'finance']), async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const userId = req.user?.user_id
+    const { invoiceId } = req.body || {}
+    if (!invoiceId) return res.status(400).json({ error: 'invoiceId_required' })
+    const invId = parseInt(invoiceId, 10)
+    if (Number.isNaN(invId)) return res.status(400).json({ error: 'invalid_invoice_id' })
+
+    await client.query('BEGIN')
+
+    // Sanity-check: only re-open if the approval is currently rejected.
+    const pa = await client.query(
+      `SELECT id, status FROM payment_approvals WHERE invoice_id = $1`,
+      [invId]
+    )
+    if (pa.rows.length === 0 || pa.rows[0].status !== 'rejected') {
+      await client.query('ROLLBACK')
+      return res.status(409).json({
+        error: 'not_rejected',
+        message: 'Invoice is not in rejected status — nothing to re-open.'
+      })
+    }
+
+    // Flip both rows back. We keep the rejection_reason / rejected_by
+    // / rejected_at so the audit chain is still readable — just move the
+    // status forward.
+    await client.query(
+      `UPDATE payment_approvals
+          SET status = 'pending_approval',
+              approved_by = NULL,
+              approved_at = NULL,
+              updated_at = NOW()
+        WHERE invoice_id = $1`,
+      [invId]
+    )
+    await client.query(
+      `UPDATE invoices SET status = 'validated', updated_at = NOW() WHERE invoice_id = $1`,
+      [invId]
+    )
+    await client.query('COMMIT')
+
+    recordAudit({
+      actorKind: 'user',
+      actorId: userId,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'payment_reopened',
+      entityKind: 'invoice',
+      entityId: invId,
+      summary: 'Rejected invoice re-opened for re-approval',
+      meta: { from_status: 'rejected', to_status: 'pending_approval' }
+    })
+    pushNotificationToRoles({
+      roles: ['admin', 'manager', 'finance'],
+      excludeUserId: userId,
+      variant: 'info',
+      title: 'Rejected invoice re-opened',
+      body: `Invoice #${invId} is back in the Approve queue.`,
+      link: '/payments/approve',
+      meta: { invoice_id: invId }
+    })
+
+    res.json({ success: true, message: 'Invoice re-opened for re-approval' })
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Re-open payment error:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  } finally {
+    client.release()
   }
 })
 
@@ -4675,6 +5469,7 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
       JOIN invoices i ON i.invoice_id = pa.invoice_id
       LEFT JOIN suppliers s ON s.supplier_id = pa.supplier_id
       LEFT JOIN purchase_orders po ON po.po_id = pa.po_id
+      LEFT JOIN users u_app ON u_app.user_id = pa.approved_by
       WHERE ${filters.join(' AND ')}
     `
 
@@ -4684,11 +5479,18 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
       `SELECT pa.id, pa.invoice_id, pa.po_id, pa.supplier_id, pa.status, pa.total_amount, pa.debit_note_value,
               pa.bank_account_name, pa.bank_account_number, pa.bank_ifsc_code, pa.bank_name, pa.branch_name,
               pa.approved_by, pa.approved_at, pa.notes,
+              u_app.username AS approved_by_username, u_app.full_name AS approved_by_name,
               (SELECT COALESCE(SUM(pt.amount), 0)::numeric(15,2) FROM payment_transactions pt WHERE pt.payment_approval_id = pa.id) AS paid_amount,
               i.invoice_number, i.invoice_date, i.payment_due_date,
               s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan,
               s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
-              po.po_number, po.date AS po_date, po.terms AS po_terms
+              po.po_number, po.date AS po_date, po.terms AS po_terms,
+              -- Debit-note rollup so finance can see dispute size before paying.
+              (SELECT COUNT(*)::int FROM debit_notes dn WHERE dn.invoice_id = pa.invoice_id) AS debit_note_count,
+              (SELECT COALESCE(SUM(dnd.amount), 0)::numeric(15,2)
+                 FROM debit_notes dn
+                 LEFT JOIN debit_note_details dnd ON dnd.debit_note_id = dn.debit_note_id
+                WHERE dn.invoice_id = pa.invoice_id) AS debit_note_total
        ${baseFrom}
        ORDER BY i.payment_due_date ASC NULLS LAST, pa.id ASC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -4704,10 +5506,13 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
     }
 
     const poIds = [...new Set(rows.map((r) => r.po_id).filter((v) => v != null))]
-    const [grnRes, asnRes] = await Promise.all([
+    const approvalIds = rows.map((r) => r.id)
+    const invoiceIds = rows.map((r) => r.invoice_id).filter((v) => v != null)
+    const [grnRes, asnRes, txRes, dnRes] = await Promise.all([
       poIds.length
         ? pool.query(
-            `SELECT po_id, id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty, unit_cost
+            `SELECT po_id, id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty,
+                    rejected_qty, rework_qty, excess_qty, unit_cost
              FROM grn WHERE po_id = ANY($1::bigint[]) ORDER BY grn_date DESC NULLS LAST`,
             [poIds]
           )
@@ -4722,6 +5527,30 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
              ORDER BY a.dc_date DESC NULLS LAST`,
             [poIds]
           )
+        : Promise.resolve({ rows: [] }),
+      approvalIds.length
+        ? pool.query(
+            `SELECT pt.payment_approval_id, pt.id, pt.amount, pt.paid_at, pt.notes,
+                    pt.payment_type, pt.payment_reference,
+                    u.username AS paid_by_username, u.full_name AS paid_by_name
+             FROM payment_transactions pt
+             LEFT JOIN users u ON u.user_id = pt.paid_by
+             WHERE pt.payment_approval_id = ANY($1::bigint[])
+             ORDER BY pt.paid_at ASC`,
+            [approvalIds]
+          )
+        : Promise.resolve({ rows: [] }),
+      invoiceIds.length
+        ? pool.query(
+            `SELECT dn.invoice_id, dn.debit_note_id, dn.file_name, dn.notes AS dn_notes, dn.uploaded_at,
+                    dnd.line_number, dnd.description, dnd.quantity, dnd.unit_price, dnd.amount,
+                    dnd.notes AS line_notes
+             FROM debit_notes dn
+             LEFT JOIN debit_note_details dnd ON dnd.debit_note_id = dn.debit_note_id
+             WHERE dn.invoice_id = ANY($1::bigint[])
+             ORDER BY dn.invoice_id, dn.debit_note_id, dnd.line_number NULLS LAST`,
+            [invoiceIds]
+          ).catch(() => ({ rows: [] }))
         : Promise.resolve({ rows: [] })
     ])
 
@@ -4735,11 +5564,23 @@ router.get('/payments/ready', authenticateToken, authorize(['admin', 'manager', 
       if (!asnByPo.has(r.po_id)) asnByPo.set(r.po_id, [])
       asnByPo.get(r.po_id).push(r)
     }
+    const txByApproval = new Map()
+    for (const r of txRes.rows) {
+      if (!txByApproval.has(r.payment_approval_id)) txByApproval.set(r.payment_approval_id, [])
+      txByApproval.get(r.payment_approval_id).push(r)
+    }
+    const dnByInv = new Map()
+    for (const r of dnRes.rows) {
+      if (!dnByInv.has(r.invoice_id)) dnByInv.set(r.invoice_id, [])
+      dnByInv.get(r.invoice_id).push(r)
+    }
 
     const items = rows.map((r) => ({
       ...r,
       grn_list: r.po_id ? grnByPo.get(r.po_id) || [] : [],
-      asn_list: r.po_id ? asnByPo.get(r.po_id) || [] : []
+      asn_list: r.po_id ? asnByPo.get(r.po_id) || [] : [],
+      payment_transactions: txByApproval.get(r.id) || [],
+      debit_note_details: r.invoice_id ? dnByInv.get(r.invoice_id) || [] : []
     }))
 
     res.json({ items, total, limit, offset })
@@ -4819,6 +5660,25 @@ router.post('/payments/record-payment', authenticateToken, authorize(['admin', '
     }
 
     await client.query('COMMIT')
+    recordAudit({
+      actorKind: 'user',
+      actorId: userId,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: isFullyPaid ? 'payment_completed' : 'payment_partial_recorded',
+      entityKind: 'invoice',
+      entityId: row.invoice_id,
+      summary: isFullyPaid
+        ? `Payment of ₹${payAmount.toLocaleString('en-IN')} completed`
+        : `Partial payment of ₹${payAmount.toLocaleString('en-IN')} recorded`,
+      meta: {
+        payment_approval_id: approvalId,
+        amount: payAmount,
+        paid_so_far: newPaidTotal,
+        remaining: totalAmount - newPaidTotal,
+        payment_type: paymentType || null,
+        payment_reference: paymentReference || null
+      }
+    })
     res.json({
       success: true,
       message: isFullyPaid ? 'Payment completed' : 'Partial payment recorded',
@@ -4847,8 +5707,8 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
     const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0
 
     const filters = [
-      "pa.status IN ('payment_done', 'partially_paid')",
-      "(pa.status = 'partially_paid' OR pa.payment_done_at IS NOT NULL)"
+      "pa.status IN ('payment_done', 'partially_paid', 'rejected')",
+      "(pa.status IN ('partially_paid', 'rejected') OR pa.payment_done_at IS NOT NULL)"
     ]
     const params = []
     const pushParam = (value) => {
@@ -4865,6 +5725,8 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
       LEFT JOIN suppliers s ON s.supplier_id = pa.supplier_id
       LEFT JOIN purchase_orders po ON po.po_id = pa.po_id
       LEFT JOIN users u_done ON u_done.user_id = pa.payment_done_by
+      LEFT JOIN users u_app ON u_app.user_id = pa.approved_by
+      LEFT JOIN users u_rej ON u_rej.user_id = pa.rejected_by
       WHERE ${filters.join(' AND ')}
     `
 
@@ -4874,12 +5736,20 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
       `SELECT pa.id, pa.invoice_id, pa.po_id, pa.supplier_id, pa.status, pa.total_amount, pa.debit_note_value,
               pa.bank_account_name, pa.bank_account_number, pa.bank_ifsc_code, pa.bank_name, pa.branch_name,
               pa.approved_by, pa.approved_at, pa.payment_done_by, pa.payment_done_at,
+              pa.rejected_by, pa.rejected_at, pa.rejection_reason,
               pa.payment_type, pa.payment_reference, pa.notes,
               i.invoice_number, i.invoice_date, i.payment_due_date,
               s.supplier_name, s.gst_number AS supplier_gst, s.pan_number AS supplier_pan,
               s.supplier_address, s.email AS supplier_email, s.phone AS supplier_phone,
               po.po_number, po.date AS po_date, po.terms AS po_terms,
-              u_done.username AS payment_done_by_username, u_done.full_name AS payment_done_by_name
+              u_done.username AS payment_done_by_username, u_done.full_name AS payment_done_by_name,
+              u_app.username  AS approved_by_username,     u_app.full_name  AS approved_by_name,
+              u_rej.username  AS rejected_by_username,     u_rej.full_name  AS rejected_by_name,
+              (SELECT COUNT(*)::int FROM debit_notes dn WHERE dn.invoice_id = pa.invoice_id) AS debit_note_count,
+              (SELECT COALESCE(SUM(dnd.amount), 0)::numeric(15,2)
+                 FROM debit_notes dn
+                 LEFT JOIN debit_note_details dnd ON dnd.debit_note_id = dn.debit_note_id
+                WHERE dn.invoice_id = pa.invoice_id) AS debit_note_total
        ${baseFrom}
        ORDER BY COALESCE(pa.payment_done_at, pa.updated_at) DESC NULLS LAST, pa.id DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -4896,11 +5766,13 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
 
     const approvalIds = rows.map((r) => r.id)
     const poIds = [...new Set(rows.map((r) => r.po_id).filter((v) => v != null))]
+    const invoiceIds = rows.map((r) => r.invoice_id).filter((v) => v != null)
 
-    const [grnRes, asnRes, txRes] = await Promise.all([
+    const [grnRes, asnRes, txRes, dnRes] = await Promise.all([
       poIds.length
         ? pool.query(
-            `SELECT po_id, id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty, unit_cost
+            `SELECT po_id, id, grn_no, grn_date, dc_no, dc_date, grn_qty, accepted_qty,
+                    rejected_qty, rework_qty, excess_qty, unit_cost
              FROM grn WHERE po_id = ANY($1::bigint[]) ORDER BY grn_date DESC NULLS LAST`,
             [poIds]
           )
@@ -4925,7 +5797,19 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
          WHERE pt.payment_approval_id = ANY($1::bigint[])
          ORDER BY pt.paid_at ASC`,
         [approvalIds]
-      )
+      ),
+      invoiceIds.length
+        ? pool.query(
+            `SELECT dn.invoice_id, dn.debit_note_id, dn.file_name, dn.notes AS dn_notes, dn.uploaded_at,
+                    dnd.line_number, dnd.description, dnd.quantity, dnd.unit_price, dnd.amount,
+                    dnd.notes AS line_notes
+             FROM debit_notes dn
+             LEFT JOIN debit_note_details dnd ON dnd.debit_note_id = dn.debit_note_id
+             WHERE dn.invoice_id = ANY($1::bigint[])
+             ORDER BY dn.invoice_id, dn.debit_note_id, dnd.line_number NULLS LAST`,
+            [invoiceIds]
+          ).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] })
     ])
 
     const grnByPo = new Map()
@@ -4943,12 +5827,18 @@ router.get('/payments/history', authenticateToken, async (req, res) => {
       if (!txByApproval.has(r.payment_approval_id)) txByApproval.set(r.payment_approval_id, [])
       txByApproval.get(r.payment_approval_id).push(r)
     }
+    const dnByInv = new Map()
+    for (const r of dnRes.rows) {
+      if (!dnByInv.has(r.invoice_id)) dnByInv.set(r.invoice_id, [])
+      dnByInv.get(r.invoice_id).push(r)
+    }
 
     const items = rows.map((r) => ({
       ...r,
       grn_list: r.po_id ? grnByPo.get(r.po_id) || [] : [],
       asn_list: r.po_id ? asnByPo.get(r.po_id) || [] : [],
-      payment_transactions: txByApproval.get(r.id) || []
+      payment_transactions: txByApproval.get(r.id) || [],
+      debit_note_details: r.invoice_id ? dnByInv.get(r.invoice_id) || [] : []
     }))
 
     res.json({ items, total, limit, offset })
@@ -5027,6 +5917,7 @@ router.get('/insights/suggestions',      authenticateToken, getInsightsSuggestio
 // Validation rules library
 router.get('/validation-rules',           authenticateToken, getValidationRulesRoute)
 router.patch('/validation-rules/:code',   authenticateToken, authorize(['admin']), patchValidationRuleRoute)
+router.post('/validation-rules/revalidate-all-pending', authenticateToken, authorize(['admin']), revalidateAllPendingRoute)
 router.get('/reconciliation/by-code/:code', authenticateToken, getInvoicesByErrorCodeRoute)
 
 // Audit log (admin only)
@@ -5054,6 +5945,344 @@ router.get('/items/:itemCode/invoice-history', authenticateToken, getInvoicePric
 
 // Supplier 360 — aggregate read for the slide-over detail panel
 router.get('/suppliers/:id/360', authenticateToken, getSupplier360Route)
+
+// ---------------------------------------------------------------------------
+// Admin: Automation observability dashboard.
+//
+// One endpoint that returns everything the Admin → Automation page renders:
+//   summary    – top-line metrics for today + last 7 days for both pipelines,
+//                + counts of failed runs and unprocessed Drive files
+//   email_runs – most recent 20 email_automation_runs
+//   email_log  – most recent 200 email_automation_log rows
+//   ocr_runs   – most recent 20 ocr_automation_runs
+//   ocr_log    – most recent 200 ocr_automation_log rows
+//   drive      – drive_synced_files inventory snapshot + failures
+//
+// All queries soft-fail to empty arrays if the table is absent (e.g. a
+// dev DB without the email_automation migration applied) — the page
+// renders an empty-state instead of 500-ing.
+// ---------------------------------------------------------------------------
+router.get('/admin/automation', authenticateToken, authorize(['admin']), async (_req, res) => {
+  /** Helper — query something, log + return [] on failure (incl. missing table). */
+  async function safe(name, sql, params = []) {
+    try {
+      const r = await pool.query(sql, params)
+      return r.rows
+    } catch (err) {
+      if (err.code !== '42P01') console.warn(`admin/automation ${name}:`, err.message)
+      return []
+    }
+  }
+
+  try {
+    const [
+      emailSummary, emailRuns, emailLog,
+      ocrSummary,   ocrRuns,   ocrLog,
+      driveSummary, driveTopFailures
+    ] = await Promise.all([
+      /* Email pipeline summary — counts today + 7d, success rate, last run. */
+      safe('email summary', `
+        SELECT
+          (SELECT COUNT(*)::int FROM email_automation_runs WHERE started_at >= CURRENT_DATE) AS runs_today,
+          (SELECT COUNT(*)::int FROM email_automation_runs WHERE started_at >= CURRENT_DATE - INTERVAL '7 days') AS runs_7d,
+          (SELECT COUNT(*)::int FROM email_automation_runs WHERE started_at >= CURRENT_DATE - INTERVAL '7 days' AND status = 'success') AS runs_ok_7d,
+          (SELECT COUNT(*)::int FROM email_automation_runs WHERE started_at >= CURRENT_DATE - INTERVAL '7 days' AND status IN ('failed','partial')) AS runs_bad_7d,
+          (SELECT COALESCE(SUM(emails_fetched), 0)::int        FROM email_automation_runs WHERE started_at >= CURRENT_DATE) AS emails_today,
+          (SELECT COALESCE(SUM(attachments_processed), 0)::int FROM email_automation_runs WHERE started_at >= CURRENT_DATE) AS attachments_today,
+          (SELECT COALESCE(SUM(attachments_succeeded), 0)::int FROM email_automation_runs WHERE started_at >= CURRENT_DATE) AS attachments_ok_today,
+          (SELECT COALESCE(SUM(attachments_failed), 0)::int    FROM email_automation_runs WHERE started_at >= CURRENT_DATE) AS attachments_bad_today,
+          (SELECT started_at  FROM email_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_started_at,
+          (SELECT finished_at FROM email_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_finished_at,
+          (SELECT status      FROM email_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_status,
+          (SELECT host        FROM email_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_host,
+          (SELECT error_message FROM email_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_error
+      `),
+      safe('email runs', `
+        SELECT run_id, started_at, finished_at, status,
+               emails_fetched, attachments_processed, attachments_succeeded,
+               attachments_failed, attachments_skipped, revalidated_invoices,
+               host, error_message,
+               EXTRACT(EPOCH FROM (COALESCE(finished_at, NOW()) - started_at))::int AS duration_seconds
+          FROM email_automation_runs
+         ORDER BY started_at DESC
+         LIMIT 20
+      `),
+      safe('email log', `
+        SELECT l.id, l.run_id, l.message_id, l.email_uid, l.sender, l.subject,
+               l.received_at, l.attachment_name, l.attachment_sha256, l.doc_type,
+               l.status, l.invoice_id, l.po_id, l.file_path,
+               l.rows_processed, l.rows_inserted, l.rows_updated, l.rows_skipped,
+               l.error_message, l.processed_at
+          FROM email_automation_log l
+         ORDER BY l.processed_at DESC
+         LIMIT 200
+      `),
+      /* OCR pipeline summary — counts today + 7d, success rate, last run. */
+      safe('ocr summary', `
+        SELECT
+          (SELECT COUNT(*)::int FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE) AS runs_today,
+          (SELECT COUNT(*)::int FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE - INTERVAL '7 days') AS runs_7d,
+          (SELECT COUNT(*)::int FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE - INTERVAL '7 days' AND status = 'success') AS runs_ok_7d,
+          (SELECT COUNT(*)::int FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE - INTERVAL '7 days' AND status IN ('failed','partial')) AS runs_bad_7d,
+          (SELECT COALESCE(SUM(files_listed), 0)::int    FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE) AS files_listed_today,
+          (SELECT COALESCE(SUM(files_processed), 0)::int FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE) AS files_processed_today,
+          (SELECT COALESCE(SUM(files_succeeded), 0)::int FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE) AS files_ok_today,
+          (SELECT COALESCE(SUM(files_failed), 0)::int    FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE) AS files_bad_today,
+          (SELECT COALESCE(SUM(invoices_created), 0)::int FROM ocr_automation_runs WHERE started_at >= CURRENT_DATE) AS invoices_today,
+          (SELECT started_at  FROM ocr_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_started_at,
+          (SELECT finished_at FROM ocr_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_finished_at,
+          (SELECT status      FROM ocr_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_status,
+          (SELECT host        FROM ocr_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_host,
+          (SELECT drive_folder_id FROM ocr_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_folder,
+          (SELECT error_message FROM ocr_automation_runs ORDER BY started_at DESC LIMIT 1) AS last_error
+      `),
+      safe('ocr runs', `
+        SELECT run_id, started_at, finished_at, status, host, drive_folder_id,
+               files_listed, files_processed, files_succeeded, files_failed,
+               files_skipped, invoices_created, invoices_reconciled, error_message,
+               EXTRACT(EPOCH FROM (COALESCE(finished_at, NOW()) - started_at))::int AS duration_seconds
+          FROM ocr_automation_runs
+         ORDER BY started_at DESC
+         LIMIT 20
+      `),
+      safe('ocr log', `
+        SELECT log_id, run_id, file_id, file_name, status, invoice_id, invoice_number,
+               reconciliation_status, duration_ms, error_message, logged_at
+          FROM ocr_automation_log
+         ORDER BY logged_at DESC
+         LIMIT 200
+      `),
+      /* Drive file inventory — counts by status + total. */
+      safe('drive summary', `
+        SELECT
+          COUNT(*)::int                                                    AS total,
+          COUNT(*) FILTER (WHERE status = 'pending')::int                  AS pending,
+          COUNT(*) FILTER (WHERE status = 'processed')::int                AS processed,
+          COUNT(*) FILTER (WHERE status = 'failed')::int                   AS failed,
+          COUNT(*) FILTER (WHERE status = 'skipped')::int                  AS skipped,
+          COALESCE(SUM(size_bytes), 0)::bigint                              AS total_bytes
+          FROM drive_synced_files
+      `),
+      /* Top 50 failed / pending Drive files for the troubleshooting table. */
+      safe('drive failures', `
+        SELECT file_id, file_name, mime_type, status, attempts,
+               invoice_id, invoice_number, error_message,
+               first_seen_at, processed_at, size_bytes, modified_time
+          FROM drive_synced_files
+         WHERE status IN ('failed', 'pending')
+         ORDER BY first_seen_at DESC
+         LIMIT 50
+      `)
+    ])
+
+    res.json({
+      summary: {
+        email: emailSummary[0] || null,
+        ocr:   ocrSummary[0]   || null,
+        drive: driveSummary[0] || null
+      },
+      email_runs:  emailRuns,
+      email_log:   emailLog,
+      ocr_runs:    ocrRuns,
+      ocr_log:     ocrLog,
+      drive_failures: driveTopFailures
+    })
+  } catch (err) {
+    console.error('admin/automation:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Payments KPI summary — feeds the 4-up KPI strip on the Payments page.
+//
+// Returns counts + value totals for four buckets:
+//   ready        — invoices.status = 'validated' AND no payment_approval yet
+//   due_week     — payment_due_date in the next 7 days, not yet paid
+//   overdue      — payment_due_date < today, not yet paid
+//   paid_month   — payment_approvals.payment_done_at in current calendar month
+// ---------------------------------------------------------------------------
+router.get('/payments/stats',
+  authenticateToken,
+  authorize(['admin', 'manager', 'finance']),
+  async (_req, res) => {
+    try {
+      const { rows } = await pool.query(`
+        SELECT
+          /* Ready to approve = validated invoices not yet in an approval row */
+          COUNT(*) FILTER (
+            WHERE i.status = 'validated'
+              AND NOT EXISTS (
+                SELECT 1 FROM payment_approvals pa
+                 WHERE pa.invoice_id = i.invoice_id
+                   AND pa.status IN ('pending_approval', 'approved', 'paid')
+              )
+          )::int                                                AS ready_count,
+          COALESCE(SUM(i.total_amount) FILTER (
+            WHERE i.status = 'validated'
+              AND NOT EXISTS (
+                SELECT 1 FROM payment_approvals pa
+                 WHERE pa.invoice_id = i.invoice_id
+                   AND pa.status IN ('pending_approval', 'approved', 'paid')
+              )
+          ), 0)::numeric                                        AS ready_value,
+
+          /* Due in the next 7 days, still unpaid */
+          COUNT(*) FILTER (
+            WHERE i.payment_due_date IS NOT NULL
+              AND i.payment_due_date >= CURRENT_DATE
+              AND i.payment_due_date <= CURRENT_DATE + INTERVAL '7 days'
+              AND i.status <> 'paid'
+          )::int                                                AS due_week_count,
+          COALESCE(SUM(i.total_amount) FILTER (
+            WHERE i.payment_due_date IS NOT NULL
+              AND i.payment_due_date >= CURRENT_DATE
+              AND i.payment_due_date <= CURRENT_DATE + INTERVAL '7 days'
+              AND i.status <> 'paid'
+          ), 0)::numeric                                        AS due_week_value,
+
+          /* Past due, still unpaid */
+          COUNT(*) FILTER (
+            WHERE i.payment_due_date IS NOT NULL
+              AND i.payment_due_date < CURRENT_DATE
+              AND i.status <> 'paid'
+          )::int                                                AS overdue_count,
+          COALESCE(SUM(i.total_amount) FILTER (
+            WHERE i.payment_due_date IS NOT NULL
+              AND i.payment_due_date < CURRENT_DATE
+              AND i.status <> 'paid'
+          ), 0)::numeric                                        AS overdue_value
+        FROM invoices i
+      `)
+      const baseRow = rows[0] || {}
+
+      /* Paid this month — read from payment_approvals because that's where
+         payment_done_at lives. Guard with a try/catch so an old schema
+         without payment_done_at doesn't 500 the whole endpoint. */
+      let paidMonthCount = 0
+      let paidMonthValue = 0
+      try {
+        const pm = await pool.query(`
+          SELECT COUNT(*)::int           AS n,
+                 COALESCE(SUM(paid_amount), 0)::numeric AS v
+            FROM payment_approvals
+           WHERE payment_done_at IS NOT NULL
+             AND payment_done_at >= DATE_TRUNC('month', CURRENT_DATE)
+             AND payment_done_at <  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+        `)
+        paidMonthCount = Number(pm.rows[0]?.n) || 0
+        paidMonthValue = Number(pm.rows[0]?.v) || 0
+      } catch (err) {
+        console.warn('payments/stats paid-month subquery:', err.message)
+      }
+
+      // Per-tab counts for the PaymentsPage chip row. Each predicate
+      // mirrors the corresponding list endpoint (/payments/pending-approval,
+      // /payments/ready, /payments/history) so the chip number always
+      // matches what the user sees when they click the tab.
+      let approveQueueCount    = Number(baseRow.ready_count) || 0
+      let awaitingBankCount    = 0
+      let historyCount         = 0
+      try {
+        const tabs = await pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE status IN ('approved', 'partially_paid'))::int   AS awaiting_bank,
+            COUNT(*) FILTER (
+              WHERE status IN ('payment_done', 'partially_paid', 'rejected')
+                AND (status IN ('partially_paid', 'rejected') OR payment_done_at IS NOT NULL)
+            )::int AS history
+          FROM payment_approvals
+        `)
+        awaitingBankCount = Number(tabs.rows[0]?.awaiting_bank) || 0
+        historyCount      = Number(tabs.rows[0]?.history) || 0
+      } catch (err) {
+        console.warn('payments/stats tab-counts subquery:', err.message)
+      }
+
+      res.json({
+        ready:         { count: Number(baseRow.ready_count)    || 0, value: Number(baseRow.ready_value)    || 0 },
+        due_week:      { count: Number(baseRow.due_week_count) || 0, value: Number(baseRow.due_week_value) || 0 },
+        overdue:       { count: Number(baseRow.overdue_count)  || 0, value: Number(baseRow.overdue_value)  || 0 },
+        paid_month:    { count: paidMonthCount,                       value: paidMonthValue },
+        // Per-tab counts (Approve queue / Approved · awaiting bank / Paid)
+        approve_queue: { count: approveQueueCount },
+        awaiting_bank: { count: awaitingBankCount },
+        history:       { count: historyCount }
+      })
+    } catch (err) {
+      console.error('payments/stats:', err)
+      res.status(500).json({ error: 'server_error', message: err.message })
+    }
+  }
+)
+
+// ---------------------------------------------------------------------------
+// Suppliers KPI summary — feeds the 4-up KPI strip on the Suppliers page.
+//
+//   active            — distinct suppliers with at least one invoice ever
+//   multi_state_gstin — suppliers whose GSTIN list spans 2+ state codes
+//                       (first two GSTIN chars are the state code)
+//   issue_free_month  — suppliers with invoices this month AND no unresolved
+//                       errors on any of those invoices
+//   open_issues       — suppliers with at least one unresolved-error invoice
+// ---------------------------------------------------------------------------
+router.get('/suppliers/stats',
+  authenticateToken,
+  authorize(['admin', 'manager']),
+  async (_req, res) => {
+    try {
+      const { rows } = await pool.query(`
+        WITH multi_state_names AS (
+          /* Suppliers where the same supplier_name is registered with 2+
+             distinct state codes (multi-state GSTIN registrations are one
+             supplier row per state in this schema). */
+          SELECT LOWER(TRIM(supplier_name)) AS name_key
+            FROM suppliers
+           WHERE supplier_name IS NOT NULL
+             AND state_code    IS NOT NULL
+           GROUP BY LOWER(TRIM(supplier_name))
+          HAVING COUNT(DISTINCT state_code) >= 2
+        ),
+        issues_per_supplier AS (
+          /* Suppliers with at least one invoice carrying an unresolved
+             mismatches.errors entry. */
+          SELECT DISTINCT i.supplier_id
+            FROM invoices i
+           WHERE i.supplier_id IS NOT NULL
+             AND i.status IN (
+               'waiting_for_validation',
+               'waiting_for_re_validation',
+               'exception_approval',
+               'debit_note_approval'
+             )
+             AND jsonb_array_length(COALESCE(i.mismatches->'errors', '[]'::jsonb)) > 0
+        ),
+        month_activity AS (
+          /* Suppliers with at least one invoice raised this calendar month */
+          SELECT DISTINCT i.supplier_id
+            FROM invoices i
+           WHERE i.supplier_id IS NOT NULL
+             AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE)
+             AND i.invoice_date <  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+        )
+        SELECT
+          (SELECT COUNT(*)::int FROM suppliers)                                   AS active,
+          (SELECT COUNT(*)::int FROM multi_state_names)                           AS multi_state_gstin,
+          (SELECT COUNT(*)::int
+             FROM month_activity m
+            WHERE NOT EXISTS (SELECT 1 FROM issues_per_supplier ips
+                               WHERE ips.supplier_id = m.supplier_id))            AS issue_free_month,
+          (SELECT COUNT(*)::int FROM issues_per_supplier)                         AS open_issues
+      `)
+      res.json(rows[0] || { active: 0, multi_state_gstin: 0, issue_free_month: 0, open_issues: 0 })
+    } catch (err) {
+      console.error('suppliers/stats:', err)
+      /* Soft-fail with zeros so the KPI strip still renders. The frontend
+         treats this exactly like a partial response. */
+      res.json({ active: 0, multi_state_gstin: 0, issue_free_month: 0, open_issues: 0 })
+    }
+  }
+)
 
 // Mount API routes under /api prefix
 app.use('/api', router)

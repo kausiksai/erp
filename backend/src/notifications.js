@@ -30,6 +30,37 @@ export async function pushNotification({ userId, variant, title, body, link, met
 }
 
 /**
+ * Fan-out helper: insert one notification per active user holding any of
+ * the given roles. Used for "X needs attention" events where there's no
+ * single owner — e.g. an invoice needs approval and any
+ * admin/manager/finance user can pick it up.
+ *
+ * `excludeUserId` skips the actor themselves (no point notifying the
+ * person who just performed the action).
+ */
+export async function pushNotificationToRoles({ roles, excludeUserId, variant, title, body, link, meta }) {
+  if (!Array.isArray(roles) || roles.length === 0) return
+  if (!variant || !title) return
+  try {
+    const { rows } = await pool.query(
+      `SELECT user_id FROM users
+        WHERE LOWER(role) = ANY($1::text[])
+          AND is_active = TRUE
+          AND ($2::bigint IS NULL OR user_id <> $2)`,
+      [roles.map((r) => String(r).toLowerCase()), excludeUserId || null]
+    )
+    for (const r of rows) {
+      // Best-effort sequential — counts are small (handful of admins/managers),
+      // not worth parallelism. pushNotification swallows its own errors so
+      // one bad row doesn't kill the fan-out.
+      await pushNotification({ userId: r.user_id, variant, title, body, link, meta })
+    }
+  } catch (err) {
+    console.warn('pushNotificationToRoles failed (non-fatal):', err.message)
+  }
+}
+
+/**
  * GET /api/notifications
  */
 export async function getNotificationsRoute(req, res) {

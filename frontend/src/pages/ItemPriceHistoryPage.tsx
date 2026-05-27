@@ -5,41 +5,39 @@ import { formatDate, formatINRSymbol, formatQty, parseAmount } from '../utils/fo
 import { useToast } from '../contexts/ToastContext'
 
 /* =========================================================================
- *   Types
+ *   Types — invoice-side rate history (mirrors /items/:itemCode/invoice-history)
  * ========================================================================= */
 
-interface POHistoryRow {
-  po_id: number | string
+interface InvoiceRow {
+  invoice_id: number | string
+  invoice_number: string | null
+  invoice_date: string | null
+  po_id: number | string | null
   po_number: string | null
-  pfx: string | null
-  po_date: string | null
-  amd_no: number | string | null
-  po_status: string | null
+  po_pfx: string | null
   supplier_id: number | string | null
   supplier_name: string | null
-  gst_number: string | null
-  qty: number | string | null
-  unit_cost: number | string | null
-  disc_pct: number | string | null
-  description1: string | null
-  item_id: string | null
-  line_value: number | string | null
+  total_amount: number | string | null
+  status: string | null
+  po_rate?: number | null
+  disc_pct?: number | null
+  po_qty?: number | null
+  effective_rate?: number | null
 }
 
-interface POHistorySummary {
-  latest: number | null
-  previous: number | null
-  min: number | null
-  max: number | null
-  delta_vs_previous: number | null
-  delta_pct_vs_previous: number | null
+interface BySupplierRow {
+  supplier_name: string
+  avg_rate: number
+  latest_rate: number | null
+  latest_date: string | null
+  count: number
 }
 
-interface POHistoryResponse {
+interface InvoiceHistoryResponse {
   item_code: string
   count: number
-  summary: POHistorySummary | null
-  rows: POHistoryRow[]
+  rows: InvoiceRow[]
+  by_supplier: BySupplierRow[]
 }
 
 interface SuggestionItem {
@@ -51,38 +49,16 @@ interface SuggestionItem {
   match_field?: 'item_id' | 'description'
 }
 
-const SLOT_LABELS = ['Latest', 'Previous', 'Earliest']
+type TimeRange = 'all' | '12m' | '6m' | '3m'
 
-/* =========================================================================
- *   Local style overrides — injected once to kill any browser/global focus
- *   ring on the search form. Cannot be done with React inline styles since
- *   they don't accept :focus pseudo-classes.
- * ========================================================================= */
-const PAGE_STYLES = `
-  .iph-form {
-    transition: border-color .12s ease, box-shadow .12s ease;
-  }
-  .iph-form:focus-within {
-    border-color: var(--border-subtle) !important;
-    box-shadow: var(--shadow-sm) !important;
-  }
-  .iph-input,
-  .iph-input:focus,
-  .iph-input:focus-visible {
-    outline: none !important;
-    box-shadow: none !important;
-    -webkit-box-shadow: none !important;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .iph-row:hover { background: var(--surface-1); }
-  .iph-fade-in {
-    animation: iph-fade-in .25s ease-out both;
-  }
-  @keyframes iph-fade-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-`
+const TIME_RANGE_LABEL: Record<TimeRange, string> = {
+  all: 'All time',
+  '12m': 'Last 12 months',
+  '6m': 'Last 6 months',
+  '3m': 'Last 3 months',
+}
+
+const SUPPLIER_PALETTE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#f43f5e', '#06b6d4', '#ec4899', '#64748b']
 
 /* =========================================================================
  *   Page
@@ -91,9 +67,15 @@ const PAGE_STYLES = `
 export default function ItemPriceHistoryPage() {
   const [itemCode, setItemCode] = useState('')
   const [searched, setSearched] = useState('')
-  const [data, setData] = useState<POHistoryResponse | null>(null)
+  const [description, setDescription] = useState<string | null>(null)
+  const [data, setData] = useState<InvoiceHistoryResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const toast = useToast()
+
+  /* ---------- filters ---------- */
+  const [supplierFilter, setSupplierFilter] = useState<string>('all')
+  const [timeRange, setTimeRange] = useState<TimeRange>('12m')
+  const [hiddenSuppliers, setHiddenSuppliers] = useState<Set<string>>(new Set())
 
   /* ---------- autocomplete ---------- */
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
@@ -156,18 +138,26 @@ export default function ItemPriceHistoryPage() {
     }
   }, [itemCode, fetchSuggestions])
 
-  const search = async (code: string) => {
+  const search = async (code: string, suggestedDescription?: string | null) => {
     setData(null)
+    setSupplierFilter('all')
+    setHiddenSuppliers(new Set())
     const trimmed = code.trim()
     if (!trimmed) return
     setSuggestionsOpen(false)
     setSearched(trimmed)
+    setDescription(suggestedDescription ?? null)
     setLoading(true)
     try {
-      const res = await apiFetch(`items/${encodeURIComponent(trimmed)}/po-history?limit=3`)
-      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to fetch PO history'))
-      const body: POHistoryResponse = await res.json()
+      const res = await apiFetch(`items/${encodeURIComponent(trimmed)}/invoice-history?limit=200`)
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Failed to fetch price history'))
+      const body: InvoiceHistoryResponse = await res.json()
       setData(body)
+      // Backfill description from the response if we didn't have one from the suggestion
+      if (!suggestedDescription) {
+        const firstWithDesc = body.rows?.find((r) => (r as InvoiceRow & { description1?: string }).description1)
+        if (firstWithDesc) setDescription((firstWithDesc as InvoiceRow & { description1?: string }).description1 || null)
+      }
     } catch (err) {
       toast.danger('Search failed', getDisplayError(err))
     } finally {
@@ -177,20 +167,15 @@ export default function ItemPriceHistoryPage() {
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    // If the typed text is a description (a suggestion is visible whose
-    // item_id differs from the typed text), prefer the highlighted
-    // suggestion so clicking the Search button behaves the same as
-    // pressing Enter on the dropdown. Avoids "/items/HYDRAULIC%20OIL/..."
-    // queries that return 0 rows because the lookup keys on item_id.
     const typed = itemCode.trim().toUpperCase()
     const pick = suggestions[highlight]
     if (suggestionsOpen && pick && pick.item_id.toUpperCase() !== typed) {
       setItemCode(pick.item_id)
       setSuggestionsOpen(false)
-      search(pick.item_id)
+      search(pick.item_id, pick.description)
       return
     }
-    search(itemCode)
+    search(itemCode, pick?.description ?? null)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -213,115 +198,147 @@ export default function ItemPriceHistoryPage() {
         e.preventDefault()
         setItemCode(pick.item_id)
         setSuggestionsOpen(false)
-        search(pick.item_id)
+        search(pick.item_id, pick.description)
       }
     } else if (e.key === 'Escape') {
       setSuggestionsOpen(false)
     }
   }
 
-  /* ---------- derived ---------- */
-  const rows = data?.rows ?? []
-  const sortedAsc = useMemo(() => [...rows].reverse(), [rows])
-  const prices = rows.map((r) => parseAmount(r.unit_cost) ?? 0)
-  const minP = prices.length ? Math.min(...prices) : 0
-  const maxP = prices.length ? Math.max(...prices) : 0
-  const stable = prices.length > 0 && Math.abs(maxP - minP) < 0.005
-  const minIdxOriginal = prices.indexOf(minP)
-  const maxIdxOriginal = prices.indexOf(maxP)
-  const trendDirection: 'up' | 'down' | 'flat' =
-    !data?.summary?.delta_vs_previous
-      ? 'flat'
-      : (data.summary.delta_vs_previous ?? 0) > 0
-      ? 'up'
-      : (data.summary.delta_vs_previous ?? 0) < 0
-      ? 'down'
-      : 'flat'
+  /* ---------- filter + derive ---------- */
+  const allRows = useMemo(() => (data?.rows ?? []).filter((r) => rateOf(r) > 0), [data])
+
+  const rangeCutoff = useMemo(() => {
+    if (timeRange === 'all') return null
+    const months = timeRange === '12m' ? 12 : timeRange === '6m' ? 6 : 3
+    const d = new Date()
+    d.setMonth(d.getMonth() - months)
+    return d
+  }, [timeRange])
+
+  const filteredRows = useMemo(() => {
+    return allRows.filter((r) => {
+      if (supplierFilter !== 'all' && (r.supplier_name || 'Unknown') !== supplierFilter) return false
+      if (rangeCutoff && r.invoice_date) {
+        const d = new Date(r.invoice_date)
+        if (!Number.isNaN(d.getTime()) && d < rangeCutoff) return false
+      }
+      return true
+    })
+  }, [allRows, supplierFilter, rangeCutoff])
+
+  const distinctSuppliers = useMemo(() => {
+    const set = new Map<string, number>()
+    for (const r of allRows) {
+      const k = r.supplier_name || 'Unknown'
+      set.set(k, (set.get(k) || 0) + 1)
+    }
+    return [...set.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name)
+  }, [allRows])
+
+  const distinctPos = useMemo(() => new Set(filteredRows.map((r) => r.po_id).filter(Boolean)).size, [filteredRows])
+
+  // KPI values — based on filtered rows (newest first as returned by API)
+  const kpis = useMemo(() => computeKpis(filteredRows), [filteredRows])
+
+  // Ordered ascending for the chart
+  const asc = useMemo(() => {
+    return [...filteredRows].sort((a, b) => {
+      const da = a.invoice_date ? new Date(a.invoice_date).getTime() : 0
+      const db = b.invoice_date ? new Date(b.invoice_date).getTime() : 0
+      return da - db
+    })
+  }, [filteredRows])
 
   return (
-    <div style={{ padding: '1.5rem 2rem 3rem', maxWidth: 1180, margin: '0 auto' }}>
-      <style>{PAGE_STYLES}</style>
+    <>
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-history" /> Insights</span>
+          <h1>Item price history</h1>
+          <p>Trace how a part's per-unit rate has moved across suppliers, invoices, and time. Spot creeping costs before they hit the P&amp;L.</p>
+        </div>
+        <div className="hero__act">
+          <button className="btn btn--g" onClick={() => toast.info('Export queued', 'Per-item price-history CSV will land with /api/items/:itemCode/export.')}>
+            <i className="pi pi-download" /> Export
+          </button>
+          <button className="btn btn--g" onClick={() => toast.info('Bookmarked', 'Bookmarks will land with /api/saved-views.')}>
+            <i className="pi pi-bookmark" /> Bookmark item
+          </button>
+        </div>
+      </section>
 
-      <header style={{ marginBottom: '1.4rem' }}>
-        <h1 style={{ margin: 0, fontSize: '1.65rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
-          Item price history
-        </h1>
-        <p style={{ margin: '0.3rem 0 0', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          Search by item code <em>or</em> part name (description) to compare unit cost across the last 3 distinct POs. Spot price drift before approving a new PO.
-        </p>
-      </header>
-
-      {/* Search bar */}
-      <div ref={wrapperRef} style={{ position: 'relative', marginBottom: '1.2rem' }}>
+      {/* Search + filters bar */}
+      <div ref={wrapperRef} style={{ position: 'relative', marginBottom: 14 }}>
         <form
           onSubmit={handleSubmit}
-          className="iph-form"
           style={{
-            display: 'flex',
-            gap: '0.55rem',
+            display: 'grid',
+            gridTemplateColumns: '1fr auto auto auto',
+            gap: 8,
             alignItems: 'center',
-            padding: '0.7rem 0.85rem',
-            background: 'var(--surface-0)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-lg)',
-            boxShadow: 'var(--shadow-sm)',
+            padding: '10px 12px',
+            background: 'var(--s-0)',
+            border: '1px solid var(--b-1)',
+            borderRadius: 'var(--r-lg)',
+            boxShadow: 'var(--sh-xs)',
           }}
         >
-          <i className="pi pi-search" style={{ color: 'var(--text-muted)' }} />
-          <input
-            ref={inputRef}
-            type="text"
-            autoComplete="off"
-            className="iph-input"
-            value={itemCode}
-            onChange={(e) => setItemCode(e.target.value)}
-            onFocus={() => itemCode.trim() && setSuggestionsOpen(true)}
-            onKeyDown={onKeyDown}
-            placeholder="Start typing… item code (CS001) or part name (HYDRAULIC OIL)"
-            style={{
-              flex: 1,
-              border: 'none',
-              outline: 'none',
-              fontSize: '0.95rem',
-              background: 'transparent',
-              color: 'var(--text-primary)',
-              fontFamily: 'var(--font-mono, monospace)',
-              letterSpacing: '0.02em',
-            }}
-          />
-          {itemCode && (
-            <button
-              type="button"
-              onClick={() => {
-                setItemCode('')
-                setSuggestions([])
-                setSuggestionsOpen(false)
-                inputRef.current?.focus()
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <i className="pi pi-search" style={{ color: 'var(--t-3)' }} />
+            <input
+              ref={inputRef}
+              type="text"
+              autoComplete="off"
+              value={itemCode}
+              onChange={(e) => setItemCode(e.target.value)}
+              onFocus={() => itemCode.trim() && setSuggestionsOpen(true)}
+              onKeyDown={onKeyDown}
+              placeholder="Start typing… item code (CS001) or part name (HYDRAULIC OIL)"
+              style={{
+                flex: 1,
+                border: 'none',
+                outline: 'none',
+                fontSize: 14,
+                background: 'transparent',
+                color: 'var(--t-1)',
+                fontFamily: 'var(--font-mono, monospace)',
+                letterSpacing: '0.02em',
               }}
-              title="Clear"
-              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.2rem 0.4rem', fontSize: '0.9rem' }}
-            >
-              <i className="pi pi-times-circle" />
-            </button>
-          )}
-          <button
-            type="submit"
-            disabled={loading || !itemCode.trim()}
-            style={{
-              border: 'none',
-              cursor: loading || !itemCode.trim() ? 'not-allowed' : 'pointer',
-              padding: '0.55rem 1.1rem',
-              borderRadius: 'var(--radius-md)',
-              background: loading || !itemCode.trim() ? 'var(--surface-2)' : 'var(--brand-600)',
-              color: loading || !itemCode.trim() ? 'var(--text-muted)' : '#fff',
-              fontSize: '0.88rem',
-              fontWeight: 700,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-            }}
-          >
-            {loading ? <><i className="pi pi-spin pi-spinner" /> Searching…</> : <>Search</>}
+            />
+            {itemCode && (
+              <button
+                type="button"
+                onClick={() => {
+                  setItemCode('')
+                  setSuggestions([])
+                  setSuggestionsOpen(false)
+                  inputRef.current?.focus()
+                }}
+                title="Clear"
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--t-3)', padding: '2px 4px' }}
+              >
+                <i className="pi pi-times-circle" />
+              </button>
+            )}
+          </div>
+
+          <FilterSelect
+            value={supplierFilter}
+            onChange={setSupplierFilter}
+            disabled={!data}
+            options={[{ value: 'all', label: 'All suppliers' }, ...distinctSuppliers.map((s) => ({ value: s, label: s }))]}
+          />
+
+          <FilterSelect
+            value={timeRange}
+            onChange={(v) => setTimeRange(v as TimeRange)}
+            disabled={!data}
+            options={(['12m', '6m', '3m', 'all'] as TimeRange[]).map((k) => ({ value: k, label: TIME_RANGE_LABEL[k] }))}
+          />
+
+          <button type="submit" disabled={loading || !itemCode.trim()} className="btn btn--p btn--sm">
+            {loading ? <><i className="pi pi-spin pi-spinner" /> Searching…</> : <><i className="pi pi-search" /> Search</>}
           </button>
         </form>
 
@@ -333,17 +350,17 @@ export default function ItemPriceHistoryPage() {
               top: 'calc(100% + 6px)',
               left: 0,
               right: 0,
-              background: 'var(--surface-0)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              boxShadow: 'var(--shadow-lg, 0 10px 30px rgba(15,23,42,0.12))',
+              background: 'var(--s-0)',
+              border: '1px solid var(--b-1)',
+              borderRadius: 'var(--r-md)',
+              boxShadow: 'var(--sh-lg, 0 10px 30px rgba(15,23,42,0.12))',
               maxHeight: 360,
               overflowY: 'auto',
               zIndex: 50,
             }}
           >
             {suggestionsLoading && suggestions.length === 0 && (
-              <div style={{ padding: '0.8rem 1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              <div style={{ padding: '0.8rem 1rem', color: 'var(--t-3)', fontSize: 13 }}>
                 <i className="pi pi-spin pi-spinner" /> Looking up matching items…
               </div>
             )}
@@ -360,7 +377,7 @@ export default function ItemPriceHistoryPage() {
                     e.preventDefault()
                     setItemCode(s.item_id)
                     setSuggestionsOpen(false)
-                    search(s.item_id)
+                    search(s.item_id, s.description)
                   }}
                   style={{
                     width: '100%',
@@ -368,50 +385,32 @@ export default function ItemPriceHistoryPage() {
                     display: 'grid',
                     gridTemplateColumns: 'minmax(120px, max-content) 1fr auto auto',
                     alignItems: 'center',
-                    gap: '0.85rem',
-                    padding: '0.55rem 0.85rem',
+                    gap: 12,
+                    padding: '8px 12px',
                     border: 'none',
-                    background: i === highlight ? 'var(--surface-1)' : 'transparent',
+                    background: i === highlight ? 'var(--s-1)' : 'transparent',
                     cursor: 'pointer',
-                    borderBottom: '1px solid var(--border-subtle)',
+                    borderBottom: '1px solid var(--b-1)',
                   }}
                 >
-                  <code
-                    style={{
-                      fontFamily: 'var(--font-mono, monospace)',
-                      fontWeight: 800,
-                      color: 'var(--brand-600)',
-                      fontSize: '0.84rem',
-                    }}
-                  >
+                  <code style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 800, color: 'var(--brand-600)', fontSize: 12.5 }}>
                     {matchedOnDesc ? s.item_id : highlightMatch(s.item_id, itemCode)}
                   </code>
                   <span
                     style={{
-                      color: matchedOnDesc ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      color: matchedOnDesc ? 'var(--t-1)' : 'var(--t-2)',
                       fontWeight: matchedOnDesc ? 600 : 400,
-                      fontSize: '0.82rem',
+                      fontSize: 12.5,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                     }}
                     title={s.description || ''}
                   >
-                    {matchedOnDesc
-                      ? highlightMatch(s.description || '—', itemCode)
-                      : (s.description || '—')}
+                    {matchedOnDesc ? highlightMatch(s.description || '—', itemCode) : (s.description || '—')}
                   </span>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    {s.po_count} PO{s.po_count === 1 ? '' : 's'}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      color: 'var(--text-primary)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+                  <span style={{ fontSize: 11, color: 'var(--t-3)' }}>{s.po_count} PO{s.po_count === 1 ? '' : 's'}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-1)', whiteSpace: 'nowrap' }}>
                     {s.latest_unit_cost != null ? formatINRSymbol(s.latest_unit_cost) : ''}
                   </span>
                 </button>
@@ -419,672 +418,612 @@ export default function ItemPriceHistoryPage() {
             })}
           </div>
         )}
+
+        {/* Count line */}
+        {data && (
+          <div style={{ marginTop: 8, color: 'var(--t-3)', fontSize: 12.5 }}>
+            <strong style={{ color: 'var(--t-2)' }}>{filteredRows.length}</strong> invoice{filteredRows.length === 1 ? '' : 's'} ·{' '}
+            <strong style={{ color: 'var(--t-2)' }}>{distinctPos}</strong> PO{distinctPos === 1 ? '' : 's'} found
+            {timeRange !== 'all' && <> · {TIME_RANGE_LABEL[timeRange].toLowerCase()}</>}
+            {supplierFilter !== 'all' && <> · {supplierFilter}</>}
+          </div>
+        )}
       </div>
 
       {/* Loading / empty */}
       {loading && (
-        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
-          <i className="pi pi-spin pi-spinner" style={{ fontSize: '1.4rem', color: 'var(--brand-600)' }} />
-          <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>Looking up PO history for {searched}…</div>
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--t-3)', background: 'var(--s-0)', border: '1px solid var(--b-1)', borderRadius: 'var(--r-lg)' }}>
+          <i className="pi pi-spin pi-spinner" style={{ fontSize: 22, color: 'var(--brand-600)' }} />
+          <div style={{ marginTop: 8, fontSize: 13 }}>Looking up invoice price history for {searched}…</div>
         </div>
       )}
       {!loading && data && data.count === 0 && (
-        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface-1)', borderRadius: 'var(--radius-lg)', border: '1px dashed var(--border-default)', fontSize: '0.92rem' }}>
-          <i className="pi pi-inbox" style={{ fontSize: '1.4rem', display: 'block', marginBottom: '0.4rem' }} />
-          No purchase orders found containing item code{' '}
-          <code style={{ background: 'var(--surface-2)', padding: '0.05rem 0.35rem', borderRadius: 4 }}>{searched}</code>.
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--t-3)', background: 'var(--s-1)', borderRadius: 'var(--r-lg)', border: '1px dashed var(--b-2)', fontSize: 13.5 }}>
+          <i className="pi pi-inbox" style={{ fontSize: 22, display: 'block', marginBottom: 6 }} />
+          No invoices found for item code{' '}
+          <code style={{ background: 'var(--s-2)', padding: '1px 6px', borderRadius: 4 }}>{searched}</code>.
         </div>
       )}
 
       {/* Results */}
       {!loading && data && data.count > 0 && (
-        <div className="iph-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <Hero
-            data={data}
-            stable={stable}
-            minP={minP}
-            maxP={maxP}
-            trendDirection={trendDirection}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <ItemHeaderCard
+            itemCode={searched || data.item_code}
+            description={description}
+            supplierCount={distinctSuppliers.length}
+            invoiceCount={allRows.length}
+            kpis={kpis}
           />
 
-          {rows.length > 1 && (
-            <Sparkline rows={sortedAsc} minP={minP} maxP={maxP} stable={stable} />
-          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 1fr)', gap: 14 }}>
+            <RateTrendChart
+              rowsAsc={asc}
+              suppliers={distinctSuppliers}
+              hidden={hiddenSuppliers}
+              onToggle={(s) => {
+                setHiddenSuppliers((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(s)) next.delete(s)
+                  else next.add(s)
+                  return next
+                })
+              }}
+              rangeLabel={TIME_RANGE_LABEL[timeRange]}
+            />
+            <InsightsPanel
+              kpis={kpis}
+              bySupplier={data.by_supplier || []}
+              hiddenSuppliers={hiddenSuppliers}
+              onPriceAlert={() => toast.info('Price alert', 'Threshold alerts will land with /api/saved-views/price-alerts.')}
+            />
+          </div>
 
-          <ComparisonTable
-            rows={rows}
-            latestPrice={data.summary?.latest ?? 0}
-            minIdxOriginal={minIdxOriginal}
-            maxIdxOriginal={maxIdxOriginal}
-            stable={stable}
-          />
+          <PurchaseHistoryTable rows={filteredRows} />
         </div>
       )}
-    </div>
+    </>
   )
 }
 
 /* =========================================================================
- *   Hero — big colourful summary at the top
+ *   Item header card — single row: icon + meta on left, 4 KPIs on right
  * ========================================================================= */
 
-function Hero({
-  data,
-  stable,
-  minP,
-  maxP,
-  trendDirection,
+interface KpiBundle {
+  latest: { rate: number; date: string | null; supplier: string | null } | null
+  avg: number | null
+  lowest: { rate: number; date: string | null; supplier: string | null } | null
+  highest: { rate: number; date: string | null; supplier: string | null } | null
+  deltaPctVsAvg: number | null
+}
+
+function ItemHeaderCard({
+  itemCode,
+  description,
+  supplierCount,
+  invoiceCount,
+  kpis,
 }: {
-  data: POHistoryResponse
-  stable: boolean
-  minP: number
-  maxP: number
-  trendDirection: 'up' | 'down' | 'flat'
+  itemCode: string
+  description: string | null
+  supplierCount: number
+  invoiceCount: number
+  kpis: KpiBundle
 }) {
-  const top = data.rows[0]
-  const heroBg =
-    trendDirection === 'up'
-      ? 'linear-gradient(135deg, rgba(244,63,94,0.10), rgba(245,158,11,0.06))'
-      : trendDirection === 'down'
-      ? 'linear-gradient(135deg, rgba(16,185,129,0.10), rgba(14,165,233,0.06))'
-      : 'linear-gradient(135deg, rgba(99,102,241,0.10), rgba(14,165,233,0.06))'
-
-  const trendBadge = (() => {
-    if (stable) return { label: 'Stable', icon: 'pi-check', tone: 'var(--status-success-fg)' }
-    if (trendDirection === 'up') return { label: 'Increasing', icon: 'pi-arrow-up', tone: 'var(--status-danger-fg)' }
-    if (trendDirection === 'down') return { label: 'Decreasing', icon: 'pi-arrow-down', tone: 'var(--status-success-fg)' }
-    return { label: 'Mixed', icon: 'pi-minus', tone: 'var(--text-muted)' }
-  })()
-
   return (
-    <div
-      style={{
-        padding: '1.2rem 1.4rem',
-        background: heroBg,
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-sm)',
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) auto',
-        gap: '1.5rem',
-        alignItems: 'center',
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: '0.62rem',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: 'var(--text-muted)',
-            fontWeight: 800,
-          }}
-        >
-          Item code
-        </div>
-        <div
-          style={{
-            fontSize: '1.55rem',
-            fontWeight: 800,
-            color: 'var(--text-primary)',
-            fontFamily: 'var(--font-mono, monospace)',
-            letterSpacing: '-0.01em',
-            marginTop: '0.1rem',
-          }}
-        >
-          {top?.item_id || data.item_code}
-        </div>
-        {top?.description1 && (
-          <div style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-            {top.description1}
+    <div className="card">
+      <div className="card__b" style={{ padding: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 18, alignItems: 'center' }}>
+          {/* Left: icon + code + description + chips */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+            <div
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: 12,
+                background: 'linear-gradient(135deg, #3b82f6, #06b6d4)',
+                color: '#fff',
+                display: 'grid',
+                placeItems: 'center',
+                fontSize: 20,
+                flexShrink: 0,
+              }}
+            >
+              <i className="pi pi-box" />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                <code style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 800, color: 'var(--t-1)', fontSize: 18, letterSpacing: '-0.01em' }}>
+                  {itemCode}
+                </code>
+                {description && (
+                  <span style={{ color: 'var(--t-2)', fontWeight: 500, fontSize: 14 }}>{description}</span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <span className="chip chip--mute"><i className="pi pi-building" /> {supplierCount} supplier{supplierCount === 1 ? '' : 's'}</span>
+                <span className="chip chip--info"><i className="pi pi-file" /> {invoiceCount} invoice{invoiceCount === 1 ? '' : 's'}</span>
+                <span className="chip chip--ok"><i className="pi pi-check-circle" /> Active</span>
+              </div>
+            </div>
           </div>
-        )}
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            marginTop: '0.7rem',
-            padding: '0.25rem 0.7rem',
-            borderRadius: 9999,
-            background: 'var(--surface-0)',
-            color: trendBadge.tone,
-            fontSize: '0.75rem',
-            fontWeight: 800,
-            border: `1px solid color-mix(in srgb, ${trendBadge.tone} 30%, transparent)`,
-          }}
-        >
-          <i className={`pi ${trendBadge.icon}`} />
-          {trendBadge.label}
-        </div>
-      </div>
 
-      <div style={{ textAlign: 'right' }}>
-        <div
-          style={{
-            fontSize: '0.62rem',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: 'var(--text-muted)',
-            fontWeight: 800,
-          }}
-        >
-          Latest unit cost
-        </div>
-        <div
-          style={{
-            fontSize: '2.4rem',
-            fontWeight: 900,
-            color: 'var(--brand-600)',
-            letterSpacing: '-0.03em',
-            lineHeight: 1.05,
-            marginTop: '0.1rem',
-          }}
-        >
-          {formatINRSymbol(data.summary?.latest ?? 0)}
-        </div>
-
-        {/* Mini stats row */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '1.1rem',
-            justifyContent: 'flex-end',
-            marginTop: '0.55rem',
-            color: 'var(--text-secondary)',
-            fontSize: '0.78rem',
-          }}
-        >
-          {!stable && data.summary?.delta_vs_previous != null && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
-                vs prev
-              </span>
-              <strong style={{ color: trendTone(data.summary.delta_vs_previous), fontSize: '0.85rem' }}>
-                {data.summary.delta_vs_previous >= 0 ? '+' : ''}
-                {formatINRSymbol(data.summary.delta_vs_previous)}
-              </strong>
-              <small style={{ color: trendTone(data.summary.delta_pct_vs_previous ?? null) }}>
-                ({data.summary.delta_pct_vs_previous! >= 0 ? '+' : ''}
-                {data.summary.delta_pct_vs_previous?.toFixed(2)}%)
-              </small>
-            </span>
-          )}
-          {!stable && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
-                range
-              </span>
-              <strong style={{ fontSize: '0.85rem' }}>
-                {formatINRSymbol(minP)} – {formatINRSymbol(maxP)}
-              </strong>
-            </span>
-          )}
-          {stable && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: 'var(--status-success-fg)' }}>
-              <i className="pi pi-check-circle" />
-              <strong style={{ fontSize: '0.85rem' }}>No price change across all {data.count} POs</strong>
-            </span>
-          )}
+          {/* Right: 4 KPIs inline */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(140px, 1fr))', gap: 18 }}>
+            <KpiTile
+              label="Latest rate"
+              value={kpis.latest ? formatINRSymbol(kpis.latest.rate) : '—'}
+              sub={kpis.latest ? `${formatDate(kpis.latest.date)} · ${kpis.latest.supplier || '—'}` : ''}
+              tone={kpis.deltaPctVsAvg != null ? (kpis.deltaPctVsAvg > 0 ? 'up' : kpis.deltaPctVsAvg < 0 ? 'down' : 'flat') : 'flat'}
+            />
+            <KpiTile
+              label="12-mo avg"
+              value={kpis.avg != null ? formatINRSymbol(kpis.avg) : '—'}
+              sub="across all suppliers"
+              tone="flat"
+            />
+            <KpiTile
+              label="Lowest"
+              value={kpis.lowest ? formatINRSymbol(kpis.lowest.rate) : '—'}
+              sub={kpis.lowest ? `${formatDate(kpis.lowest.date)} · ${kpis.lowest.supplier || '—'}` : ''}
+              tone="down"
+            />
+            <KpiTile
+              label="Highest"
+              value={kpis.highest ? formatINRSymbol(kpis.highest.rate) : '—'}
+              sub={kpis.highest ? `${formatDate(kpis.highest.date)} · ${kpis.highest.supplier || '—'}` : ''}
+              tone="up"
+            />
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
+function KpiTile({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: 'up' | 'down' | 'flat' }) {
+  const tint =
+    tone === 'up' ? 'var(--err-fg)' :
+    tone === 'down' ? 'var(--ok-fg)' :
+    'var(--t-1)'
+  return (
+    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--t-3)', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: tint, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', lineHeight: 1.05 }}>{value}</div>
+      <div style={{ fontSize: 11, color: 'var(--t-4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={sub}>{sub}</div>
+    </div>
+  )
+}
+
 /* =========================================================================
- *   Comparison table
+ *   Rate trend chart — multi-supplier line over the filtered window
  * ========================================================================= */
 
-function ComparisonTable({
-  rows,
-  latestPrice,
-  minIdxOriginal,
-  maxIdxOriginal,
-  stable,
+function RateTrendChart({
+  rowsAsc,
+  suppliers,
+  hidden,
+  onToggle,
+  rangeLabel,
 }: {
-  rows: POHistoryRow[]
-  latestPrice: number
-  minIdxOriginal: number
-  maxIdxOriginal: number
-  stable: boolean
+  rowsAsc: InvoiceRow[]
+  suppliers: string[]
+  hidden: Set<string>
+  onToggle: (s: string) => void
+  rangeLabel: string
 }) {
-  const ordered = [...rows].reverse()
-  const slotIndex = (i: number) => rows.length - 1 - i
-  const cols = ordered.length
+  const series = useMemo(() => buildSupplierSeries(rowsAsc, suppliers), [rowsAsc, suppliers])
+  const visibleSuppliers = suppliers.filter((s) => !hidden.has(s))
+  const visibleSeries = series.filter((s) => visibleSuppliers.includes(s.supplier))
+
+  const allRates = visibleSeries.flatMap((s) => s.points.map((p) => p.rate))
+  const allDates = visibleSeries.flatMap((s) => s.points.map((p) => p.t))
+  const hasData = allRates.length > 0
+
+  const W = 800
+  const H = 240
+  const padL = 56
+  const padR = 24
+  const padT = 24
+  const padB = 38
+
+  const minR = hasData ? Math.min(...allRates) : 0
+  const maxR = hasData ? Math.max(...allRates) : 1
+  const rRange = Math.max(maxR - minR, 0.001)
+  const yPad = rRange * 0.1
+  const yMin = minR - yPad
+  const yMax = maxR + yPad
+
+  const minT = hasData ? Math.min(...allDates) : 0
+  const maxT = hasData ? Math.max(...allDates) : 1
+  const tRange = Math.max(maxT - minT, 1)
+
+  const x = (t: number) => padL + ((t - minT) / tRange) * (W - padL - padR)
+  const y = (r: number) => padT + (1 - (r - yMin) / (yMax - yMin)) * (H - padT - padB)
 
   return (
-    <div
-      style={{
-        background: 'var(--surface-0)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-sm)',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          padding: '0.85rem 1.15rem',
-          borderBottom: '1px solid var(--border-subtle)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          color: 'var(--text-secondary)',
-          fontSize: '0.86rem',
-          fontWeight: 700,
-        }}
-      >
-        <i className="pi pi-table" /> Side-by-side comparison
+    <div className="card">
+      <div className="card__h">
+        <div className="card__t"><i className="pi pi-chart-line" /> Rate trend</div>
+        <span className="card__m">{rangeLabel}</span>
       </div>
-
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-          <thead>
-            <tr style={{ background: 'var(--surface-1)' }}>
-              <th
+      <div className="card__b" style={{ padding: 14 }}>
+        {/* Supplier filter chips */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {suppliers.map((s, i) => {
+            const color = SUPPLIER_PALETTE[i % SUPPLIER_PALETTE.length]
+            const off = hidden.has(s)
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onToggle(s)}
+                title={off ? 'Show ' + s : 'Hide ' + s}
                 style={{
-                  width: 168,
-                  padding: '0.85rem 1rem',
-                  textAlign: 'left',
-                  fontSize: '0.66rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  color: 'var(--text-muted)',
-                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 10px',
+                  borderRadius: 'var(--r-full)',
+                  border: '1px solid var(--b-1)',
+                  background: off ? 'var(--s-1)' : 'var(--s-0)',
+                  color: off ? 'var(--t-4)' : 'var(--t-2)',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  opacity: off ? 0.55 : 1,
                 }}
-              />
-              {ordered.map((r, i) => {
-                const orig = slotIndex(i)
-                const isLatest = orig === 0
-                const slotLabel = SLOT_LABELS[orig] || `#${orig + 1}`
-                return (
+              >
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, display: 'inline-block' }} />
+                {s}
+              </button>
+            )
+          })}
+        </div>
+
+        {!hasData ? (
+          <div style={{ padding: 30, textAlign: 'center', color: 'var(--t-3)', fontSize: 13 }}>
+            <i className="pi pi-chart-line" style={{ fontSize: 22, display: 'block', marginBottom: 6 }} />
+            No data points in this window — try widening the time range or clearing the supplier filter.
+          </div>
+        ) : (
+          <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="xMidYMid meet">
+            {/* Y reference lines */}
+            {[0, 0.25, 0.5, 0.75, 1].map((p, i) => {
+              const yy = padT + p * (H - padT - padB)
+              const rv = yMax - p * (yMax - yMin)
+              return (
+                <g key={i}>
+                  <line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="var(--b-1)" strokeDasharray="3 4" />
+                  <text x={padL - 8} y={yy + 4} fill="var(--t-4)" fontSize={10} textAnchor="end">{formatINRSymbol(rv)}</text>
+                </g>
+              )
+            })}
+
+            {/* X labels — start / mid / end dates */}
+            {[0, 0.5, 1].map((p, i) => {
+              const xx = padL + p * (W - padL - padR)
+              const t = minT + p * tRange
+              return (
+                <text key={i} x={xx} y={H - 14} fill="var(--t-4)" fontSize={10} textAnchor="middle">
+                  {formatDate(new Date(t).toISOString())}
+                </text>
+              )
+            })}
+
+            {visibleSeries.map((s) => {
+              const color = SUPPLIER_PALETTE[suppliers.indexOf(s.supplier) % SUPPLIER_PALETTE.length]
+              const pts = s.points
+              if (pts.length === 0) return null
+              const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t).toFixed(2)},${y(p.rate).toFixed(2)}`).join(' ')
+              return (
+                <g key={s.supplier}>
+                  <path d={path} fill="none" stroke={color} strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
+                  {pts.map((p, i) => (
+                    <circle key={i} cx={x(p.t)} cy={y(p.rate)} r={3.2} fill="#fff" stroke={color} strokeWidth={2} />
+                  ))}
+                </g>
+              )
+            })}
+          </svg>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* =========================================================================
+ *   Insights panel — heuristic suggestions
+ * ========================================================================= */
+
+function InsightsPanel({
+  kpis,
+  bySupplier,
+  hiddenSuppliers,
+  onPriceAlert,
+}: {
+  kpis: KpiBundle
+  bySupplier: BySupplierRow[]
+  hiddenSuppliers: Set<string>
+  onPriceAlert: () => void
+}) {
+  const visibleSuppliers = bySupplier.filter((s) => !hiddenSuppliers.has(s.supplier_name))
+  const cheapest = visibleSuppliers.length > 0
+    ? visibleSuppliers.reduce((a, b) => (a.avg_rate < b.avg_rate ? a : b))
+    : null
+  const latestSupplier = kpis.latest?.supplier
+  const latestSupplierAvg = bySupplier.find((s) => s.supplier_name === latestSupplier)?.avg_rate ?? null
+
+  const insights: { icon: string; title: string; body: string; tone: 'up' | 'down' | 'flat' }[] = []
+
+  if (kpis.deltaPctVsAvg != null && kpis.deltaPctVsAvg > 3) {
+    insights.push({
+      icon: 'pi-arrow-up',
+      title: `Rate creeping up (+${kpis.deltaPctVsAvg.toFixed(1)}%)`,
+      body: `Latest rate is ${kpis.deltaPctVsAvg.toFixed(1)}% above the period average. Consider re-negotiating or sourcing from another supplier.`,
+      tone: 'up',
+    })
+  } else if (kpis.deltaPctVsAvg != null && kpis.deltaPctVsAvg < -3) {
+    insights.push({
+      icon: 'pi-arrow-down',
+      title: `Rate trending down (${kpis.deltaPctVsAvg.toFixed(1)}%)`,
+      body: `Latest rate is ${Math.abs(kpis.deltaPctVsAvg).toFixed(1)}% below the period average — a good window to lock in a longer-term price.`,
+      tone: 'down',
+    })
+  }
+
+  if (cheapest && latestSupplier && cheapest.supplier_name !== latestSupplier && latestSupplierAvg != null && cheapest.avg_rate < latestSupplierAvg) {
+    const saving = latestSupplierAvg - cheapest.avg_rate
+    const pct = (saving / latestSupplierAvg) * 100
+    insights.push({
+      icon: 'pi-tag',
+      title: `${cheapest.supplier_name} is cheaper`,
+      body: `Averages ${formatINRSymbol(cheapest.avg_rate)} vs ${latestSupplier}'s ${formatINRSymbol(latestSupplierAvg)} — a ${pct.toFixed(1)}% saving per unit.`,
+      tone: 'down',
+    })
+  }
+
+  if (insights.length === 0) {
+    insights.push({
+      icon: 'pi-check',
+      title: 'Prices look stable',
+      body: 'No notable rate drift or supplier arbitrage in this window.',
+      tone: 'flat',
+    })
+  }
+
+  return (
+    <div className="card">
+      <div className="card__h">
+        <div className="card__t"><i className="pi pi-sparkles" /> Insights</div>
+      </div>
+      <div className="card__b" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {insights.map((it, i) => (
+          <div key={i} className="insight">
+            <div className="insight__ic" style={{ background: it.tone === 'up' ? 'linear-gradient(135deg, #f43f5e, #ec4899)' : it.tone === 'down' ? 'linear-gradient(135deg, #10b981, #14b8a6)' : 'linear-gradient(135deg, #a78bfa, #7c3aed)' }}>
+              <i className={`pi ${it.icon}`} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="insight__t">{it.title}</div>
+              <div className="insight__d">{it.body}</div>
+            </div>
+          </div>
+        ))}
+
+        <button onClick={onPriceAlert} className="btn btn--p btn--sm" style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+          <i className="pi pi-bell" /> Set price alert
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* =========================================================================
+ *   Purchase history table — chronological invoice list with Δ vs Prior
+ * ========================================================================= */
+
+function PurchaseHistoryTable({ rows }: { rows: InvoiceRow[] }) {
+  // Sort ascending to compute delta-vs-prior, then render descending
+  const asc = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const da = a.invoice_date ? new Date(a.invoice_date).getTime() : 0
+      const db = b.invoice_date ? new Date(b.invoice_date).getTime() : 0
+      return da - db
+    })
+  }, [rows])
+
+  const withDelta = useMemo(() => {
+    return asc.map((r, i) => {
+      const rate = rateOf(r)
+      if (i === 0) return { ...r, delta: null as null | { amount: number; pct: number | null; kind: 'baseline' | 'change' | 'flat' | 'cross'; note?: string } }
+      const priorRate = rateOf(asc[i - 1])
+      const diff = rate - priorRate
+      const priorSup = asc[i - 1].supplier_name || 'Unknown'
+      const thisSup = r.supplier_name || 'Unknown'
+      const crossSupplier = priorSup !== thisSup
+      if (Math.abs(diff) < 0.005) {
+        return { ...r, delta: { amount: 0, pct: 0, kind: 'flat' as const } }
+      }
+      return {
+        ...r,
+        delta: {
+          amount: diff,
+          pct: priorRate > 0 ? (diff / priorRate) * 100 : null,
+          kind: crossSupplier ? 'cross' as const : 'change' as const,
+          note: crossSupplier ? `vs ${priorSup}` : undefined,
+        },
+      }
+    })
+  }, [asc])
+
+  // Render newest first
+  const display = useMemo(() => [...withDelta].reverse(), [withDelta])
+
+  return (
+    <div className="card">
+      <div className="card__h">
+        <div className="card__t"><i className="pi pi-history" /> Purchase history</div>
+        <span className="card__m">{rows.length} invoice{rows.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="card__b" style={{ padding: 0 }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'var(--s-1)' }}>
+                {['Date', 'Invoice', 'PO Ref', 'Supplier', 'Qty', 'Rate', 'Total', 'Δ vs Prior'].map((h, i) => (
                   <th
-                    key={`${r.po_id}-h`}
+                    key={h}
                     style={{
-                      padding: '0.85rem 1rem',
-                      textAlign: 'left',
-                      verticalAlign: 'top',
-                      borderLeft: '1px solid var(--border-subtle)',
-                      background: isLatest ? 'color-mix(in srgb, var(--brand-600) 9%, var(--surface-1))' : undefined,
-                      borderTop: isLatest ? '3px solid var(--brand-600)' : undefined,
+                      padding: '10px 14px',
+                      textAlign: i >= 4 ? 'right' : 'left',
+                      fontSize: 11,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      color: 'var(--t-3)',
+                      fontWeight: 700,
+                      borderBottom: '1px solid var(--b-1)',
                     }}
                   >
-                    <div
-                      style={{
-                        display: 'inline-block',
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: 9999,
-                        fontSize: '0.62rem',
-                        fontWeight: 800,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.1em',
-                        background: isLatest ? 'var(--brand-600)' : 'var(--surface-2)',
-                        color: isLatest ? '#fff' : 'var(--text-secondary)',
-                      }}
-                    >
-                      {slotLabel}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '0.85rem',
-                        color: 'var(--text-secondary)',
-                        marginTop: '0.4rem',
-                        fontWeight: 700,
-                      }}
-                    >
-                      {formatDate(r.po_date)}
-                    </div>
+                    {h}
                   </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {display.map((r, i) => {
+                const isBaseline = i === display.length - 1
+                return (
+                  <tr key={`${r.invoice_id}-${i}`} style={{ borderBottom: '1px solid var(--b-1)' }}>
+                    <td style={{ padding: '10px 14px', color: 'var(--t-2)', whiteSpace: 'nowrap' }}>{formatDate(r.invoice_date)}</td>
+                    <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'var(--t-1)' }}>{r.invoice_number || '—'}</td>
+                    <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono, monospace)', color: 'var(--t-2)' }}>
+                      {r.po_pfx && r.po_number ? `${r.po_pfx}-${r.po_number}` : r.po_number || '—'}
+                    </td>
+                    <td style={{ padding: '10px 14px', color: 'var(--t-2)' }}>{r.supplier_name || '—'}</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--t-2)', fontVariantNumeric: 'tabular-nums' }}>{formatQty(r.po_qty)}</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--t-1)', fontVariantNumeric: 'tabular-nums' }}>{formatINRSymbol(rateOf(r))}</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--t-2)', fontVariantNumeric: 'tabular-nums' }}>{formatINRSymbol(r.total_amount)}</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                      {isBaseline ? (
+                        <span className="chip chip--info">baseline</span>
+                      ) : r.delta == null ? (
+                        <span className="chip chip--mute">—</span>
+                      ) : r.delta.kind === 'flat' ? (
+                        <span className="chip chip--mute">unchanged</span>
+                      ) : r.delta.kind === 'cross' ? (
+                        <span className={r.delta.amount > 0 ? 'chip chip--err' : 'chip chip--ok'}>
+                          {r.delta.amount > 0 ? '+' : '−'}{formatINRSymbol(Math.abs(r.delta.amount))} {r.delta.note ? `(${r.delta.note})` : ''}
+                        </span>
+                      ) : (
+                        <span className={r.delta.amount > 0 ? 'chip chip--err' : 'chip chip--ok'}>
+                          {r.delta.amount > 0 ? '+' : '−'}{formatINRSymbol(Math.abs(r.delta.amount))}
+                          {r.delta.pct != null ? ` (${r.delta.amount > 0 ? '+' : ''}${r.delta.pct.toFixed(1)}%)` : ''}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
                 )
               })}
-            </tr>
-          </thead>
-          <tbody>
-            <Row
-              label={<><i className="pi pi-money-bill" style={{ marginRight: 6, color: 'var(--text-muted)' }} />Unit cost</>}
-              cols={cols}
-              renderer={(i) => {
-                const r = ordered[i]
-                const orig = slotIndex(i)
-                const isLatest = orig === 0
-                const isMin = !stable && orig === minIdxOriginal
-                const isMax = !stable && orig === maxIdxOriginal
-                return (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span
-                      style={{
-                        fontSize: '1.4rem',
-                        fontWeight: 800,
-                        color: isLatest ? 'var(--brand-600)' : 'var(--text-primary)',
-                        letterSpacing: '-0.01em',
-                      }}
-                    >
-                      {formatINRSymbol(r.unit_cost)}
-                    </span>
-                    {isMin && !isLatest && (
-                      <span
-                        style={{
-                          fontSize: '0.62rem',
-                          fontWeight: 800,
-                          textTransform: 'uppercase',
-                          padding: '0.12rem 0.4rem',
-                          borderRadius: 9999,
-                          background: 'color-mix(in srgb, var(--status-success-fg) 14%, transparent)',
-                          color: 'var(--status-success-fg)',
-                        }}
-                        title="Lowest in this comparison"
-                      >
-                        ↓ Min
-                      </span>
-                    )}
-                    {isMax && !isLatest && (
-                      <span
-                        style={{
-                          fontSize: '0.62rem',
-                          fontWeight: 800,
-                          textTransform: 'uppercase',
-                          padding: '0.12rem 0.4rem',
-                          borderRadius: 9999,
-                          background: 'color-mix(in srgb, var(--status-danger-fg) 14%, transparent)',
-                          color: 'var(--status-danger-fg)',
-                        }}
-                        title="Highest in this comparison"
-                      >
-                        ↑ Max
-                      </span>
-                    )}
-                  </div>
-                )
-              }}
-              latestIdx={cols - 1}
-            />
-            <Row
-              label={<><i className="pi pi-chart-line" style={{ marginRight: 6, color: 'var(--text-muted)' }} />Δ vs latest</>}
-              cols={cols}
-              renderer={(i) => {
-                const r = ordered[i]
-                const orig = slotIndex(i)
-                if (orig === 0) {
-                  return (
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.3rem',
-                        padding: '0.18rem 0.55rem',
-                        borderRadius: 9999,
-                        background: 'var(--brand-600)',
-                        color: '#fff',
-                        fontSize: '0.7rem',
-                        fontWeight: 800,
-                        letterSpacing: '0.04em',
-                      }}
-                    >
-                      <i className="pi pi-star-fill" style={{ fontSize: '0.7rem' }} /> CURRENT
-                    </span>
-                  )
-                }
-                const unit = parseAmount(r.unit_cost) ?? 0
-                const delta = unit - latestPrice
-                if (Math.abs(delta) < 0.005) {
-                  return <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>— no change</span>
-                }
-                const tone = trendTone(delta)
-                return (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.35rem',
-                      padding: '0.18rem 0.55rem',
-                      borderRadius: 9999,
-                      background: `color-mix(in srgb, ${tone} 12%, transparent)`,
-                      color: tone,
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                    }}
-                  >
-                    <i className={`pi ${trendIcon(delta)}`} style={{ fontSize: '0.74rem' }} />
-                    {delta >= 0 ? '+' : ''}{formatINRSymbol(delta)}
-                  </span>
-                )
-              }}
-              latestIdx={cols - 1}
-            />
-            <SectionDivider cols={cols} />
-            <Row
-              label={<><i className="pi pi-shopping-cart" style={{ marginRight: 6, color: 'var(--text-muted)' }} />PO #</>}
-              cols={cols}
-              renderer={(i) => <Mono>{ordered[i].po_number || '—'}</Mono>}
-              latestIdx={cols - 1}
-            />
-            <Row
-              label={<><i className="pi pi-building" style={{ marginRight: 6, color: 'var(--text-muted)' }} />Supplier</>}
-              cols={cols}
-              renderer={(i) => (
-                <span
-                  style={{
-                    color: 'var(--text-primary)',
-                    fontWeight: 600,
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {ordered[i].supplier_name || '—'}
-                </span>
-              )}
-              latestIdx={cols - 1}
-            />
-            <Row
-              label={<><i className="pi pi-th-large" style={{ marginRight: 6, color: 'var(--text-muted)' }} />Quantity</>}
-              cols={cols}
-              renderer={(i) => formatQty(ordered[i].qty)}
-              latestIdx={cols - 1}
-            />
-            <Row
-              label={<><i className="pi pi-percentage" style={{ marginRight: 6, color: 'var(--text-muted)' }} />Discount</>}
-              cols={cols}
-              renderer={(i) => (ordered[i].disc_pct != null ? `${ordered[i].disc_pct}%` : '—')}
-              latestIdx={cols - 1}
-            />
-            <Row
-              label={<><i className="pi pi-wallet" style={{ marginRight: 6, color: 'var(--text-muted)' }} />Line value</>}
-              cols={cols}
-              renderer={(i) => (
-                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{formatINRSymbol(ordered[i].line_value)}</span>
-              )}
-              latestIdx={cols - 1}
-            />
-            <Row
-              label={<><i className="pi pi-bookmark" style={{ marginRight: 6, color: 'var(--text-muted)' }} />Status</>}
-              cols={cols}
-              renderer={(i) => (
-                <span
-                  style={{
-                    display: 'inline-block',
-                    padding: '0.15rem 0.6rem',
-                    borderRadius: 9999,
-                    fontSize: '0.74rem',
-                    fontWeight: 700,
-                    background: 'var(--surface-2)',
-                    color: 'var(--text-secondary)',
-                    textTransform: 'capitalize',
-                  }}
-                >
-                  {ordered[i].po_status || '—'}
-                </span>
-              )}
-              latestIdx={cols - 1}
-            />
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
 }
 
-function Row({
-  label,
-  cols,
-  renderer,
-  latestIdx,
+/* =========================================================================
+ *   Filter dropdown — minimal styled <select> matching mockup chips
+ * ========================================================================= */
+
+function FilterSelect({
+  value,
+  onChange,
+  options,
+  disabled,
 }: {
-  label: React.ReactNode
-  cols: number
-  renderer: (i: number) => React.ReactNode
-  latestIdx: number
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+  disabled?: boolean
 }) {
   return (
-    <tr className="iph-row" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-      <td
-        style={{
-          padding: '0.75rem 1rem',
-          fontSize: '0.74rem',
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: 'var(--text-muted)',
-          fontWeight: 700,
-          background: 'var(--surface-1)',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {label}
-      </td>
-      {Array.from({ length: cols }).map((_, i) => (
-        <td
-          key={i}
-          style={{
-            padding: '0.75rem 1rem',
-            color: 'var(--text-primary)',
-            verticalAlign: 'middle',
-            borderLeft: '1px solid var(--border-subtle)',
-            background: i === latestIdx ? 'color-mix(in srgb, var(--brand-600) 4%, transparent)' : undefined,
-          }}
-        >
-          {renderer(i)}
-        </td>
-      ))}
-    </tr>
-  )
-}
-
-function SectionDivider({ cols }: { cols: number }) {
-  return (
-    <tr>
-      <td colSpan={cols + 1} style={{ padding: 0, borderTop: '2px solid var(--border-default)', height: 0 }} />
-    </tr>
-  )
-}
-
-/* =========================================================================
- *   Sparkline — only when prices vary
- * ========================================================================= */
-
-function Sparkline({ rows, minP, maxP, stable }: { rows: POHistoryRow[]; minP: number; maxP: number; stable: boolean }) {
-  const n = rows.length
-  const W = 800
-  const H = 160
-  const padX = 60
-  const padTop = 38
-  const padBottom = 42
-  const range = Math.max(maxP - minP, 0.0001)
-  const step = (W - padX * 2) / Math.max(n - 1, 1)
-  // When all prices are equal, draw a centered horizontal line instead of
-  // a degenerate one pinned to the bottom (the default range fallback).
-  const yMid = padTop + (H - padTop - padBottom) / 2
-
-  const points = rows.map((r, i) => {
-    const x = padX + i * step
-    const v = parseAmount(r.unit_cost) ?? 0
-    const y = stable ? yMid : padTop + (1 - (v - minP) / range) * (H - padTop - padBottom)
-    return { x, y, v, r }
-  })
-
-  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')
-  const areaPath = `${path} L${points[points.length - 1].x.toFixed(2)},${(H - padBottom).toFixed(2)} L${points[0].x.toFixed(2)},${(H - padBottom).toFixed(2)} Z`
-
-  // Y-axis reference labels (min, max)
-  const yMax = padTop
-  const yMin = H - padBottom
-
-  return (
-    <div
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
       style={{
-        background: 'var(--surface-0)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '0.95rem 1.2rem 0.7rem',
-        boxShadow: 'var(--shadow-sm)',
+        padding: '6px 10px',
+        borderRadius: 'var(--r-md)',
+        border: '1px solid var(--b-1)',
+        background: 'var(--s-0)',
+        color: 'var(--t-2)',
+        fontSize: 12.5,
+        fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
+        minWidth: 140,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.84rem', fontWeight: 700 }}>
-          <i className="pi pi-chart-line" style={{ color: 'var(--brand-600)' }} /> Price trend
-          <span style={{ color: 'var(--text-muted)', fontWeight: 500, fontSize: '0.78rem' }}>(oldest → newest)</span>
-        </div>
-        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-          {stable
-            ? <>flat at {formatINRSymbol(minP)}</>
-            : <>range: {formatINRSymbol(minP)} – {formatINRSymbol(maxP)}</>}
-        </div>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="xMidYMid meet">
-        {/* Y reference lines + min/max labels — only when prices vary */}
-        {!stable && (
-          <>
-            <line x1={padX - 8} x2={W - padX + 8} y1={yMax} y2={yMax} stroke="var(--border-subtle)" strokeDasharray="3 4" />
-            <line x1={padX - 8} x2={W - padX + 8} y1={yMin} y2={yMin} stroke="var(--border-subtle)" strokeDasharray="3 4" />
-            <text x={padX - 12} y={yMax + 4} fill="var(--text-muted)" fontSize={10} textAnchor="end">{formatINRSymbol(maxP)}</text>
-            <text x={padX - 12} y={yMin + 4} fill="var(--text-muted)" fontSize={10} textAnchor="end">{formatINRSymbol(minP)}</text>
-          </>
-        )}
-        {stable && (
-          <line x1={padX - 8} x2={W - padX + 8} y1={yMid} y2={yMid} stroke="var(--border-subtle)" strokeDasharray="3 4" />
-        )}
-
-        {/* Area + line */}
-        <path d={areaPath} fill="color-mix(in srgb, var(--brand-600) 14%, transparent)" />
-        <path d={path} fill="none" stroke="var(--brand-600)" strokeWidth={2.6} strokeLinejoin="round" strokeLinecap="round" />
-
-        {points.map((p, i) => {
-          const isLast = i === points.length - 1
-          return (
-            <g key={i}>
-              <circle cx={p.x} cy={p.y} r={isLast ? 6 : 5} fill={isLast ? 'var(--brand-600)' : '#fff'} stroke="var(--brand-600)" strokeWidth={2.4} />
-              <text x={p.x} y={p.y - 12} fill="var(--text-primary)" fontSize={12} fontWeight={800} textAnchor="middle">
-                {formatINRSymbol(p.v)}
-              </text>
-              <text x={p.x} y={H - 12} fill="var(--text-muted)" fontSize={11} textAnchor="middle">
-                {formatDate(p.r.po_date)}
-              </text>
-            </g>
-          )
-        })}
-      </svg>
-    </div>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
   )
 }
 
 /* =========================================================================
- *   Tiny helpers
+ *   Helpers
  * ========================================================================= */
 
-function Mono({ children }: { children: React.ReactNode }) {
-  return <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{children}</span>
+function rateOf(r: InvoiceRow): number {
+  const er = parseAmount(r.effective_rate)
+  if (er != null && er > 0) return er
+  const pr = parseAmount(r.po_rate)
+  return pr ?? 0
 }
 
-function trendTone(delta: number | null): string {
-  if (delta == null) return 'var(--text-muted)'
-  if (delta > 0) return 'var(--status-danger-fg)'
-  if (delta < 0) return 'var(--status-success-fg)'
-  return 'var(--text-muted)'
+function computeKpis(rows: InvoiceRow[]): KpiBundle {
+  if (rows.length === 0) {
+    return { latest: null, avg: null, lowest: null, highest: null, deltaPctVsAvg: null }
+  }
+  // rows arrive newest-first from the API (ORDER BY invoice_date DESC); after
+  // filter we preserve that order. Sort defensively.
+  const sorted = [...rows].sort((a, b) => {
+    const da = a.invoice_date ? new Date(a.invoice_date).getTime() : 0
+    const db = b.invoice_date ? new Date(b.invoice_date).getTime() : 0
+    return db - da
+  })
+  const top = sorted[0]
+  const latest = { rate: rateOf(top), date: top.invoice_date, supplier: top.supplier_name }
+
+  let lo: { rate: number; date: string | null; supplier: string | null } | null = null
+  let hi: { rate: number; date: string | null; supplier: string | null } | null = null
+  let sum = 0
+  let n = 0
+  for (const r of sorted) {
+    const rate = rateOf(r)
+    if (rate <= 0) continue
+    sum += rate
+    n++
+    if (lo == null || rate < lo.rate) lo = { rate, date: r.invoice_date, supplier: r.supplier_name }
+    if (hi == null || rate > hi.rate) hi = { rate, date: r.invoice_date, supplier: r.supplier_name }
+  }
+  const avg = n > 0 ? sum / n : null
+  const deltaPctVsAvg = avg != null && avg > 0 ? ((latest.rate - avg) / avg) * 100 : null
+
+  return { latest, avg, lowest: lo, highest: hi, deltaPctVsAvg }
 }
 
-function trendIcon(delta: number | null): string {
-  if (delta == null) return 'pi-minus'
-  if (delta > 0) return 'pi-arrow-up'
-  if (delta < 0) return 'pi-arrow-down'
-  return 'pi-minus'
+function buildSupplierSeries(rowsAsc: InvoiceRow[], suppliers: string[]): { supplier: string; points: { t: number; rate: number }[] }[] {
+  return suppliers.map((sup) => {
+    const points = rowsAsc
+      .filter((r) => (r.supplier_name || 'Unknown') === sup && r.invoice_date)
+      .map((r) => ({ t: new Date(r.invoice_date as string).getTime(), rate: rateOf(r) }))
+      .filter((p) => p.rate > 0 && Number.isFinite(p.t))
+    return { supplier: sup, points }
+  })
 }
 
 function highlightMatch(value: string, query: string) {

@@ -73,6 +73,12 @@ class InvoiceContext:
     # Cumulative invoice rollups across all invoices for this PO (this one excluded)
     other_invoices_total_amount: Decimal
     other_invoices_total_qty: Decimal
+    # Σ(invoice_lines.taxable_value) across other invoices on this PO.
+    # Used by E061 instead of `total_amount × 0.85`: the heuristic
+    # over-estimates spend when sibling invoices have inflated total_amount
+    # but missing taxable_value (a real data quality pattern). Reading
+    # taxable_value directly removed 15 false positives on the live data.
+    other_invoices_total_pre_tax: Decimal
     # Pre-computed
     this_inv_qty: Decimal
     this_inv_amount: Decimal
@@ -462,6 +468,7 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
         # -- Cumulative across other invoices for the same PO ----------------
         other_inv_total_amount = Decimal(0)
         other_inv_total_qty = Decimal(0)
+        other_inv_total_pre_tax = Decimal(0)
         if po is not None:
             cur.execute(
                 """
@@ -469,7 +476,11 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
                        COALESCE(SUM(
                            (SELECT COALESCE(SUM(il.billed_qty), 0)
                             FROM invoice_lines il WHERE il.invoice_id = i.invoice_id)
-                       ), 0)::numeric AS qty
+                       ), 0)::numeric AS qty,
+                       COALESCE(SUM(
+                           (SELECT COALESCE(SUM(COALESCE(il.taxable_value, 0)), 0)
+                            FROM invoice_lines il WHERE il.invoice_id = i.invoice_id)
+                       ), 0)::numeric AS pre_tax
                 FROM invoices i
                 WHERE i.po_id = %s
                   AND i.invoice_id <> %s
@@ -480,6 +491,7 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             row = cur.fetchone()
             other_inv_total_amount = _to_decimal(row["amt"])
             other_inv_total_qty = _to_decimal(row["qty"])
+            other_inv_total_pre_tax = _to_decimal(row["pre_tax"])
 
         return InvoiceContext(
             invoice_id=invoice_id,
@@ -500,6 +512,7 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             schedule_qty_total=schedule_qty_total,
             other_invoices_total_amount=other_inv_total_amount,
             other_invoices_total_qty=other_inv_total_qty,
+            other_invoices_total_pre_tax=other_inv_total_pre_tax,
             this_inv_qty=this_inv_qty,
             this_inv_amount=this_inv_amount,
             po_value_computed=po_value_computed,

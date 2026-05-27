@@ -12,6 +12,7 @@
 // no-op until the migration runs.
 
 import { pool } from './db.js'
+import { recordAudit } from './auditEvents.js'
 
 /**
  * Static catalog of the 32 rule codes the engine emits, mirrored from
@@ -62,22 +63,54 @@ const RULES = [
 ]
 
 /**
- * Look up the live count of invoices currently failing each rule.
- * Reads from invoices.mismatches->'errors'[].code.
+ * Pull a stored mismatch code down to its short prefix.
+ *   "E003_PO_NOT_FOUND"   → "E003"
+ *   "E003"                → "E003"
+ * The Python engine writes short codes ("E003") into
+ * `invoices.mismatches->errors[].code`, but the rule catalog uses long
+ * codes ("E003_PO_NOT_FOUND"). All count + sample lookups normalise both
+ * sides to the short form before matching, so the two stores stay in
+ * sync regardless of which form gets written next.
+ */
+function shortCode(code) {
+  if (!code) return ''
+  return String(code).split('_')[0].toUpperCase()
+}
+
+/**
+ * Look up the live count of invoices currently failing each rule. Counts
+ * are aggregated by short prefix (E003, E022, …) so both legacy short
+ * codes and the long-form rule codes match.
+ *
+ * Reads from `invoices.validation_errors->errors[]` (populated by
+ * `validateAndUpdateInvoiceStatus` in poInvoiceValidation.js). NOT
+ * `mismatches` — that column is owned by the dual-source reconcile flow
+ * and uses a different shape (flat array of field diffs).
+ *
+ * Counts are scoped to invoices currently in a pending status so the
+ * reconciliation queue reflects only invoices the user can act on, not
+ * historical errors from invoices that have since been validated.
  */
 async function fetchLiveCounts() {
   try {
     const { rows } = await pool.query(`
-      SELECT e->>'code' AS code, COUNT(DISTINCT i.invoice_id)::int AS n
+      SELECT split_part(e->>'code', '_', 1) AS code,
+             COUNT(DISTINCT i.invoice_id)::int AS n
         FROM invoices i,
              LATERAL jsonb_array_elements(
-               COALESCE(i.mismatches->'errors', '[]'::jsonb)
+               COALESCE(i.validation_errors->'errors', '[]'::jsonb)
              ) AS e
-       GROUP BY e->>'code'
+       WHERE e->>'code' IS NOT NULL
+         AND e->>'code' <> 'EXXX'
+         AND i.status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                          'exception_approval',    'debit_note_approval')
+       GROUP BY split_part(e->>'code', '_', 1)
     `)
     return Object.fromEntries(rows.map(r => [r.code, r.n]))
   } catch (err) {
-    // mismatches column might not be populated yet — return zeros.
+    // validation_errors column might not exist yet — first call to
+    // validateAndUpdateInvoiceStatus auto-creates it. Return empty until
+    // then so the page renders an empty queue instead of 500'ing.
     console.warn('validation-rules: fetchLiveCounts failed, returning empty', err.message)
     return {}
   }
@@ -100,23 +133,88 @@ async function fetchOverrides() {
 }
 
 /**
+ * Distinct-invoice rollups for the Reconciliation page's KPI strip.
+ *
+ * The previous frontend computed totals by summing per-rule counts, which
+ * double-counts every invoice that fails more than one rule (1 invoice with
+ * 3 errors → counted 3 times). These queries use COUNT(DISTINCT invoice_id)
+ * over the live `validation_errors->errors[]` JSONB so the topline numbers
+ * always match what the user sees in the invoice list.
+ */
+async function fetchReconcileStats() {
+  const empty = { total_in_queue: 0, awaiting_reference_data: 0, re_validation_needed: 0 }
+  try {
+    const { rows } = await pool.query(`
+      WITH inv_with_codes AS (
+        SELECT i.invoice_id,
+               array_agg(DISTINCT split_part(e->>'code','_',1)) AS codes
+          FROM invoices i,
+               LATERAL jsonb_array_elements(
+                 COALESCE(i.validation_errors->'errors', '[]'::jsonb)
+               ) AS e
+         WHERE e->>'code' IS NOT NULL
+           AND e->>'code' <> 'EXXX'
+           AND i.status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                            'exception_approval',    'debit_note_approval')
+         GROUP BY i.invoice_id
+      )
+      SELECT
+        COUNT(*)::int AS total_in_queue,
+        -- Awaiting reference data: invoices whose only blockers are missing
+        -- master data (PO / supplier). These are unblocked by reloading
+        -- reference data, not by code fixes.
+        COUNT(*) FILTER (
+          WHERE codes && ARRAY['E002','E003','E004']
+        )::int AS awaiting_reference_data,
+        -- Re-validation needed: has at least one code OTHER than the
+        -- reference-data set (qty / price / GST / GRN / open-PO etc.).
+        COUNT(*) FILTER (
+          WHERE EXISTS (
+            SELECT 1 FROM unnest(codes) c
+             WHERE c NOT IN ('E002','E003','E004')
+          )
+        )::int AS re_validation_needed
+      FROM inv_with_codes
+    `)
+    const row = rows[0] || {}
+    return {
+      total_in_queue:          Number(row.total_in_queue || 0),
+      awaiting_reference_data: Number(row.awaiting_reference_data || 0),
+      re_validation_needed:    Number(row.re_validation_needed || 0),
+    }
+  } catch (err) {
+    console.warn('validation-rules: fetchReconcileStats failed, returning empty', err.message)
+    return empty
+  }
+}
+
+/**
  * GET /api/validation-rules
  *
  * Returns the catalog enriched with live counts and any per-rule overrides.
+ * Also returns a `stats` block with distinct-invoice counts for the
+ * Reconciliation page KPI strip.
  */
 export async function getValidationRulesRoute(_req, res) {
   try {
-    const [counts, overrides] = await Promise.all([fetchLiveCounts(), fetchOverrides()])
+    const [counts, overrides, stats] = await Promise.all([
+      fetchLiveCounts(),
+      fetchOverrides(),
+      fetchReconcileStats(),
+    ])
     const rules = RULES.map(r => {
       const o = overrides[r.code]
+      // Look counts up by short prefix (E003) so we hit the bucket
+      // populated from invoices.mismatches regardless of whether the
+      // engine stored the long or short form.
       return {
         ...r,
-        count:    counts[r.code] || 0,
+        count:    counts[shortCode(r.code)] || 0,
         active:   o?.active ?? true,
         severity: o?.severity_override || r.severity
       }
     })
-    res.json({ rules, total: rules.length })
+    res.json({ rules, total: rules.length, stats })
   } catch (err) {
     console.error('Error fetching validation rules:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
@@ -136,24 +234,30 @@ export async function getInvoicesByErrorCodeRoute(req, res) {
     if (!code) return res.status(400).json({ error: 'code_required' })
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100)
 
+    // Match either the long form (E003_PO_NOT_FOUND) or the short prefix
+    // (E003) — both are normalised to the short form for comparison so
+    // either format works on the wire.
+    const codeShort = shortCode(code)
     const sql = `
       SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.total_amount,
              i.po_number, i.status, i.source,
              COALESCE(s.supplier_name, '') AS supplier_name
         FROM invoices i
         LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
-        WHERE EXISTS (
-          SELECT 1
-            FROM jsonb_array_elements(
-              COALESCE(i.mismatches->'errors', '[]'::jsonb)
-            ) AS e
-           WHERE e->>'code' = $1
-        )
+        WHERE i.status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                           'exception_approval',    'debit_note_approval')
+          AND EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements(
+                COALESCE(i.validation_errors->'errors', '[]'::jsonb)
+              ) AS e
+             WHERE split_part(e->>'code', '_', 1) = $1
+          )
         ORDER BY i.invoice_date DESC NULLS LAST, i.invoice_id DESC
         LIMIT $2
     `
     try {
-      const { rows } = await pool.query(sql, [code, limit])
+      const { rows } = await pool.query(sql, [codeShort, limit])
       res.json({ code, items: rows })
     } catch (err) {
       // mismatches column / errors structure missing — return empty.
@@ -210,9 +314,106 @@ export async function patchValidationRuleRoute(req, res) {
       RETURNING code, active, severity_override
     `, [code, active ?? null, severity ?? null, userId])
 
+    // Audit the change — compliance teams need to see who muted what and
+    // when, which the override table alone (one row per code, overwritten
+    // on every change) doesn't preserve historically.
+    const ruleDef = RULES.find(r => r.code === code)
+    const summary = active === false
+      ? `Disabled rule ${code} (${ruleDef?.name || ''})`
+      : active === true
+        ? `Enabled rule ${code} (${ruleDef?.name || ''})`
+        : severity
+          ? `Set severity of ${code} to ${severity}`
+          : `Updated rule ${code}`
+    recordAudit({
+      actorKind: 'user',
+      actorId: userId,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'validation_rule_changed',
+      entityKind: 'rule',
+      entityId: code,
+      entityLabel: ruleDef?.name || code,
+      summary,
+      meta: { active: active ?? null, severity: severity ?? null }
+    })
+
     res.json(rows[0])
   } catch (err) {
     console.error('Error patching validation rule:', err)
+    res.status(500).json({ error: 'server_error', message: err.message })
+  }
+}
+
+/**
+ * POST /api/validation-rules/revalidate-all-pending
+ *
+ * Re-runs the validation engine on every invoice that hasn't yet been
+ * approved by a human (downstream states `ready_for_payment` / `paid` /
+ * `rejected` are excluded because they've already cleared the validation
+ * gate via human action).
+ *
+ * Statuses included by default:
+ *   • waiting_for_validation
+ *   • waiting_for_re_validation
+ *   • exception_approval
+ *   • debit_note_approval
+ *   • **validated**  ← included so rule-set upgrades flush out invoices
+ *                       that were marked valid under an older, more
+ *                       permissive engine. Any new error demotes them
+ *                       back to waiting_for_re_validation.
+ *
+ * Each invocation persists per-rule findings to `invoices.validation_errors`
+ * (auto-created), so the Reconciliation page's count rollup stays accurate.
+ *
+ * Returns { total, succeeded, failed, started_at, finished_at } so the UI
+ * can render a progress summary.
+ */
+export async function revalidateAllPendingRoute(req, res) {
+  // Lazy-imported to avoid circular dep (poInvoiceValidation imports pool
+  // which imports this file transitively).
+  const { validateAndUpdateInvoiceStatus } = await import('./poInvoiceValidation.js')
+  const startedAt = new Date().toISOString()
+  try {
+    const { rows } = await pool.query(
+      `SELECT invoice_id FROM invoices
+        WHERE status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                         'exception_approval',    'debit_note_approval',
+                         'validated')
+        ORDER BY invoice_id ASC`
+    )
+    let succeeded = 0
+    let failed = 0
+    for (const r of rows) {
+      try {
+        await validateAndUpdateInvoiceStatus(r.invoice_id)
+        succeeded++
+      } catch (err) {
+        failed++
+        console.warn(`revalidate ${r.invoice_id} failed:`, err.message)
+      }
+    }
+    const finishedAt = new Date().toISOString()
+
+    recordAudit({
+      actorKind: 'user',
+      actorId: req.user?.user_id,
+      actorLabel: req.user?.username || req.user?.full_name || null,
+      action: 'validation_revalidate_all',
+      entityKind: 'rule',
+      entityId: 'all',
+      summary: `Re-validated ${rows.length} pending invoices (${succeeded} ok / ${failed} failed)`,
+      meta: { total: rows.length, succeeded, failed }
+    })
+
+    res.json({
+      total: rows.length,
+      succeeded,
+      failed,
+      started_at: startedAt,
+      finished_at: finishedAt
+    })
+  } catch (err) {
+    console.error('Error in revalidate-all-pending:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
   }
 }

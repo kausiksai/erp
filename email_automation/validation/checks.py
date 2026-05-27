@@ -583,17 +583,21 @@ def check_totals(ctx: InvoiceContext) -> List[Finding]:
                     data={"invoice_qty": str(this_qty), "po_qty": str(po_qty)},
                 ))
             else:
-                # Suppress E041 when cumulative billing across all invoices on
-                # this PO meets or exceeds the PO total — the PO is fully
-                # consumed across siblings; this invoice being individually
-                # under is just normal multi-shipment billing.
+                # Partial billing is a normal workflow — one PO can be
+                # split across multiple invoices (batch deliveries, partial
+                # shipments). The invoice validates for what it bills; the
+                # PO is correctly set to `partially_fulfilled` by the
+                # status writer. Emit a warning so finance can still see
+                # the PO is under-billed cumulatively, but don't block
+                # payment for legitimate partial deliveries.
                 cumulative_qty = this_qty + ctx.other_invoices_total_qty
                 if cumulative_qty < po_qty - TOL_QTY:
                     out.append(Finding(
-                        "E041_HEADER_QTY_UNDER_PO", SEVERITY_ERROR, CAT_TOTALS,
-                        f"Σ invoice billed_qty ({this_qty}) is less than Σ PO line qty ({po_qty}); "
-                        f"cumulative billing across all invoices on this PO ({cumulative_qty}) "
-                        f"still falls short.",
+                        "W041_HEADER_QTY_UNDER_PO", SEVERITY_WARNING, CAT_TOTALS,
+                        f"Partial billing: invoice qty ({this_qty}) is less than PO total "
+                        f"({po_qty}); cumulative across all invoices on this PO "
+                        f"({cumulative_qty}) still under PO total — PO will be marked "
+                        f"partially_fulfilled.",
                         data={
                             "invoice_qty": str(this_qty),
                             "po_qty": str(po_qty),
@@ -716,30 +720,22 @@ def check_cumulative(ctx: InvoiceContext) -> List[Finding]:
         Decimal(0),
     )
     if ctx.po_value_computed > 0:
-        # `other_invoices_total_amount` from the context is the sum of
-        # invoices.total_amount which is tax-inclusive. For a fair
-        # comparison we need to also fetch pre-tax totals for other
-        # invoices. Until we add that to the context, we apply a
-        # proportional allowance: expected_max = po_value × (1 + average_gst_rate).
-        # A simple safe approach: skip the check when other_invoices_total_amount
-        # already exceeds po_value_computed (would yield false positive),
-        # otherwise check only this invoice's pre-tax amount against a
-        # budget of (po_value - other_invoices_pre_tax_estimate).
-        #
-        # Conservative implementation: check cumulative pre-tax amount of
-        # *this invoice alone* against (po_value - other_invoices_total_amount × 0.85),
-        # where 0.85 is a rough pre-tax/post-tax ratio for 18% GST.
-        est_other_pre_tax = ctx.other_invoices_total_amount * Decimal("0.85")
-        remaining_budget = ctx.po_value_computed - est_other_pre_tax
+        # Use the real Σ(invoice_lines.taxable_value) across sibling invoices
+        # (other_invoices_total_pre_tax) rather than the old 0.85 × total_amount
+        # heuristic. The heuristic over-estimated sibling spend whenever any
+        # sibling had inflated total_amount with missing taxable_value (a real
+        # data quality pattern), blocking ~10 invoices that legitimately fit
+        # inside the PO budget on the live data.
+        remaining_budget = ctx.po_value_computed - ctx.other_invoices_total_pre_tax
         if remaining_budget > 0 and this_amt_exclusive > remaining_budget + TOL_AMOUNT:
             out.append(Finding(
                 "E061_CUMULATIVE_AMOUNT_OVER_PO", SEVERITY_ERROR, CAT_CUMULATIVE,
                 f"Cumulative pre-tax invoiced amount exceeds PO value "
-                f"(this invoice pre-tax={this_amt_exclusive}, estimated budget={remaining_budget})",
+                f"(this invoice pre-tax={this_amt_exclusive}, remaining budget={remaining_budget})",
                 data={
                     "this_inv_pre_tax": str(this_amt_exclusive),
                     "po_value": str(ctx.po_value_computed),
-                    "estimated_budget": str(remaining_budget),
+                    "remaining_budget": str(remaining_budget),
                 },
             ))
     return out

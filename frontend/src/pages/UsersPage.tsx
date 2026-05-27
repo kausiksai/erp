@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
+import { formatDateTime } from '../utils/format'
 
 interface User {
   user_id: number
@@ -10,6 +11,7 @@ interface User {
   full_name: string | null
   role: string
   is_active: boolean
+  last_login: string | null
   created_at: string | null
 }
 
@@ -110,6 +112,28 @@ function UsersPage({ embedded = false }: UsersPageProps = {}) {
     try {
       const res = await apiFetch(`users/${u.user_id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Delete failed'))
+      await load()
+    } catch (err) {
+      setError(getDisplayError(err))
+    }
+  }
+
+  /**
+   * Toggle the user's is_active flag. Disabling preserves the user row
+   * (and therefore all audit_events.actor_id references) — it just
+   * revokes login.
+   */
+  const handleToggleActive = async (u: User) => {
+    const verb = u.is_active ? 'Disable' : 'Re-enable'
+    if (!confirm(`${verb} user "${u.username}"?`)) return
+    setError(''); setSuccess('')
+    try {
+      const res = await apiFetch(`users/${u.user_id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ is_active: !u.is_active })
+      })
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, `${verb} failed`))
+      setSuccess(`${u.username} ${u.is_active ? 'disabled' : 're-enabled'}.`)
       await load()
     } catch (err) {
       setError(getDisplayError(err))
@@ -281,9 +305,19 @@ function UsersPage({ embedded = false }: UsersPageProps = {}) {
                     {(u.full_name || u.username).split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{u.full_name || u.username}</div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {u.full_name || u.username}
+                      {!u.is_active && (
+                        <span className="status-chip status-chip--muted" style={{ fontSize: 10 }}>
+                          DISABLED
+                        </span>
+                      )}
+                    </div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                       {u.email} · {u.username}
+                      <span style={{ marginLeft: 8 }}>
+                        · last seen {u.last_login ? formatDateTime(u.last_login) : <em>never</em>}
+                      </span>
                     </div>
                   </div>
                   <span style={{
@@ -298,6 +332,15 @@ function UsersPage({ embedded = false }: UsersPageProps = {}) {
                   }}>
                     {u.role}
                   </span>
+                  <button
+                    className="action-btn action-btn--ghost"
+                    onClick={() => handleToggleActive(u)}
+                    title={u.is_active ? 'Disable user (revoke login without losing audit history)' : 'Re-enable user'}
+                    style={u.is_active ? undefined : { color: 'var(--brand-600)' }}
+                  >
+                    <i className={`pi ${u.is_active ? 'pi-pause' : 'pi-play'}`} />
+                    {u.is_active ? ' Disable' : ' Enable'}
+                  </button>
                   <button className="action-btn action-btn--ghost" onClick={() => handleEdit(u)}>
                     <i className="pi pi-pencil" /> Edit
                   </button>

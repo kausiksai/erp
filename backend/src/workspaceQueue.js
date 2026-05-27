@@ -186,6 +186,68 @@ async function buildQueue(userId) {
       })
     }
 
+    // ---- Generic awaiting-validation group ----
+    // Shown alongside any per-error-code groups. The two answer different
+    // questions: per-code groups tell you "approve these debit notes" or
+    // "fix this rule"; the bucket count tells you "X invoices total are
+    // blocked" so headline scanning still works.
+    const awaiting = statusCounts.waiting_for_validation || 0
+    if (awaiting > 0) {
+      items.push({
+        id: 'status:awaiting',
+        priority: 1,
+        variant: 'warn',
+        icon: 'pi-clock',
+        chip: `${awaiting} invoices`,
+        title: `${awaiting} invoices awaiting validation`,
+        body: 'Reference data missing — PO, GRN or supplier needs to be linked before the engine can sign off.',
+        actions: [{ label: 'Open queue', link: '/invoices/reconciliation' }]
+      })
+    }
+
+    // ---- Re-validation needed (data quality / supplier issues) ----
+    const reval = statusCounts.waiting_for_re_validation || 0
+    if (reval > 0) {
+      items.push({
+        id: 'status:reval',
+        priority: 1,
+        variant: 'danger',
+        icon: 'pi-sync',
+        chip: `${reval} invoices`,
+        title: `${reval} invoices need re-validation`,
+        body: 'Data-quality or supplier-side issues blocked the previous run. Resolve and re-run the engine.',
+        actions: [{ label: 'Open queue', link: '/invoices/reconciliation' }]
+      })
+    }
+
+    // ---- Exception / debit-note approvals ----
+    const exc = statusCounts.exception_approval || 0
+    if (exc > 0) {
+      items.push({
+        id: 'status:exception',
+        priority: 1,
+        variant: 'warn',
+        icon: 'pi-exclamation-triangle',
+        chip: `${exc} invoices`,
+        title: `${exc} exception approvals waiting on you`,
+        body: 'Engine paused these for manual review. Approve to release them for payment.',
+        actions: [{ label: 'Review', link: '/invoices/validate?status=exception_approval' }]
+      })
+    }
+    const dn = statusCounts.debit_note_approval || 0
+    if (dn > 0 && !errorCounts.E022) {
+      items.push({
+        id: 'status:debit',
+        priority: 1,
+        variant: 'info',
+        icon: 'pi-rupee',
+        chip: `${dn} invoices`,
+        title: `${dn} debit notes awaiting approval`,
+        body: 'Auto-drafted debit notes for rate / qty discrepancies. Approve to send to the supplier.',
+        actions: [{ label: 'Review', link: '/invoices/validate?status=debit_note_approval' }]
+      })
+    }
+
     // ---- Validated and ready for payment (positive item) ----
     const validated = statusCounts.validated || 0
     if (validated > 0) {
@@ -200,6 +262,13 @@ async function buildQueue(userId) {
         actions: [{ label: 'Approve all →', link: '/payments/approve', kind: 'primary' }]
       })
     }
+
+    // ---- Sort: priority asc, then variant severity (danger → warn → info → success) ----
+    const variantWeight = { danger: 0, warn: 1, info: 2, success: 3 }
+    items.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority
+      return (variantWeight[a.variant] ?? 4) - (variantWeight[b.variant] ?? 4)
+    })
 
     return items
   } finally {
@@ -234,7 +303,10 @@ export async function getInsightsSuggestionsRoute(_req, res) {
          LIMIT 1
       `)
       const top = rows[0]
-      if (top && top.n >= 30) {
+      // Lowered from n>=30 → n>=1 so the card surfaces whenever the engine
+      // has logged any blocker. The mockup shows 3 insight cards even on a
+      // small dataset; gating at 30 hid the panel for most installs.
+      if (top && top.n >= 1) {
         const code  = String(top.code).split('_')[0]
         const label = code === 'E003' ? `Add ${top.n} SC* POs to clear top blocker`
                     : code === 'E022' ? `Approve ${top.n} debit notes in one batch`
@@ -250,7 +322,17 @@ export async function getInsightsSuggestionsRoute(_req, res) {
           : code === 'E004'
           ? 'Engine has high-confidence guesses for many of these. A review session clears them.'
           : 'Targeting this category resolves the largest single bucket of stuck invoices.'
-        out.push({ icon: 'pi-bolt', title: label, body, metadata: { code, count: top.n } })
+        out.push({
+          icon: 'pi-bolt',
+          title: label,
+          body,
+          metadata: { code, count: top.n },
+          // Deep-link into the reconciliation queue filtered to this code so
+          // users can act on the insight in one click. Frontend routes
+          // /invoices/reconciliation accepts ?code=…
+          action_link: `/invoices/reconciliation?code=${encodeURIComponent(code)}`,
+          action_label: 'Open queue'
+        })
       }
     } catch { /* non-fatal */ }
 
@@ -271,7 +353,7 @@ export async function getInsightsSuggestionsRoute(_req, res) {
         )
         SELECT supplier_name, code, n
           FROM per
-         WHERE n >= 5
+         WHERE n >= 1
          ORDER BY n DESC
          LIMIT 1
       `)
@@ -282,7 +364,9 @@ export async function getInsightsSuggestionsRoute(_req, res) {
           icon: 'pi-percentage',
           title: `${top.supplier_name} ${code === 'E022' ? 'rate' : 'data'} issue is systemic`,
           body:  `All ${top.n} invoices from this supplier hit ${code}. Recommend a master-rate audit.`,
-          metadata: { supplier: top.supplier_name, code, count: top.n }
+          metadata: { supplier: top.supplier_name, code, count: top.n },
+          action_link: `/invoices/validate?supplier=${encodeURIComponent(top.supplier_name)}&code=${encodeURIComponent(code)}`,
+          action_label: 'Review invoices'
         })
       }
     } catch { /* non-fatal */ }
@@ -304,12 +388,139 @@ export async function getInsightsSuggestionsRoute(_req, res) {
           icon: 'pi-trending-up',
           title: `OCR validation rate at ${pct}% this week`,
           body:  'Some PDF templates may have changed format. Review OCR queue and re-extract failures.',
-          metadata: { ocr_rate: rate }
+          metadata: { ocr_rate: rate },
+          action_link: '/automation',
+          action_label: 'Open automation'
         })
       }
     } catch { /* non-fatal */ }
 
-    res.json({ items: out })
+    // ---- 4. Analytical fallbacks ----
+    // The queue surfaces "what to do now" with status counts. To avoid
+    // duplicating that, these fallbacks lean on dimensions the queue
+    // doesn't use: time trends, supplier concentration, age, and source
+    // split. Same data, different lens.
+    const usedDims = new Set(out.map(c => c.metadata?.dim))
+
+    // 4a. Top supplier by 30-day spend → spend concentration insight
+    if (out.length < 3 && !usedDims.has('supplier_spend')) {
+      try {
+        const { rows } = await pool.query(`
+          WITH last30 AS (
+            SELECT s.supplier_name,
+                   SUM(COALESCE(i.total_amount, 0))::numeric AS spend,
+                   COUNT(*)::int                              AS n
+              FROM invoices i
+              LEFT JOIN suppliers s ON s.supplier_id = i.supplier_id
+             WHERE i.invoice_date >= CURRENT_DATE - INTERVAL '30 days'
+               AND s.supplier_name IS NOT NULL
+             GROUP BY s.supplier_name
+          ),
+          tot AS (SELECT SUM(spend) AS s FROM last30)
+          SELECT l.supplier_name, l.spend, l.n,
+                 ROUND((l.spend / NULLIF(t.s, 0)) * 100, 1) AS pct
+            FROM last30 l, tot t
+           ORDER BY l.spend DESC
+           LIMIT 1
+        `)
+        const top = rows[0]
+        const pct = Number(top?.pct) || 0
+        if (top && pct >= 15) {
+          out.push({
+            icon: 'pi-chart-pie',
+            title: `${top.supplier_name} is ${pct}% of last-30-day spend`,
+            body:  `${Number(top.n).toLocaleString('en-IN')} invoices in 30 days. Concentrated supplier — worth reviewing rate cards and payment terms.`,
+            metadata: { dim: 'supplier_spend', supplier: top.supplier_name, pct },
+            action_link: `/suppliers?q=${encodeURIComponent(top.supplier_name)}`,
+            action_label: 'Open supplier'
+          })
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // 4b. Stuck-too-long invoices → ageing insight
+    if (out.length < 3 && !usedDims.has('aged')) {
+      try {
+        const { rows } = await pool.query(`
+          SELECT COUNT(*)::int AS n
+            FROM invoices
+           WHERE status IN ('waiting_for_validation', 'waiting_for_re_validation',
+                            'exception_approval',    'debit_note_approval')
+             AND invoice_date < CURRENT_DATE - INTERVAL '30 days'
+        `)
+        const n = Number(rows[0]?.n) || 0
+        if (n >= 1) {
+          out.push({
+            icon: 'pi-history',
+            title: `${n.toLocaleString('en-IN')} invoices stuck more than 30 days`,
+            body:  'Ageing buckets are growing — likely waiting on supplier or master-data fixes that need an external chase.',
+            metadata: { dim: 'aged', count: n },
+            action_link: '/invoices/validate?aged=30',
+            action_label: 'Open aged invoices'
+          })
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // 4c. Source split → pipeline-mix insight
+    if (out.length < 3 && !usedDims.has('source_mix')) {
+      try {
+        const { rows } = await pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE source = 'excel')::int AS excel,
+            COUNT(*) FILTER (WHERE source = 'ocr')::int   AS ocr,
+            COUNT(*) FILTER (WHERE source = 'both')::int  AS both,
+            COUNT(*)::int                                  AS total
+          FROM invoices
+         WHERE invoice_date >= CURRENT_DATE - INTERVAL '30 days'
+        `)
+        const r = rows[0] || {}
+        const total = Number(r.total) || 0
+        const ocr   = Number(r.ocr) || 0
+        if (total > 0 && ocr > 0) {
+          const ocrPct = Math.round((ocr / total) * 100)
+          out.push({
+            icon: 'pi-image',
+            title: `OCR pipeline carries ${ocrPct}% of last-30-day volume`,
+            body:  ocrPct >= 30
+              ? `${ocr.toLocaleString('en-IN')} PDF invoices in 30 days. Watch the OCR accuracy panel — drift here cascades into reconciliation.`
+              : `${ocr.toLocaleString('en-IN')} OCR invoices in 30 days. Most volume comes from the Bill Register pipeline.`,
+            metadata: { dim: 'source_mix', ocr_pct: ocrPct },
+            action_link: '/automation',
+            action_label: 'Open automation'
+          })
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // 4d. Last-resort: pure validation-rate posture
+    if (out.length === 0) {
+      try {
+        const { rows } = await pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE status = 'validated')::int AS validated,
+            COUNT(*)::int                                      AS total
+          FROM invoices
+        `)
+        const r = rows[0] || {}
+        const total = Number(r.total) || 0
+        if (total > 0) {
+          const pct = Math.round((Number(r.validated) / total) * 100)
+          out.push({
+            icon: 'pi-check-circle',
+            title: `${pct}% end-to-end validation rate`,
+            body:  pct >= 50
+              ? 'Healthy. The remaining error groups are concentrated and quick to resolve.'
+              : 'Pipeline is mostly upstream-blocked. Resolve the top error groups first.',
+            metadata: { dim: 'rate', pct },
+            action_link: '/insights',
+            action_label: 'Open insights'
+          })
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    res.json({ items: out.slice(0, 3) })
   } catch (err) {
     console.error('insights/suggestions:', err)
     res.json({ items: [] })   // never 500 — frontend renders empty state

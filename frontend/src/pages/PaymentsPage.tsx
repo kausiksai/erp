@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import PageHero from '../components/PageHero'
-import StatTile from '../components/StatTile'
 import StatusChip from '../components/StatusChip'
 import InvoiceExpansion from '../components/InvoiceExpansion'
+import SlideOver from '../components/SlideOver'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { formatINRSymbol, formatDate, parseAmount } from '../utils/format'
 import { downloadCsv } from '../utils/exportCsv'
@@ -11,6 +10,30 @@ import { useToast } from '../contexts/ToastContext'
 import { useConfirm } from '../contexts/ConfirmContext'
 
 type Tab = 'approve' | 'ready' | 'history'
+
+interface DebitNoteDetailRow {
+  debit_note_id: number
+  file_name: string | null
+  dn_notes: string | null
+  uploaded_at: string | null
+  line_number: number | null
+  description: string | null
+  quantity: number | string | null
+  unit_price: number | string | null
+  amount: number | string | null
+  line_notes: string | null
+}
+
+interface PaymentTxRow {
+  id: number
+  amount: number | string | null
+  paid_at: string | null
+  notes: string | null
+  payment_type: string | null
+  payment_reference: string | null
+  paid_by_username: string | null
+  paid_by_name: string | null
+}
 
 interface PaymentRow {
   // Approve tab is a list of invoices; Ready / History are rows from payment_approvals.
@@ -23,14 +46,28 @@ interface PaymentRow {
   po_number?: string | null
   total_amount: number | string | null
   debit_note_value?: number | string | null
+  debit_note_count?: number | null
+  debit_note_total?: number | string | null
+  debit_note_details?: DebitNoteDetailRow[]
   paid_amount?: number | string | null     // Ready + History
+  payment_transactions?: PaymentTxRow[]
   status: string | null
   payment_due_date?: string | null
+  approved_by_name?: string | null
+  approved_by_username?: string | null
   approved_at?: string | null
   payment_date?: string | null
+  payment_done_by_name?: string | null
+  payment_done_by_username?: string | null
   payment_done_at?: string | null
   payment_type?: string | null
   payment_reference?: string | null
+  // Rejection trail — surfaced on the History tab so the supplier-facing
+  // user can see why a payment was blocked, by whom, and when.
+  rejection_reason?: string | null
+  rejected_by_name?: string | null
+  rejected_by_username?: string | null
+  rejected_at?: string | null
 }
 
 interface RecordPaymentForm {
@@ -62,9 +99,36 @@ function PaymentsPage() {
   const [rows, setRows] = useState<PaymentRow[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | null>(null)
-  const [totals, setTotals] = useState({ count: 0, value: 0 })
+  /** Whole-system payment KPIs — independent of the active tab. */
+  const [stats, setStats] = useState<{
+    ready:         { count: number; value: number }
+    due_week:      { count: number; value: number }
+    overdue:       { count: number; value: number }
+    paid_month:    { count: number; value: number }
+    // Per-tab chip counts — independent of the current tab's row fetch
+    // so all three numbers stay accurate at once.
+    approve_queue?: { count: number }
+    awaiting_bank?: { count: number }
+    history?:       { count: number }
+  } | null>(null)
 
-  // Row expansion state — keyed by invoice_id
+  /** SlideOver — when the user clicks a row chevron we open the rich
+   *  invoice detail in a side panel instead of expanding inline. This
+   *  matches the Invoices + Purchase-orders pages. */
+  const [detailRow, setDetailRow] = useState<PaymentRow | null>(null)
+
+  // Multi-select state for bulk actions on the Approve tab. Set of
+  // invoice_id — same key used elsewhere on the page. Cleared whenever the
+  // visible rows or tab change so a stale selection can't leak across views.
+  const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set())
+  const [bulkRunning, setBulkRunning] = useState(false)
+  useEffect(() => { setBulkSelected(new Set()) }, [tab])
+
+  // Row expansion state — keyed by invoice_id. Now only controls the
+  // inline action forms (bank override on Approve tab, payment-recording
+  // on Ready tab). The rich invoice/PO/GRN/ASN/validation/audit drill-in
+  // moved out of the inline expansion and into the slide-over above so
+  // it matches the Invoices + Purchase-orders pages.
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
   const toggleExpand = (id: number) => {
     setExpandedIds((prev) => {
@@ -108,12 +172,7 @@ function PaymentsPage() {
       // Trust the server's `total` (= COUNT(*) of the filter) when present —
       // otherwise fall back to items.length. This keeps the displayed count
       // accurate even if the page is paginated server-side.
-      const reportedTotal = typeof body.total === 'number' ? body.total : items.length
       setRows(items)
-      setTotals({
-        count: reportedTotal,
-        value: items.reduce((s, r) => s + (parseAmount(r.total_amount) ?? 0), 0)
-      })
     } catch (err) {
       toast.danger('Action failed', getDisplayError(err))
     } finally {
@@ -122,6 +181,20 @@ function PaymentsPage() {
   }, [tab])
 
   useEffect(() => { load() }, [load])
+
+  /* Whole-system payment KPIs — independent of the active tab. Exposed as
+     a function so post-mutation handlers (approve / reject / reopen /
+     record-payment) can refresh the chip counts in place. */
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await apiFetch('payments/stats')
+      if (!res.ok) return
+      setStats(await res.json())
+    } catch {
+      /* swallow — KPIs fall back to "—" */
+    }
+  }, [])
+  useEffect(() => { loadStats() }, [loadStats])
 
   useEffect(() => {
     const path = tab === 'history' ? '/payments/history' : tab === 'ready' ? '/payments/ready' : '/payments/approve'
@@ -148,10 +221,7 @@ function PaymentsPage() {
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Approve failed'))
       toast.success('Approved for payment', `Invoice ${row.invoice_number} moved to Ready for payment.`)
       setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
-      setTotals((t) => ({
-        count: Math.max(0, t.count - 1),
-        value: Math.max(0, t.value - (parseAmount(row.total_amount) ?? 0))
-      }))
+      loadStats()
     } catch (err) {
       toast.danger('Action failed', getDisplayError(err))
     } finally {
@@ -175,10 +245,7 @@ function PaymentsPage() {
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Approve failed'))
       toast.success('Approved with bank override', `Invoice ${row.invoice_number} — using the modified bank details.`)
       setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
-      setTotals((t) => ({
-        count: Math.max(0, t.count - 1),
-        value: Math.max(0, t.value - (parseAmount(row.total_amount) ?? 0))
-      }))
+      loadStats()
       setBankOverrideId(null)
       setBankForm({ bank_account_name: '', bank_account_number: '', bank_ifsc_code: '', bank_name: '', branch_name: '' })
     } catch (err) {
@@ -200,10 +267,131 @@ function PaymentsPage() {
       if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Reject failed'))
       toast.warn('Invoice rejected', `${row.invoice_number} won't proceed to payment.`)
       setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
-      setTotals((t) => ({
-        count: Math.max(0, t.count - 1),
-        value: Math.max(0, t.value - (parseAmount(row.total_amount) ?? 0))
-      }))
+      loadStats()
+    } catch (err) {
+      toast.danger('Action failed', getDisplayError(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // ---------- bulk approve / reject (Approve tab) ----------
+  // The backend has no batch endpoint, but a serial loop is fine: each
+  // /payments/approve is a single transaction and ~tens of invoices is the
+  // realistic batch size. We collect successes/failures and toast a summary
+  // at the end so the user knows exactly what landed.
+
+  const toggleBulkSelect = (invoiceId: number) => {
+    setBulkSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(invoiceId)) next.delete(invoiceId)
+      else next.add(invoiceId)
+      return next
+    })
+  }
+  const toggleBulkSelectAll = () => {
+    setBulkSelected((prev) => {
+      const allOnPage = rows.map((r) => r.invoice_id)
+      // If every visible row is already selected, deselect; otherwise select all.
+      const allSelected = allOnPage.every((id) => prev.has(id))
+      return allSelected ? new Set() : new Set(allOnPage)
+    })
+  }
+
+  const handleBulkApprove = async () => {
+    if (bulkSelected.size === 0) return
+    const ok = await confirmDialog({
+      title: `Approve ${bulkSelected.size} invoice${bulkSelected.size === 1 ? '' : 's'}?`,
+      body: 'Each invoice is approved with its supplier-default banking. To override banking on any single invoice, use the "Modify & Approve" action instead.',
+      icon: 'pi-check',
+      kind: 'success',
+      okLabel: `Approve ${bulkSelected.size}`
+    })
+    if (!ok) return
+    setBulkRunning(true)
+    const ids = Array.from(bulkSelected)
+    let ok_count = 0
+    let fail_count = 0
+    for (const invoiceId of ids) {
+      try {
+        const res = await apiFetch('payments/approve', {
+          method: 'POST',
+          body: JSON.stringify({ invoiceId })
+        })
+        if (res.ok) ok_count++
+        else fail_count++
+      } catch { fail_count++ }
+    }
+    if (ok_count > 0) {
+      setRows((prev) => prev.filter((r) => !ids.includes(r.invoice_id) || !bulkSelected.has(r.invoice_id)))
+      loadStats()
+    }
+    setBulkSelected(new Set())
+    setBulkRunning(false)
+    if (fail_count === 0) {
+      toast.success(`${ok_count} invoices approved`, 'All approvals landed cleanly.')
+    } else {
+      toast.warn(`${ok_count} approved, ${fail_count} failed`, 'Failed rows stay in the queue — open each to see the error.')
+    }
+  }
+
+  const handleBulkReject = async () => {
+    if (bulkSelected.size === 0) return
+    const reason = window.prompt(
+      `Reject ${bulkSelected.size} invoice${bulkSelected.size === 1 ? '' : 's'}?\n\nShared reason (required, applied to every row):`
+    )
+    if (!reason || !reason.trim()) return
+    setBulkRunning(true)
+    const ids = Array.from(bulkSelected)
+    let ok_count = 0
+    let fail_count = 0
+    for (const invoiceId of ids) {
+      try {
+        const res = await apiFetch('payments/reject', {
+          method: 'PATCH',
+          body: JSON.stringify({ invoiceId, rejection_reason: reason.trim() })
+        })
+        if (res.ok) ok_count++
+        else fail_count++
+      } catch { fail_count++ }
+    }
+    if (ok_count > 0) {
+      setRows((prev) => prev.filter((r) => !ids.includes(r.invoice_id) || !bulkSelected.has(r.invoice_id)))
+      loadStats()
+    }
+    setBulkSelected(new Set())
+    setBulkRunning(false)
+    if (fail_count === 0) {
+      toast.warn(`${ok_count} invoices rejected`, `Reason: ${reason}`)
+    } else {
+      toast.warn(`${ok_count} rejected, ${fail_count} failed`, 'Failed rows stay in the queue.')
+    }
+  }
+
+  /**
+   * Re-open a rejected invoice — flips it back to validated/pending_approval
+   * so it re-enters the Approve queue. The rejection trail on
+   * payment_approvals is preserved for audit.
+   */
+  const handleReopen = async (row: PaymentRow) => {
+    const ok = await confirmDialog({
+      title: `Re-open invoice ${row.invoice_number}?`,
+      body: 'This puts the invoice back into the Approve queue. The original rejection (reason, who, when) stays on file for audit.',
+      okLabel: 'Re-open',
+      kind: 'info',
+      icon: 'pi-refresh'
+    })
+    if (!ok) return
+    setBusyId(row.invoice_id)
+    try {
+      const res = await apiFetch('payments/reopen', {
+        method: 'PATCH',
+        body: JSON.stringify({ invoiceId: row.invoice_id })
+      })
+      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Re-open failed'))
+      toast.success('Invoice re-opened', `${row.invoice_number} is back in the Approve queue.`)
+      setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
+      loadStats()
     } catch (err) {
       toast.danger('Action failed', getDisplayError(err))
     } finally {
@@ -252,10 +440,7 @@ function PaymentsPage() {
       if (body.status === 'payment_done') {
         toast.success('Payment recorded', `Invoice ${row.invoice_number} is fully paid.`)
         setRows((prev) => prev.filter((r) => r.invoice_id !== row.invoice_id))
-        setTotals((t) => ({
-          count: Math.max(0, t.count - 1),
-          value: Math.max(0, t.value - (parseAmount(row.total_amount) ?? 0))
-        }))
+        loadStats()
       } else {
         toast.success('Partial payment', `${formatINRSymbol(amount)} recorded for ${row.invoice_number}. Remaining ${formatINRSymbol(body.remaining)}.`)
         setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, paid_amount: body.paidSoFar, status: 'partially_paid' } : r)))
@@ -278,16 +463,18 @@ function PaymentsPage() {
 
   return (
     <>
-      <PageHero
-        eyebrow="Workflow"
-        eyebrowIcon="pi-wallet"
-        title="Payments cockpit"
-        subtitle="Approve, release and track every rupee going out the door. Tabbed by pipeline stage."
-        actions={
-          tab === 'history' ? (
-            <button
-              className="action-btn action-btn--ghost"
-              onClick={() => {
+      {/* Hero — verbatim from mockup VIEWS.payments */}
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-wallet" /> Workflow</span>
+          <h1>Payments</h1>
+          <p>Validated invoices ready for payment. Bulk-approve into a payment batch, schedule by due date, or split by supplier — then export NEFT/RTGS file.</p>
+        </div>
+        <div className="hero__act">
+          <button
+            className="btn btn--g"
+            onClick={() => {
+              if (tab === 'history') {
                 downloadCsv(
                   rows as unknown as Record<string, unknown>[],
                   'payment-history-export',
@@ -302,40 +489,67 @@ function PaymentsPage() {
                     { key: 'payment_reference', header: 'Reference' }
                   ]
                 )
-              }}
-            >
-              <i className="pi pi-download" /> Export CSV
-            </button>
-          ) : undefined
-        }
-      />
+              } else {
+                setTab('history')
+              }
+            }}
+          >
+            <i className="pi pi-history" /> {tab === 'history' ? 'Export CSV' : 'Payment history'}
+          </button>
+        </div>
+      </section>
 
-      <div className="grid-kpis fade-in-up--stagger">
-        <StatTile
-          label={tab === 'approve' ? 'Pending approval' : tab === 'ready' ? 'Ready to pay' : 'Payments made'}
-          value={totals.count.toLocaleString('en-IN')}
-          icon="pi-file"
-          variant="brand"
-        />
-        <StatTile
-          label="Total value"
-          value={formatINRSymbol(totals.value)}
-          icon="pi-indian-rupee"
-          variant="emerald"
-        />
+      {/* 4-up KPI strip from /payments/stats — independent of active tab. */}
+      <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
+        <div className="kpi kpi--em">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-check" /></div></div>
+          <p className="kpi__l">Ready to approve</p>
+          <div className="kpi__v">{stats ? stats.ready.count.toLocaleString('en-IN') : '—'}</div>
+          <div className="kpi__f">{stats ? formatINRSymbol(stats.ready.value) : ''}</div>
+        </div>
+        <div className="kpi kpi--am">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-clock" /></div></div>
+          <p className="kpi__l">Due this week</p>
+          <div className="kpi__v">{stats ? stats.due_week.count.toLocaleString('en-IN') : '—'}</div>
+          <div className="kpi__f">{stats ? formatINRSymbol(stats.due_week.value) : ''}</div>
+        </div>
+        <div className="kpi kpi--rs">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-exclamation-circle" /></div></div>
+          <p className="kpi__l">Overdue</p>
+          <div className="kpi__v">{stats ? stats.overdue.count.toLocaleString('en-IN') : '—'}</div>
+          <div className="kpi__f">{stats ? formatINRSymbol(stats.overdue.value) : ''}</div>
+        </div>
+        <div className="kpi kpi--vio">
+          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-credit-card" /></div></div>
+          <p className="kpi__l">Paid this month</p>
+          <div className="kpi__v">{stats ? stats.paid_month.count.toLocaleString('en-IN') : '—'}</div>
+          <div className="kpi__f">{stats ? formatINRSymbol(stats.paid_month.value) : ''}</div>
+        </div>
       </div>
 
-      <div className="tab-row">
-        {(['approve', 'ready', 'history'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            className={`tab-row__btn ${tab === t ? 'tab-row__btn--active' : ''}`}
-            onClick={() => setTab(t)}
-          >
-            {t === 'approve' ? '⏳ Approve' : t === 'ready' ? '💰 Ready' : '📜 History'}
-          </button>
-        ))}
+      {/* Mockup tabs row. Each chip uses its OWN count from /payments/stats
+          (the totals state only tracks the active tab, so we can't reuse it
+          for the inactive tabs without three separate fetches). */}
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        {(['approve', 'ready', 'history'] as Tab[]).map((t) => {
+          const tabCount =
+            t === 'approve' ? stats?.approve_queue?.count
+            : t === 'ready' ? stats?.awaiting_bank?.count
+            : stats?.history?.count
+          return (
+            <button
+              key={t}
+              type="button"
+              className={`tab ${tab === t ? 'active' : ''}`}
+              onClick={() => setTab(t)}
+            >
+              {t === 'approve' ? 'Approve queue' : t === 'ready' ? 'Approved · awaiting bank' : 'Paid'}
+              {tabCount != null && (
+                <span className="muted" style={{ marginLeft: 6 }}>({tabCount.toLocaleString('en-IN')})</span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -358,6 +572,53 @@ function PaymentsPage() {
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
+            {/* Bulk-action toolbar — only meaningful on the Approve tab.
+                Sticks just above the table when one or more rows are
+                selected; collapses back to nothing when selection is empty. */}
+            {tab === 'approve' && bulkSelected.size > 0 && (
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.6rem',
+                  padding: '0.6rem 1rem',
+                  background: 'color-mix(in srgb, var(--brand-600) 10%, transparent)',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  position: 'sticky', top: 0, zIndex: 1
+                }}
+              >
+                <span style={{ fontWeight: 700, fontSize: 13 }}>
+                  {bulkSelected.size} selected
+                </span>
+                <button
+                  type="button"
+                  className="action-btn"
+                  onClick={handleBulkApprove}
+                  disabled={bulkRunning}
+                  style={{ padding: '5px 11px', fontSize: 12 }}
+                >
+                  {bulkRunning
+                    ? <><i className="pi pi-spin pi-spinner" /> Running…</>
+                    : <><i className="pi pi-check" /> Approve selected</>}
+                </button>
+                <button
+                  type="button"
+                  className="action-btn action-btn--ghost"
+                  onClick={handleBulkReject}
+                  disabled={bulkRunning}
+                  style={{ padding: '5px 11px', fontSize: 12, color: 'var(--status-danger-fg)' }}
+                >
+                  <i className="pi pi-times" /> Reject selected
+                </button>
+                <button
+                  type="button"
+                  className="action-btn action-btn--ghost"
+                  onClick={() => setBulkSelected(new Set())}
+                  disabled={bulkRunning}
+                  style={{ padding: '5px 11px', fontSize: 12 }}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
               <thead>
                 <tr style={{ background: 'var(--surface-1)' }}>
@@ -367,7 +628,7 @@ function PaymentsPage() {
                         ? ['', 'Invoice', 'Supplier', 'Invoice date', 'Amount', 'Paid / Remaining', 'Status', 'Action']
                         : tab === 'history'
                         ? ['', 'Invoice', 'Supplier', 'Invoice date', 'Amount', 'Status', 'Payment date', 'Mode']
-                        : ['', 'Invoice', 'Supplier', 'Invoice date', 'Amount', 'Status', 'Action']
+                        : ['__BULK__', 'Invoice', 'Supplier', 'Invoice date', 'Amount', 'Status', 'Action']
                     return headers.map((h, i) => (
                       <th
                         key={`${h}-${i}`}
@@ -380,10 +641,19 @@ function PaymentsPage() {
                           letterSpacing: '0.06em',
                           fontWeight: 700,
                           borderBottom: '1px solid var(--border-subtle)',
-                          width: i === 0 ? 36 : undefined
+                          width: i === 0 ? 56 : undefined
                         }}
                       >
-                        {h}
+                        {h === '__BULK__' ? (
+                          <input
+                            type="checkbox"
+                            aria-label="Select all on page"
+                            title="Select all visible invoices"
+                            checked={rows.length > 0 && rows.every((r) => bulkSelected.has(r.invoice_id))}
+                            onChange={toggleBulkSelectAll}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        ) : h}
                       </th>
                     ))
                   })()}
@@ -398,30 +668,37 @@ function PaymentsPage() {
                   const formState = r.id ? payForms[r.id] ?? EMPTY_PAY_FORM : EMPTY_PAY_FORM
                   return (
                     <>
-                      <tr key={r.invoice_id} style={{ borderBottom: isExpanded ? 0 : '1px solid var(--border-subtle)' }}>
-                        {/* Expander */}
-                        <td style={{ padding: '0.5rem 0.4rem 0.5rem 0.95rem', width: 36 }}>
-                          <button
-                            type="button"
-                            onClick={() => toggleExpand(r.invoice_id)}
-                            aria-label={isExpanded ? 'Collapse row' : 'Expand row'}
-                            style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 7,
-                              border: '1px solid var(--border-subtle)',
-                              background: isExpanded ? 'var(--brand-50)' : 'var(--surface-0)',
-                              color: isExpanded ? 'var(--brand-700)' : 'var(--text-secondary)',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '0.75rem',
-                              transition: 'background 160ms var(--ease-out)'
-                            }}
-                          >
-                            <i className={`pi ${isExpanded ? 'pi-chevron-down' : 'pi-chevron-right'}`} />
-                          </button>
+                      <tr
+                        key={r.invoice_id}
+                        style={{ borderBottom: isExpanded ? 0 : '1px solid var(--border-subtle)', cursor: 'pointer' }}
+                        onClick={(e) => {
+                          /* Only open the side panel when the user clicks
+                             a data cell — not when they click an action
+                             button, input or chevron inside the row. */
+                          const target = e.target as HTMLElement
+                          if (target.closest('button, input, a, select')) return
+                          setDetailRow(r)
+                        }}
+                      >
+                        {/* First cell — bulk checkbox on Approve tab only;
+                            empty elsewhere. The chevron expand button used to
+                            live here but was redundant: "Modify & Approve"
+                            (Approve tab) and "Partial" (Ready tab) already
+                            auto-toggle the inline form. Row click still opens
+                            the slide-over for full detail. */}
+                        <td
+                          style={{ padding: '0.5rem 0.4rem 0.5rem 0.95rem', width: tab === 'approve' ? 36 : 12 }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {tab === 'approve' && (
+                            <input
+                              type="checkbox"
+                              aria-label={`Select invoice ${r.invoice_number}`}
+                              checked={bulkSelected.has(r.invoice_id)}
+                              onChange={() => toggleBulkSelect(r.invoice_id)}
+                              style={{ cursor: 'pointer' }}
+                            />
+                          )}
                         </td>
 
                         <td style={{ padding: '0.85rem 0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -433,6 +710,14 @@ function PaymentsPage() {
                         </td>
                         <td style={{ padding: '0.85rem 0.95rem', textAlign: 'right', fontWeight: 700 }}>
                           {formatINRSymbol(baseAmount)}
+                          {Number(r.debit_note_count || 0) > 0 && (
+                            <div style={{ fontSize: '0.7rem', fontWeight: 500, color: 'var(--accent-rose)', marginTop: 2 }}>
+                              <i className="pi pi-receipt" style={{ fontSize: 9, marginRight: 3 }} />
+                              {r.debit_note_count} debit note{Number(r.debit_note_count) === 1 ? '' : 's'}
+                              {r.debit_note_total != null && Number(r.debit_note_total) > 0 &&
+                                ` · −${formatINRSymbol(r.debit_note_total)}`}
+                            </div>
+                          )}
                         </td>
 
                         {tab === 'ready' && (
@@ -447,20 +732,52 @@ function PaymentsPage() {
                         )}
 
                         <td style={{ padding: '0.85rem 0.95rem' }}>
-                          <StatusChip status={r.status} />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                            <StatusChip status={r.status} />
+                            {String(r.status || '').toLowerCase() === 'rejected' && r.rejection_reason && (
+                              <span
+                                className="status-chip status-chip--danger"
+                                style={{ fontSize: 11, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                title={r.rejection_reason}
+                              >
+                                <i className="pi pi-info-circle" /> {r.rejection_reason}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {tab === 'history' ? (
                           <>
                             <td style={{ padding: '0.85rem 0.95rem', fontSize: '0.88rem' }}>
-                              {formatDate(r.payment_done_at || r.payment_date)}
+                              {formatDate(r.payment_done_at || r.rejected_at || r.payment_date)}
                             </td>
                             <td style={{ padding: '0.85rem 0.95rem' }}>
-                              <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{r.payment_type || '—'}</div>
+                              <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                                {String(r.status || '').toLowerCase() === 'rejected'
+                                  ? 'Rejected'
+                                  : (r.payment_type || '—')}
+                              </div>
                               {r.payment_reference && (
                                 <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                                   {r.payment_reference}
                                 </div>
+                              )}
+                              {/* Re-open hatch for rejected rows — flips the
+                                  invoice back to validated so it can be
+                                  re-approved. Rejection trail stays on file. */}
+                              {String(r.status || '').toLowerCase() === 'rejected' && (
+                                <button
+                                  type="button"
+                                  className="action-btn action-btn--ghost"
+                                  onClick={(e) => { e.stopPropagation(); handleReopen(r) }}
+                                  disabled={busyId === r.invoice_id}
+                                  style={{ marginTop: 6, padding: '4px 9px', fontSize: 11 }}
+                                  title="Move this invoice back into the Approve queue"
+                                >
+                                  {busyId === r.invoice_id
+                                    ? <><i className="pi pi-spin pi-spinner" /></>
+                                    : <><i className="pi pi-refresh" /> Re-open</>}
+                                </button>
                               )}
                             </td>
                           </>
@@ -540,6 +857,12 @@ function PaymentsPage() {
                       {isExpanded && (
                         <tr key={`${r.invoice_id}-expanded`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                           <td colSpan={tab === 'ready' ? 8 : tab === 'history' ? 8 : 7} style={{ padding: 0 }}>
+                            {/* Approver / disputes / transactions context strip — shown on every
+                                tab when the data is present. Lets the user see who approved or
+                                paid, the debit-note lines that drive the payable amount, and
+                                the partial-payment trail before they take the next action. */}
+                            <PaymentContextStrip row={r} tab={tab} />
+
                             {/* Bank-override form (Approve tab) */}
                             {tab === 'approve' && bankOverrideId === r.invoice_id && (
                               <div
@@ -717,11 +1040,6 @@ function PaymentsPage() {
                               </div>
                             )}
 
-                            {/* Rich invoice + PO + GRN + ASN + validation drill-in */}
-                            <InvoiceExpansion
-                              invoiceId={r.invoice_id}
-                              poNumber={r.po_number ?? null}
-                            />
                           </td>
                         </tr>
                       )}
@@ -733,6 +1051,36 @@ function PaymentsPage() {
           </div>
         )}
       </div>
+
+      {/* Rich invoice + PO + GRN + ASN + validation drill-in — matches the
+          Invoices + Purchase-orders slide-over pattern. */}
+      <SlideOver
+        open={!!detailRow}
+        onClose={() => setDetailRow(null)}
+        title={detailRow ? `Invoice ${detailRow.invoice_number}` : 'Invoice'}
+        headerActions={
+          detailRow && (
+            <button
+              type="button"
+              className="btn btn--g btn--sm"
+              onClick={() => {
+                navigate(`/invoices/validate/${detailRow.invoice_id}`)
+                setDetailRow(null)
+              }}
+              title="Open in full page"
+            >
+              <i className="pi pi-external-link" /> Open full
+            </button>
+          )
+        }
+      >
+        {detailRow && (
+          <InvoiceExpansion
+            invoiceId={detailRow.invoice_id}
+            poNumber={detailRow.po_number ?? null}
+          />
+        )}
+      </SlideOver>
     </>
   )
 }
@@ -765,6 +1113,182 @@ const inputStyle: React.CSSProperties = {
   fontSize: '0.85rem',
   fontFamily: 'inherit',
   outline: 'none'
+}
+
+/**
+ * Context strip rendered above the action form when a row is expanded.
+ *
+ *   Approve tab → debit-note lines (so the approver knows exactly what
+ *                  reduction they're authorising before they release).
+ *   Ready tab   → who approved + debit-note lines + transaction trail
+ *                  (so finance sees the audit chain before paying).
+ *   History tab → approver + payer + transaction trail.
+ *
+ * Sections render only if the underlying data exists, so the strip
+ * collapses to nothing when there's no context to show.
+ */
+function PaymentContextStrip({ row, tab }: { row: PaymentRow; tab: Tab }) {
+  const dn = row.debit_note_details || []
+  const dnCount = Number(row.debit_note_count || 0)
+  const dnTotal = parseAmount(row.debit_note_total)
+  const txs = row.payment_transactions || []
+  const showApprover = (tab === 'ready' || tab === 'history') &&
+    (row.approved_by_name || row.approved_by_username || row.approved_at)
+  const showPayer = tab === 'history' &&
+    (row.payment_done_by_name || row.payment_done_by_username || row.payment_done_at)
+  const isRejected = String(row.status || '').toLowerCase() === 'rejected'
+  const showRejection = isRejected &&
+    (row.rejection_reason || row.rejected_by_name || row.rejected_by_username || row.rejected_at)
+  if (!showApprover && !showPayer && !showRejection && dn.length === 0 && txs.length === 0) {
+    return null
+  }
+  return (
+    <div style={{
+      padding: '0.75rem 1.25rem 0.25rem',
+      background: 'var(--surface-1)',
+      borderTop: '1px solid var(--border-subtle)',
+      display: 'flex', flexDirection: 'column', gap: '0.75rem'
+    }}>
+      {showRejection && (
+        <div
+          style={{
+            padding: '0.6rem 0.85rem',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--status-danger-ring)',
+            background: 'var(--status-danger-bg)',
+            color: 'var(--status-danger-fg)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            fontSize: 12
+          }}
+        >
+          <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="pi pi-ban" /> Payment rejected
+          </div>
+          {row.rejection_reason && (
+            <div>{row.rejection_reason}</div>
+          )}
+          <div style={{ opacity: 0.85 }}>
+            {row.rejected_by_name || row.rejected_by_username
+              ? <>by <b>{row.rejected_by_name || row.rejected_by_username}</b> </>
+              : null}
+            {row.rejected_at && <>on {formatDate(row.rejected_at)}</>}
+          </div>
+        </div>
+      )}
+      {(showApprover || showPayer) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem 1.25rem', fontSize: 12 }}>
+          {showApprover && (
+            <div>
+              <span className="muted">Approved by · </span>
+              <strong>{row.approved_by_name || row.approved_by_username || '—'}</strong>
+              {row.approved_at && (
+                <span className="muted" style={{ marginLeft: 6 }}>
+                  on {formatDate(row.approved_at)}
+                </span>
+              )}
+            </div>
+          )}
+          {showPayer && (
+            <div>
+              <span className="muted">Marked paid by · </span>
+              <strong>{row.payment_done_by_name || row.payment_done_by_username || '—'}</strong>
+              {row.payment_done_at && (
+                <span className="muted" style={{ marginLeft: 6 }}>
+                  on {formatDate(row.payment_done_at)}
+                </span>
+              )}
+              {row.payment_type && (
+                <span className="muted" style={{ marginLeft: 6 }}>
+                  · {row.payment_type}{row.payment_reference ? ` · ref ${row.payment_reference}` : ''}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(dn.length > 0 || dnCount > 0) && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="pi pi-receipt" style={{ color: 'var(--accent-rose)' }} />
+            Debit notes
+            <span className="muted" style={{ fontWeight: 500 }}>
+              {dnCount > 0 && `${dnCount} note${dnCount === 1 ? '' : 's'}`}
+              {dnTotal != null && dnTotal > 0 && ` · total ${formatINRSymbol(dnTotal)}`}
+            </span>
+          </div>
+          {dn.length > 0 ? (
+            <table className="tbl tbl--compact" style={{ fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Description</th>
+                  <th className="tbl__num">Qty</th>
+                  <th className="tbl__num">Unit price</th>
+                  <th className="tbl__num">Amount</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dn.map((d, i) => (
+                  <tr key={`${d.debit_note_id}-${d.line_number ?? i}`}>
+                    <td className="tbl__mono">{d.line_number ?? '—'}</td>
+                    <td>{d.description || <span className="muted">—</span>}</td>
+                    <td className="tbl__num">{d.quantity ?? '—'}</td>
+                    <td className="tbl__num">{d.unit_price != null ? formatINRSymbol(d.unit_price) : '—'}</td>
+                    <td className="tbl__num tbl__bold">{d.amount != null ? formatINRSymbol(d.amount) : '—'}</td>
+                    <td className="muted">{d.line_notes || d.dn_notes || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="muted" style={{ fontSize: 12 }}>
+              {dnCount} debit note{dnCount === 1 ? '' : 's'} on file but no per-line details were captured.
+            </div>
+          )}
+        </div>
+      )}
+
+      {txs.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="pi pi-wallet" style={{ color: 'var(--accent-emerald)' }} />
+            Payment transactions
+            <span className="muted" style={{ fontWeight: 500 }}>
+              ({txs.length})
+            </span>
+          </div>
+          <table className="tbl tbl--compact" style={{ fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th>Paid at</th>
+                <th>By</th>
+                <th>Mode</th>
+                <th>Reference</th>
+                <th className="tbl__num">Amount</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {txs.map((t) => (
+                <tr key={t.id}>
+                  <td className="tbl__muted">{formatDate(t.paid_at)}</td>
+                  <td>{t.paid_by_name || t.paid_by_username || '—'}</td>
+                  <td className="tbl__mono">{t.payment_type || '—'}</td>
+                  <td className="tbl__mono">{t.payment_reference || '—'}</td>
+                  <td className="tbl__num tbl__bold">{formatINRSymbol(t.amount)}</td>
+                  <td className="muted">{t.notes || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default PaymentsPage

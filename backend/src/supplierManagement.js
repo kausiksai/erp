@@ -30,16 +30,63 @@ const SUPPLIER_COLUMNS = `
 `
 
 /**
- * GET /api/suppliers – list all suppliers (admin/manager)
+ * GET /api/suppliers – paginated list (admin/manager)
+ *
+ * Query params:
+ *   q        : free-text search across supplier_name / suplr_id / gst_number /
+ *              city / state_name
+ *   limit    : page size (default 100, max 1000)
+ *   offset   : pagination offset (default 0)
+ *
+ * Backward-compatible: returns { items, total, limit, offset } when paginated
+ * params are provided, and a plain array otherwise (legacy callers).
  */
 export async function getSuppliersRoute(req, res) {
   try {
-    const { rows } = await pool.query(`
-      SELECT ${SUPPLIER_COLUMNS}
-      FROM suppliers
-      ORDER BY supplier_name ASC
-    `)
-    res.json(rows)
+    const wantsPaginated =
+      req.query.limit !== undefined || req.query.offset !== undefined || !!req.query.q
+
+    const conds = []
+    const params = []
+    if (req.query.q) {
+      params.push(`%${String(req.query.q).trim()}%`)
+      const p = `$${params.length}`
+      conds.push(
+        `(supplier_name ILIKE ${p} OR suplr_id ILIKE ${p} OR gst_number ILIKE ${p} OR city ILIKE ${p} OR state_name ILIKE ${p})`
+      )
+    }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 1000)
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0)
+
+    if (!wantsPaginated) {
+      // Legacy callers expect an array — preserve that contract.
+      const { rows } = await pool.query(
+        `SELECT ${SUPPLIER_COLUMNS} FROM suppliers ORDER BY supplier_name ASC`
+      )
+      return res.json(rows)
+    }
+
+    const [list, count] = await Promise.all([
+      pool.query(
+        `SELECT ${SUPPLIER_COLUMNS}
+           FROM suppliers
+           ${where}
+           ORDER BY supplier_name ASC
+           LIMIT ${limit} OFFSET ${offset}`,
+        params
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS n FROM suppliers ${where}`,
+        params
+      )
+    ])
+    res.json({
+      items: list.rows,
+      total: count.rows[0]?.n || 0,
+      limit,
+      offset
+    })
   } catch (err) {
     console.error('Error fetching suppliers:', err)
     res.status(500).json({ error: 'server_error', message: err.message })

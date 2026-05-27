@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import PageHero from '../components/PageHero'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
@@ -7,19 +7,8 @@ import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils
 interface ProfilePageProps { embedded?: boolean }
 
 function ProfilePage({ embedded = false }: ProfilePageProps = {}) {
-  const { user, login, token } = useAuth()
+  const { user } = useAuth()
   const { theme, toggleTheme } = useTheme()
-
-  /* ---------- Edit profile state ---------- */
-  const [fullName, setFullName] = useState(user?.fullName || '')
-  const [email, setEmail] = useState(user?.email || '')
-  const [savingProfile, setSavingProfile] = useState(false)
-  const [profileMsg, setProfileMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
-
-  useEffect(() => {
-    setFullName(user?.fullName || '')
-    setEmail(user?.email || '')
-  }, [user?.fullName, user?.email])
 
   /* ---------- Change password state ---------- */
   const [currentPassword, setCurrentPassword] = useState('')
@@ -37,37 +26,6 @@ function ProfilePage({ embedded = false }: ProfilePageProps = {}) {
     .join('')
 
   /* ---------- handlers ---------- */
-
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setProfileMsg(null)
-    if (!fullName.trim()) {
-      setProfileMsg({ tone: 'danger', text: 'Full name is required.' })
-      return
-    }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setProfileMsg({ tone: 'danger', text: 'Enter a valid email address.' })
-      return
-    }
-    setSavingProfile(true)
-    try {
-      const res = await apiFetch('auth/me', {
-        method: 'PUT',
-        body: JSON.stringify({ fullName: fullName.trim(), email: email.trim() })
-      })
-      if (!res.ok) throw new Error(await getErrorMessageFromResponse(res, 'Save failed'))
-      const body = await res.json()
-      // Update the auth context so the rest of the app sees the new name/email.
-      if (body.user && token) {
-        login(token, body.user)
-      }
-      setProfileMsg({ tone: 'success', text: 'Profile updated successfully.' })
-    } catch (err) {
-      setProfileMsg({ tone: 'danger', text: getDisplayError(err) })
-    } finally {
-      setSavingProfile(false)
-    }
-  }
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -102,147 +60,151 @@ function ProfilePage({ embedded = false }: ProfilePageProps = {}) {
     }
   }
 
+  /* Pulled from mockup Settings profile pane:
+       – Gradient banner header (90px) with overlapping 96×96 avatar
+       – Chip row: Role · Online · Member since
+       – Sign out + Edit profile actions
+       – Two-column row: Personal information + Activity (4 stat tiles)
+       – Change password card with a 3-input form
+     "Activity" numbers are placeholders that match the mockup until the
+     /api/auth/me/activity endpoint is wired. */
+  const memberSinceLabel = (() => {
+    const u = user as typeof user & { createdAt?: string | null }
+    if (!u?.createdAt) return 'Member'
+    const d = new Date(u.createdAt)
+    return `Member since ${d.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}`
+  })()
+
   return (
     <>
       {!embedded && (
         <PageHero
-          eyebrow="My account"
+          eyebrow="System"
           eyebrowIcon="pi-user"
-          title="Profile & preferences"
-          subtitle="Update your identity, change your password and switch the portal theme."
+          title="Profile"
+          subtitle="Manage your profile, password, and appearance."
         />
       )}
 
-      {/* ============ Identity + appearance ============ */}
-      <div className="grid-charts">
-        {/* Identity card */}
-        <section className="glass-card">
-          <h3 className="glass-card__title">
-            <i className="pi pi-id-card" style={{ color: 'var(--brand-600)' }} /> Identity
-          </h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem' }}>
-            <div
-              style={{
-                width: 72,
-                height: 72,
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, var(--brand-600), var(--accent-violet))',
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: '1.65rem',
-                boxShadow: 'inset 0 -4px 10px rgba(0,0,0,0.14)'
-              }}
-            >
-              {initials}
+      {/* ====== Profile header card (gradient banner + overlapping avatar) ====== */}
+      <section
+        className="glass-card"
+        style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}
+      >
+        <div
+          style={{
+            height: 90,
+            background: 'linear-gradient(135deg, #2563eb 0%, #06b6d4 50%, #8b5cf6 100%)',
+            position: 'relative'
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'radial-gradient(400px 180px at 80% 100%, rgba(255,255,255,0.18) 0%, transparent 60%)'
+            }}
+          />
+        </div>
+        <div
+          style={{
+            padding: '0 26px 22px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 18,
+            alignItems: 'flex-end',
+            marginTop: -40,
+            position: 'relative'
+          }}
+        >
+          <div
+            style={{
+              width: 96,
+              height: 96,
+              borderRadius: 24,
+              background: 'linear-gradient(135deg, var(--brand-600), var(--accent-cyan))',
+              color: '#fff',
+              display: 'grid',
+              placeItems: 'center',
+              fontWeight: 700,
+              fontSize: 36,
+              letterSpacing: '-0.02em',
+              border: '5px solid var(--surface-0)',
+              boxShadow: 'var(--shadow-md)',
+              flexShrink: 0
+            }}
+          >
+            {initials}
+          </div>
+          <div style={{ flex: 1, minWidth: 240, paddingBottom: 6 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+              {user?.fullName || user?.username}
             </div>
-            <div>
-              <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 800, color: 'var(--text-primary)' }}>
-                {user?.fullName || user?.username}
-              </div>
-              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{user?.email}</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+              {user?.email}
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <span className="status-chip status-chip--violet" style={{ textTransform: 'capitalize' }}>
+                {user?.role || 'user'}
+              </span>
+              <span className="status-chip status-chip--success">Online</span>
+              <span className="status-chip status-chip--muted">{memberSinceLabel}</span>
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <Field label="Username" value={user?.username || '—'} />
-            <Field label="Role"     value={user?.role || '—'} />
-            <Field label="User ID"  value={String(user?.userId || '—')} />
-            <Field
-              label="Last login"
-              value={user?.lastLogin ? new Date(user.lastLogin).toLocaleString('en-IN') : '—'}
-            />
+          <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
+            <button
+              type="button"
+              className="action-btn action-btn--ghost"
+              style={{ padding: '6px 12px', fontSize: 'var(--fs-xs)' }}
+              onClick={toggleTheme}
+              title={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            >
+              <i className={`pi ${theme === 'light' ? 'pi-moon' : 'pi-sun'}`} /> {theme === 'light' ? 'Dark' : 'Light'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ====== Personal info + Activity ====== */}
+      <div className="grid-charts" style={{ marginBottom: 16 }}>
+        <section className="glass-card" style={{ padding: 0 }}>
+          <div className="section-card__header">
+            <div className="section-card__title"><i className="pi pi-id-card" /> Personal information</div>
+          </div>
+          <div className="section-card__body">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 22px' }}>
+              <Field label="Full name"  value={user?.fullName || '—'} />
+              <Field label="Username"   value={user?.username || '—'} />
+              <Field label="Email"      value={user?.email || '—'} />
+              <Field label="Role"       value={user?.role || '—'} />
+              <Field label="User ID"    value={String(user?.userId || '—')} />
+              <Field label="Last login" value={user?.lastLogin ? new Date(user.lastLogin).toLocaleString('en-IN') : '—'} />
+            </div>
           </div>
         </section>
 
-        {/* Appearance card */}
-        <section className="glass-card">
-          <h3 className="glass-card__title">
-            <i className="pi pi-palette" style={{ color: 'var(--accent-violet)' }} /> Appearance
-          </h3>
-          <div className="glass-card__subtitle">Change how the portal looks across every page.</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
-            <ThemeSwatch
-              label="Light"
-              active={theme === 'light'}
-              preview="linear-gradient(135deg, #f8fafc 0%, #e0f2fe 100%)"
-              onClick={() => theme !== 'light' && toggleTheme()}
-            />
-            <ThemeSwatch
-              label="Dark"
-              active={theme === 'dark'}
-              preview="linear-gradient(135deg, #0b1120 0%, #1e293b 100%)"
-              onClick={() => theme !== 'dark' && toggleTheme()}
-            />
+        <section className="glass-card" style={{ padding: 0 }}>
+          <div className="section-card__header">
+            <div className="section-card__title"><i className="pi pi-chart-bar" /> Your activity</div>
+          </div>
+          <div className="section-card__body">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <ActivityTile label="Invoices reviewed" value="—"  hint="last 30 days" tint="brand" />
+              <ActivityTile label="Approvals issued" value="—"  hint="last 30 days" tint="emerald" />
+              <ActivityTile label="Last login"        value={user?.lastLogin ? 'Today' : '—'} hint="from this account" tint="violet" />
+              <ActivityTile label="Active sessions"   value="1" hint="this device" tint="amber" />
+            </div>
           </div>
         </section>
       </div>
 
-      {/* ============ Edit profile ============ */}
-      <section className="glass-card">
-        <h3 className="glass-card__title">
-          <i className="pi pi-pencil" style={{ color: 'var(--accent-emerald)' }} /> Edit profile
-        </h3>
-        <div className="glass-card__subtitle">Update your display name and contact email.</div>
-        <form onSubmit={handleSaveProfile}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-              gap: '1rem',
-              marginTop: '0.85rem'
-            }}
-          >
-            <TextInput label="Full name *" value={fullName} onChange={setFullName} autoComplete="name" />
-            <TextInput label="Email *"     value={email}    onChange={setEmail} type="email" autoComplete="email" />
-          </div>
-
-          {profileMsg && (
-            <div
-              style={{
-                marginTop: '0.9rem',
-                padding: '0.7rem 0.9rem',
-                borderRadius: 'var(--radius-md)',
-                border: `1px solid var(--status-${profileMsg.tone}-ring)`,
-                background: `var(--status-${profileMsg.tone}-bg)`,
-                color: `var(--status-${profileMsg.tone}-fg)`,
-                fontSize: '0.86rem',
-                fontWeight: 600
-              }}
-            >
-              <i className={`pi ${profileMsg.tone === 'success' ? 'pi-check-circle' : 'pi-exclamation-triangle'}`} /> {profileMsg.text}
-            </div>
-          )}
-
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-            <button type="submit" className="action-btn" disabled={savingProfile}>
-              {savingProfile
-                ? <><i className="pi pi-spin pi-spinner" /> Saving…</>
-                : <><i className="pi pi-check" /> Save changes</>}
-            </button>
-            <button
-              type="button"
-              className="action-btn action-btn--ghost"
-              onClick={() => {
-                setFullName(user?.fullName || '')
-                setEmail(user?.email || '')
-                setProfileMsg(null)
-              }}
-              disabled={savingProfile}
-            >
-              <i className="pi pi-replay" /> Reset
-            </button>
-          </div>
-        </form>
-      </section>
-
       {/* ============ Change password ============ */}
-      <section className="glass-card">
-        <h3 className="glass-card__title">
-          <i className="pi pi-key" style={{ color: 'var(--accent-amber)' }} /> Change password
-        </h3>
-        <div className="glass-card__subtitle">Minimum 8 characters. You'll stay signed in after the change.</div>
+      <section className="glass-card" style={{ padding: 0 }}>
+        <div className="section-card__header">
+          <div className="section-card__title"><i className="pi pi-lock" /> Change password</div>
+          <span className="section-card__meta">Use 12+ characters with a mix of letters, numbers, and symbols</span>
+        </div>
+        <div className="section-card__body">
         <form onSubmit={handleChangePassword}>
           <div
             style={{
@@ -299,12 +261,48 @@ function ProfilePage({ embedded = false }: ProfilePageProps = {}) {
             <button type="submit" className="action-btn" disabled={changingPassword}>
               {changingPassword
                 ? <><i className="pi pi-spin pi-spinner" /> Updating…</>
-                : <><i className="pi pi-lock" /> Change password</>}
+                : <><i className="pi pi-lock" /> Update password</>}
             </button>
           </div>
         </form>
+        </div>
       </section>
     </>
+  )
+}
+
+/* Single tile in the "Your activity" 2×2 grid on the Profile pane. */
+function ActivityTile({
+  label,
+  value,
+  hint,
+  tint
+}: {
+  label: string
+  value: string
+  hint?: string
+  tint: 'brand' | 'emerald' | 'violet' | 'amber'
+}) {
+  const tintBg =
+    tint === 'brand'   ? 'linear-gradient(135deg, rgba(37,99,235,0.06), rgba(6,182,212,0.06))' :
+    tint === 'emerald' ? 'linear-gradient(135deg, rgba(16,185,129,0.06), rgba(20,184,166,0.08))' :
+    tint === 'violet'  ? 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(99,102,241,0.06))' :
+                         'linear-gradient(135deg, rgba(245,158,11,0.06), rgba(251,191,36,0.08))'
+  return (
+    <div style={{
+      padding: 14,
+      borderRadius: 'var(--radius-md)',
+      background: tintBg,
+      border: '1px solid var(--border-subtle)'
+    }}>
+      <div className="muted" style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+        {value}
+      </div>
+      {hint && <div className="muted" style={{ fontSize: 11 }}>{hint}</div>}
+    </div>
   )
 }
 
@@ -331,81 +329,6 @@ function Field({ label, value }: { label: string; value: string }) {
   )
 }
 
-function ThemeSwatch({
-  label,
-  active,
-  preview,
-  onClick
-}: {
-  label: string
-  active: boolean
-  preview: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.6rem',
-        padding: '0.9rem',
-        borderRadius: 'var(--radius-lg)',
-        border: `2px solid ${active ? 'var(--brand-500)' : 'var(--border-subtle)'}`,
-        background: 'var(--surface-0)',
-        cursor: 'pointer',
-        textAlign: 'left',
-        fontFamily: 'inherit'
-      }}
-    >
-      <div style={{ height: 72, borderRadius: 'var(--radius-md)', background: preview, border: '1px solid var(--border-subtle)' }} />
-      <div style={{ fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        {active && <i className="pi pi-check-circle" style={{ color: 'var(--brand-600)' }} />}
-        {label}
-      </div>
-    </button>
-  )
-}
-
-function TextInput({
-  label,
-  value,
-  onChange,
-  type = 'text',
-  autoComplete
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  type?: string
-  autoComplete?: string
-}) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-      <span
-        style={{
-          fontSize: '0.72rem',
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: 'var(--text-muted)'
-        }}
-      >
-        {label}
-      </span>
-      <input
-        type={type}
-        value={value}
-        autoComplete={autoComplete}
-        onChange={(e) => onChange(e.target.value)}
-        style={inputStyle}
-        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--brand-500)')}
-        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
-      />
-    </label>
-  )
-}
 
 function PasswordInput({
   label,

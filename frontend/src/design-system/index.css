@@ -10,3 +10,9 @@
 @import './confirm.css';
 @import './pipeline.css';
 @import './cmdk.css';
+/* Mockup-compat layer must come LAST — it overrides earlier rules for
+   the classes the mockup uses (.card, .kpi, .chip, .pipe, .tabs, .btn,
+   .hero, .eyebrow, .dl, .q__row, .insight, .pb, etc.) and aliases the
+   short CSS variable names (--s-0, --t-1, --b-1, --r-lg, --sh-md, …).
+   This lets us paste mockup HTML verbatim into React components. */
+@import './mockup-compat.css';

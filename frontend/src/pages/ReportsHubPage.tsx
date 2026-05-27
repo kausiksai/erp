@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import PageHero from '../components/PageHero'
 import { apiFetch, getDisplayError, getErrorMessageFromResponse } from '../utils/api'
 import { downloadCsv } from '../utils/exportCsv'
 import { formatDate, formatINR, parseAmount } from '../utils/format'
@@ -14,8 +13,12 @@ import { useToast } from '../contexts/ToastContext'
  * work); these are batched point-in-time extracts with flat columns.
  */
 
+/** Mockup-style audience groups for the reports hub. */
+type ReportCategory = 'finance' | 'receiving' | 'procurement' | 'system'
+
 interface ReportDef {
   key: string
+  category: ReportCategory
   title: string
   description: string
   icon: string
@@ -29,6 +32,7 @@ interface ReportDef {
 const REPORTS: ReportDef[] = [
   {
     key: 'invoice-register',
+    category: 'finance',
     title: 'Invoice register',
     description:
       'Every invoice in a date range with supplier, GSTIN, PO reference, taxable amount, tax and status. The canonical payables extract for accounting.',
@@ -53,6 +57,7 @@ const REPORTS: ReportDef[] = [
   },
   {
     key: 'gst-summary',
+    category: 'finance',
     title: 'GST summary (monthly)',
     description:
       'Month-wise breakdown of taxable value, CGST, SGST, IGST and total tax. The audit-ready GST file — one row per month.',
@@ -74,6 +79,7 @@ const REPORTS: ReportDef[] = [
   },
   {
     key: 'outstanding-statement',
+    category: 'finance',
     title: 'Outstanding statement',
     description:
       'Every unpaid invoice — validated, ready for payment, partially paid — oldest first, with days-overdue. The chase-list.',
@@ -96,6 +102,7 @@ const REPORTS: ReportDef[] = [
   },
   {
     key: 'payment-register',
+    category: 'finance',
     title: 'Payment register',
     description:
       'Every payment executed in the selected date range with invoice, supplier, amount, mode and bank reference. The cash-out ledger.',
@@ -120,6 +127,7 @@ const REPORTS: ReportDef[] = [
   },
   {
     key: 'po-fulfillment',
+    category: 'procurement',
     title: 'PO fulfillment',
     description:
       'Every PO with its coverage flags — invoice, GRN, ASN — and overall status. The quick "what closed, what is still open" view for procurement.',
@@ -225,38 +233,51 @@ function ReportsHubPage() {
 
   return (
     <>
-      <PageHero
-        eyebrow="Reports"
-        eyebrowIcon="pi-download"
-        title="Download center"
-        subtitle="Point-in-time extracts you can email to an auditor, attach to a monthly close pack, or hand to finance. Each report is a flat CSV — no navigation, no filters, just the data."
-      />
+      {/* Hero — verbatim from mockup VIEWS.reports */}
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-chart-bar" /> Insights</span>
+          <h1>Reports</h1>
+          <p>Pre-built reports grouped by audience. Pin to favorites; schedule recurring delivery to email.</p>
+        </div>
+        <div className="hero__act">
+          <button className="btn btn--g"><i className="pi pi-star" /> Favorites</button>
+          <button className="btn btn--g">
+            <i className="pi pi-calendar" /> Scheduled <span className="chip chip--info" style={{ marginLeft: 6, fontSize: 10 }}>0</span>
+          </button>
+          <button className="btn btn--p"><i className="pi pi-plus" /> New custom</button>
+        </div>
+      </section>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
-          gap: 'var(--space-4)',
-          alignItems: 'stretch'
-        }}
-      >
-        {REPORTS.map((r) => {
+      {/* Group reports by audience category — finance / receiving /
+          procurement / system. Each group renders a section-title
+          separator and a 3-column card grid, matching mockup VIEWS.reports. */}
+      {([
+        { key: 'finance',     label: 'Finance & payments',     icon: 'pi-wallet' },
+        { key: 'receiving',   label: 'Receiving & logistics',  icon: 'pi-box' },
+        { key: 'procurement', label: 'Procurement',            icon: 'pi-shopping-cart' },
+        { key: 'system',      label: 'System & data quality',  icon: 'pi-cog' }
+      ] as Array<{ key: ReportCategory; label: string; icon: string }>).map((cat) => {
+        const items = REPORTS.filter((r) => r.category === cat.key)
+        if (items.length === 0) return null
+        return (
+          <div key={cat.key} style={{ marginBottom: 18 }}>
+            <div className="sec">
+              <span className="sec__l"><i className={`pi ${cat.icon}`} style={{ marginRight: 4 }} /> {cat.label}</span>
+              <span className="sec__line" />
+            </div>
+            <div className="g3">
+              {items.map((r) => {
           const range = ranges[r.key]
           const preview = previews[r.key]
           const isBusy = busy === r.key
           return (
             <section
               key={r.key}
-              className="glass-card fade-in-up"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                gap: 0
-              }}
+              className="card fade-in-up"
+              style={{ padding: 18, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
             >
-              {/* --- Top: icon + title + description (grows to fill space) --- */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
                 <div
                   style={{
                     width: 48,
@@ -389,8 +410,11 @@ function ReportsHubPage() {
               )}
             </section>
           )
-        })}
-      </div>
+              })}
+            </div>
+          </div>
+        )
+      })}
     </>
   )
 }

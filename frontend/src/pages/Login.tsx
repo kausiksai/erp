@@ -65,10 +65,6 @@ function Login() {
     toast.info('Reset link sent', `If an account matches ${username.trim()}, a reset link will arrive in your inbox shortly.`)
   }
 
-  function handleSso() {
-    toast.info('Microsoft SSO not configured', 'Use the form above for now. Ask your admin to enable SSO.')
-  }
-
   return (
     <div className="login-shell" data-theme={theme}>
       {/* corner theme toggle */}
@@ -99,7 +95,7 @@ function Login() {
               Validate, reconcile, and pay supplier invoices — without the chaos.
             </h1>
             <p className="login-hero__sub">
-              Daily Bill Register and OCR pipelines feed straight into a 32-rule
+              Daily Bill Register and OCR pipelines feed straight into a 28-rule
               validation engine, so your team only touches the invoices that
               actually need a human.
             </p>
@@ -206,12 +202,6 @@ function Login() {
                 }
               </button>
             </form>
-
-            <div className="login-divider">or</div>
-
-            <button type="button" className="login-sso" onClick={handleSso}>
-              <i className="pi pi-microsoft" /> Sign in with Microsoft
-            </button>
 
             <p className="login-foot">
               Don't have an account? Ask your <a href="#" onClick={(e) => e.preventDefault()}>workspace administrator</a> to invite you.

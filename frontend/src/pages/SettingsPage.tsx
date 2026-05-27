@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import PageHero from '../components/PageHero'
 import ProfilePage from './ProfilePage'
 import UsersPage from './UsersPage'
 import OwnerPage from './OwnerPage'
@@ -52,22 +51,25 @@ function SettingsPage() {
 
   return (
     <>
-      <PageHero
-        eyebrow="Settings"
-        eyebrowIcon="pi-cog"
-        title="Settings"
-        subtitle="Your profile, users on this workspace, the operating entity, and the PO-prefix rules the validation engine uses to classify POs as open or standard."
-      />
+      {/* Hero — verbatim from mockup VIEWS.settings */}
+      <section className="hero">
+        <div>
+          <span className="eyebrow"><i className="pi pi-cog" /> System</span>
+          <h1>Settings</h1>
+          <p>Manage your profile, users, and owners.</p>
+        </div>
+      </section>
 
-      <div className="tab-row" style={{ marginBottom: 'var(--space-4)' }}>
+      {/* Mockup-style pill tabs */}
+      <div className="tabs" style={{ marginBottom: 16 }}>
         {visibleTabs.map((t) => (
           <button
             key={t.key}
             type="button"
-            className={`tab-row__btn ${tab === t.key ? 'tab-row__btn--active' : ''}`}
+            className={`tab ${tab === t.key ? 'active' : ''}`}
             onClick={() => setTab(t.key)}
           >
-            <i className={`pi ${t.icon}`} style={{ marginRight: 6 }} />
+            <i className={`pi ${t.icon}`} style={{ marginRight: 5 }} />
             {t.label}
           </button>
         ))}

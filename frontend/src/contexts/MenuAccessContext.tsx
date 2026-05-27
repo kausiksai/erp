@@ -59,7 +59,7 @@ const SIBLING_GROUPS: string[][] = [
 
 // New IA-only paths that don't exist in the legacy menu table at all.
 // Admin-only by default; non-admins simply won't see them in the sidebar.
-const ADMIN_ONLY_PATHS = new Set<string>(['/rules', '/audit'])
+const ADMIN_ONLY_PATHS = new Set<string>(['/rules', '/audit', '/automation'])
 
 const MenuAccessContext = createContext<MenuAccessState>({
   loading: true,

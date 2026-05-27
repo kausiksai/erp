@@ -29,6 +29,7 @@ import ProfilePage from './pages/ProfilePage'
 import ItemPriceHistoryPage from './pages/ItemPriceHistoryPage'
 import ValidationRulesPage from './pages/ValidationRulesPage'
 import AuditLogPage from './pages/AuditLogPage'
+import AutomationAdminPage from './pages/AutomationAdminPage'
 import SettingsPage from './pages/SettingsPage'
 
 /** Every authenticated route renders inside the global AppShell. */
@@ -126,6 +127,7 @@ function App() {
         <Route path="/receipts" element={<ShellRoute><ReceiptsPage /></ShellRoute>} />
         <Route path="/rules" element={<ShellRoute requiredRole={['admin']}><ValidationRulesPage /></ShellRoute>} />
         <Route path="/audit" element={<ShellRoute requiredRole={['admin']}><AuditLogPage /></ShellRoute>} />
+        <Route path="/automation" element={<ShellRoute requiredRole={['admin']}><AutomationAdminPage /></ShellRoute>} />
         <Route path="/settings" element={<ShellRoute><SettingsPage /></ShellRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

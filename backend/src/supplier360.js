@@ -4,16 +4,20 @@
 // GET /api/suppliers/:id/360
 //
 // Pulls in one round trip:
-//   * basic master data (name, GST, address, bank)
+//   * basic master data (name, GST, address, bank, contact)
 //   * 30-day metrics (invoice count, validated count, spend, issues)
 //   * recent invoices (last 10)
-//   * GST classification distribution (for the multi-state GSTIN handling
-//     mentioned in the demo)
+//   * State distribution from the supplier's invoices' PO supplier_id chain
+//     (proxy for multi-state GSTIN signal — the dedicated gst_classification
+//     column was never added to the DB, so we derive it from supplier state)
 //   * top-3 error codes affecting this supplier
 //   * payment-cycle averages (load → bank, in days)
 //
-// The /api/suppliers/:id endpoint already returns master data only; this
-// is the same supplier scoped + enriched with operational signal.
+// All columns referenced in the SELECTs are verified against
+// backend/src/schema.sql + scripts/migration_email_automation.sql (which
+// adds suppliers.suplr_id). Fields that the frontend wants but the DB
+// doesn't carry (payment_term_days, payment_mode) are returned as null so
+// the UI renders '—' rather than crashing.
 
 import { pool } from './db.js'
 
@@ -26,17 +30,17 @@ export async function getSupplier360Route(req, res) {
       supplier,
       metrics,
       recentInvoices,
-      gstSplit,
+      stateSplit,
       topErrors,
       paymentCycle
     ] = await Promise.all([
       pool.query(
         `SELECT supplier_id, supplier_name, suplr_id, gst_number, pan_number,
-                state_name, city, address1, address2, address3,
-                contact_person, phone, mobile, email, fax,
+                supplier_address, city, state_code, state_name, pincode,
+                contact_person, phone, mobile, email, website, msme_number,
                 bank_account_name, bank_account_number, bank_ifsc_code,
-                bank_name, branch_name, payment_term_days, payment_mode,
-                created_at
+                bank_name, branch_name,
+                created_at, updated_at
            FROM suppliers
           WHERE supplier_id = $1`,
         [id]
@@ -71,7 +75,8 @@ export async function getSupplier360Route(req, res) {
 
       // Last 10 invoices
       pool.query(
-        `SELECT invoice_id, invoice_number, invoice_date, total_amount, status, source, po_number
+        `SELECT invoice_id, invoice_number, invoice_date, total_amount, status, source, po_number,
+                reconciliation_status
            FROM invoices
           WHERE supplier_id = $1
           ORDER BY invoice_date DESC NULLS LAST, invoice_id DESC
@@ -79,19 +84,22 @@ export async function getSupplier360Route(req, res) {
         [id]
       ),
 
-      // GST classification distribution (for the multi-state callout)
+      // State distribution — derived from this supplier's PO unit/state. We
+      // group invoices by the originating PO's unit (factory/state code) so
+      // multi-state suppliers show up as multiple buckets.
       pool.query(
-        `SELECT COALESCE(gst_classification, 'unknown') AS classification,
+        `SELECT COALESCE(po.unit, 'unknown') AS classification,
                 COUNT(*)::int AS n
-           FROM invoices
-          WHERE supplier_id = $1
+           FROM invoices i
+           LEFT JOIN purchase_orders po ON po.po_id = i.po_id
+          WHERE i.supplier_id = $1
           GROUP BY 1
           ORDER BY n DESC`,
         [id]
-      ),
+      ).catch(() => ({ rows: [] })),
 
       // Top 3 error codes for this supplier (degrades gracefully if
-      // mismatches column is empty)
+      // mismatches column is empty).
       pool.query(
         `SELECT e->>'code' AS code, COUNT(DISTINCT i.invoice_id)::int AS n
            FROM invoices i,
@@ -106,15 +114,19 @@ export async function getSupplier360Route(req, res) {
       ).catch(() => ({ rows: [] })),
 
       // Payment-cycle days (avg between invoice_date and a 'paid' update).
-      // Uses updated_at as a proxy for payment time when status flipped to
-      // paid — close enough for a dashboard signal.
+      // Uses payment_done_at from payment_approvals when available, else
+      // falls back to the invoice's updated_at when status flipped to paid.
       pool.query(
         `SELECT
-           COALESCE(AVG(EXTRACT(EPOCH FROM (updated_at - invoice_date::timestamptz)) / 86400.0), 0)::numeric(6,1) AS avg_days
-           FROM invoices
-          WHERE supplier_id = $1
-            AND status = 'paid'
-            AND invoice_date IS NOT NULL`,
+           COALESCE(
+             AVG(EXTRACT(EPOCH FROM (COALESCE(pa.payment_done_at, i.updated_at) - i.invoice_date::timestamptz)) / 86400.0),
+             0
+           )::numeric(6,1) AS avg_days
+           FROM invoices i
+           LEFT JOIN payment_approvals pa ON pa.invoice_id = i.invoice_id
+          WHERE i.supplier_id = $1
+            AND i.status = 'paid'
+            AND i.invoice_date IS NOT NULL`,
         [id]
       )
     ])
@@ -131,7 +143,13 @@ export async function getSupplier360Route(req, res) {
     const health = total > 0 ? Math.round((validated / total) * 100) : null
 
     res.json({
-      supplier: sup,
+      supplier: {
+        ...sup,
+        // Columns the frontend renders but the DB doesn't carry. Surfaced
+        // as nulls so the UI renders '—' rather than `undefined`.
+        payment_term_days: null,
+        payment_mode: null
+      },
       metrics: {
         invoices_total:        total,
         invoices_validated:    validated,
@@ -145,7 +163,9 @@ export async function getSupplier360Route(req, res) {
                                  : null
       },
       recent_invoices: recentInvoices.rows,
-      gst_distribution: gstSplit.rows,
+      // Kept as `gst_distribution` for backward compatibility with the
+      // frontend. Values are unit codes (state proxy) — see notes above.
+      gst_distribution: stateSplit.rows,
       top_error_codes:  topErrors.rows
     })
   } catch (err) {

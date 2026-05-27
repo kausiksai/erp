@@ -70,8 +70,12 @@
   --surface-glass-strong: rgba(255, 255, 255, 0.92);
   --surface-overlay:     rgba(15, 23, 42, 0.5);
 
-  --page-bg:  radial-gradient(1200px 600px at 10% -10%, #eef2ff 0%, transparent 55%),
-              radial-gradient(1200px 600px at 100% 10%, #f0f9ff 0%, transparent 55%),
+  /* Background gradients aligned to mockup body bg:
+       1100×500 at 0% -10% (eef2ff) + 100% 5% (ecfeff) + base gradient.
+     Previously used 1200×600 / 10%/-10% / f0f9ff which was visibly
+     brighter and offset on the right side. */
+  --page-bg:  radial-gradient(1100px 500px at 0% -10%, #eef2ff 0%, transparent 55%),
+              radial-gradient(1100px 500px at 100% 5%, #ecfeff 0%, transparent 55%),
               linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
 
   /* ----- Text ------------------------------------------------------------ */
@@ -91,20 +95,27 @@
   --border-strong:  rgba(15, 23, 42, 0.22);
   --border-focus:   rgba(59, 130, 246, 0.45);
 
-  /* ----- Elevation (shadows) -------------------------------------------- */
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -1px rgba(15, 23, 42, 0.04);
-  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.1), 0 4px 6px -2px rgba(15, 23, 42, 0.05);
-  --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 10px 10px -5px rgba(15, 23, 42, 0.04);
+  /* ----- Elevation (shadows) --------------------------------------------
+     Aligned to mockup --sh-* exactly. The md/lg/xl curves were notably
+     softer than the mockup, making cards look "floatier". Mockup uses
+     larger negative spread + slightly higher alpha for a tighter, more
+     intentional drop. */
+  --shadow-xs:  0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm:  0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md:  0 4px 8px -2px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg:  0 12px 24px -8px rgba(15, 23, 42, 0.14), 0 4px 12px -4px rgba(15, 23, 42, 0.08);
+  --shadow-xl:  0 20px 40px -12px rgba(15, 23, 42, 0.20), 0 8px 20px -6px rgba(15, 23, 42, 0.10);
   --shadow-2xl: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
   --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.15), 0 8px 24px -6px rgba(59, 130, 246, 0.25);
 
-  /* ----- Radii ----------------------------------------------------------- */
+  /* ----- Radii -----------------------------------------------------------
+     Aligned to mockup --r-* exactly. Was lg:16 / xl:22 — bumped 2px more
+     rounded than the demo which made every card and KPI look "softer"
+     than designed. */
   --radius-sm:   6px;
   --radius-md:   10px;
-  --radius-lg:   16px;
-  --radius-xl:   22px;
+  --radius-lg:   14px;
+  --radius-xl:   20px;
   --radius-2xl:  28px;
   --radius-full: 999px;
 
@@ -160,9 +171,9 @@
   --dur-slower: 520ms;
 
   /* ----- Layout ---------------------------------------------------------- */
-  --topbar-h: 64px;
-  --sidebar-w: 260px;
-  --sidebar-w-collapsed: 72px;
+  --topbar-h: 60px;
+  --sidebar-w: 236px;
+  --sidebar-w-collapsed: 64px;
   --page-max: 1440px;
   --gutter: clamp(1rem, 2vw, 2rem);
 
