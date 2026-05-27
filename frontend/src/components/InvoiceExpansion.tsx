@@ -105,6 +105,7 @@ interface GRNRow {
   accepted_qty: number | string | null
   unit_cost: number | string | null
   header_status: string | null
+  supplier_doc_no: string | null
 }
 
 interface ASNRow {
@@ -118,6 +119,7 @@ interface ASNRow {
   item_desc: string | null
   quantity: number | string | null
   status: string | null
+  inv_no: string | null
 }
 
 interface ValidationIssue {
@@ -401,11 +403,31 @@ export default function InvoiceExpansion({
           ])
           if (grnRes && grnRes.ok) {
             const body = await grnRes.json()
-            grnRows = Array.isArray(body) ? body : (body.items || [])
+            const allGrn: GRNRow[] = Array.isArray(body) ? body : (body.items || [])
+            // Scope GRN to THIS invoice. The receipt for an invoice is the GRN
+            // whose supplier_doc_no equals the invoice number (same link the
+            // engine uses for E071). On an open PO the PO-level fetch returns
+            // every invoice's GRN (e.g. 119 rows / 84 invoices) — showing them
+            // all is misleading. Fall back to the full set only when no GRN
+            // carries this invoice number (standard POs / older data where
+            // supplier_doc_no isn't populated).
+            const invNum = (detail.invoice_number || '').trim().toLowerCase()
+            const scoped = invNum
+              ? allGrn.filter((g) => (g.supplier_doc_no || '').trim().toLowerCase() === invNum)
+              : []
+            grnRows = scoped.length > 0 ? scoped : allGrn
           }
           if (asnRes && asnRes.ok) {
             const body = await asnRes.json()
-            asnRows = Array.isArray(body) ? body : (body.items || [])
+            const allAsn: ASNRow[] = Array.isArray(body) ? body : (body.items || [])
+            // Scope ASN to THIS invoice the same way as GRN — match the ASN's
+            // inv_no to the invoice number (the engine's E073 link). Falls back
+            // to the full PO-level set when no ASN carries this invoice number.
+            const invNum = (detail.invoice_number || '').trim().toLowerCase()
+            const scoped = invNum
+              ? allAsn.filter((a) => (a.inv_no || '').trim().toLowerCase() === invNum)
+              : []
+            asnRows = scoped.length > 0 ? scoped : allAsn
           }
         }
 
