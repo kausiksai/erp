@@ -309,7 +309,10 @@ function ReconciliationPage() {
           <option value="excel">Excel</option>
           <option value="ocr">OCR</option>
         </select>
-        <span className="tb__c">{activeRules.length} codes · {activeRules.reduce((s, r) => s + r.count, 0).toLocaleString('en-IN')} invoices</span>
+        {/* Distinct invoice count (stats.total_in_queue), not the sum of
+            per-rule counts — an invoice failing N rules must count once, not
+            N times. Matches the "Total in queue" KPI card. */}
+        <span className="tb__c">{activeRules.length} codes · {stats.total_in_queue.toLocaleString('en-IN')} invoices</span>
       </div>
 
       {/* Per-code group cards */}
