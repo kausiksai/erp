@@ -76,6 +76,8 @@ function ReconciliationPage() {
   const [drill, setDrill] = useState<{ status: string; label: string } | null>(null)
   const [drillRows, setDrillRows] = useState<RuleSample[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
+  const [drillPage, setDrillPage] = useState(1)
+  const DRILL_PAGE_SIZE = 10
 
   const [stats, setStats] = useState<{ total_in_queue: number; awaiting_reference_data: number; re_validation_needed: number }>(
     { total_in_queue: 0, awaiting_reference_data: 0, re_validation_needed: 0 }
@@ -104,6 +106,7 @@ function ReconciliationPage() {
     setDrill({ status, label })
     setDrillLoading(true)
     setDrillRows([])
+    setDrillPage(1)
     try {
       const res = await apiFetch(`invoices?status=${encodeURIComponent(status)}&limit=500`)
       if (!res.ok) return
@@ -355,34 +358,72 @@ function ReconciliationPage() {
           ) : drillRows.length === 0 ? (
             <div className="ph"><i className="pi pi-inbox" /> No invoices in this bucket.</div>
           ) : (
-            <table className="tbl compact">
-              <thead>
-                <tr>
-                  <th>Invoice</th>
-                  <th>Date</th>
-                  <th>Supplier</th>
-                  <th>PO ref</th>
-                  <th>Source</th>
-                  <th className="num">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {drillRows.map((s) => (
-                  <tr key={s.invoice_id} style={{ cursor: 'pointer' }} onClick={() => setOpenInv(s)}>
-                    <td className="bold">{s.invoice_number}</td>
-                    <td>{formatDate(s.invoice_date)}</td>
-                    <td>{s.supplier_name || '—'}</td>
-                    <td className="mono">{s.po_number || '—'}</td>
-                    <td>
-                      {s.source === 'ocr'   ? <span className="chip chip--vio">OCR</span>
-                        : s.source === 'excel' ? <span className="chip chip--info">Excel</span>
-                        : <span className="muted">—</span>}
-                    </td>
-                    <td className="num">{formatINRSymbol(s.total_amount)}</td>
+            <>
+              <table className="tbl compact">
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Date</th>
+                    <th>Supplier</th>
+                    <th>PO ref</th>
+                    <th>Source</th>
+                    <th className="num">Amount</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {drillRows
+                    .slice((drillPage - 1) * DRILL_PAGE_SIZE, drillPage * DRILL_PAGE_SIZE)
+                    .map((s) => (
+                      <tr key={s.invoice_id} style={{ cursor: 'pointer' }} onClick={() => setOpenInv(s)}>
+                        <td className="bold">{s.invoice_number}</td>
+                        <td>{formatDate(s.invoice_date)}</td>
+                        <td>{s.supplier_name || '—'}</td>
+                        <td className="mono">{s.po_number || '—'}</td>
+                        <td>
+                          {s.source === 'ocr'   ? <span className="chip chip--vio">OCR</span>
+                            : s.source === 'excel' ? <span className="chip chip--info">Excel</span>
+                            : <span className="muted">—</span>}
+                        </td>
+                        <td className="num">{formatINRSymbol(s.total_amount)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+
+              {/* Pagination — 10 rows per page */}
+              {drillRows.length > DRILL_PAGE_SIZE && (() => {
+                const totalPages = Math.ceil(drillRows.length / DRILL_PAGE_SIZE)
+                const from = (drillPage - 1) * DRILL_PAGE_SIZE + 1
+                const to = Math.min(drillPage * DRILL_PAGE_SIZE, drillRows.length)
+                return (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '10px 18px', background: 'var(--s-1)', fontSize: 12.5,
+                  }}>
+                    <span className="muted">
+                      {from}–{to} of {drillRows.length.toLocaleString('en-IN')}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        className="btn btn--g btn--xs"
+                        disabled={drillPage <= 1}
+                        onClick={() => setDrillPage((p) => Math.max(1, p - 1))}
+                      >
+                        <i className="pi pi-angle-left" /> Prev
+                      </button>
+                      <span className="muted">Page {drillPage} / {totalPages}</span>
+                      <button
+                        className="btn btn--g btn--xs"
+                        disabled={drillPage >= totalPages}
+                        onClick={() => setDrillPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        Next <i className="pi pi-angle-right" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+            </>
           )}
         </div>
       )}
