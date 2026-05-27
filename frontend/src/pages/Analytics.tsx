@@ -4,7 +4,7 @@ import StatTile from '../components/StatTile'
 import ChartCard from '../components/ChartCard'
 import StatusChip from '../components/StatusChip'
 import { apiFetch, getDisplayError } from '../utils/api'
-import { formatINRCompact, formatINRSymbol, formatInt, formatDate, parseAmount } from '../utils/format'
+import { formatINRCompact, formatINRSymbol, formatInt, parseAmount } from '../utils/format'
 
 type Tab = 'overview' | 'cashflow' | 'suppliers' | 'procurement' | 'quality'
 
@@ -153,60 +153,6 @@ function Analytics() {
   const byMonth = useMemo(() => dashboard?.byMonth || [], [dashboard])
   const byStatus = dashboard?.invoiceByStatus || []
   const qualityTotals = quality?.totals || {}
-
-  // Monthly trend (count + amount)
-  const monthlyTrend = useMemo(() => ({
-    type: 'bar' as const,
-    data: {
-      labels: byMonth.map((m) => m.month_label),
-      datasets: [
-        {
-          label: 'Invoices',
-          data: byMonth.map((m) => Number(m.invoice_count) || 0),
-          backgroundColor: '#6366f1',
-          borderRadius: 6,
-          yAxisID: 'y'
-        },
-        {
-          label: 'Amount (₹)',
-          data: byMonth.map((m) => parseAmount(m.amount) ?? 0),
-          type: 'line' as const,
-          borderColor: '#10b981',
-          backgroundColor: 'rgba(16,185,129,0.18)',
-          tension: 0.35,
-          pointRadius: 3,
-          fill: true,
-          yAxisID: 'y1'
-        }
-      ]
-    },
-    options: {
-      plugins: { legend: { position: 'top' as const, align: 'end' as const } },
-      scales: {
-        y:  { beginAtZero: true, position: 'left' as const,  grid: { display: false } },
-        y1: { beginAtZero: true, position: 'right' as const, grid: { drawOnChartArea: false } }
-      }
-    }
-  }), [byMonth])
-
-  // Status distribution doughnut (by count)
-  const statusDonut = useMemo(() => ({
-    type: 'doughnut' as const,
-    data: {
-      labels: byStatus.map((r) => r.status.replace(/_/g, ' ')),
-      datasets: [
-        {
-          data: byStatus.map((r) => Number(r.count) || 0),
-          backgroundColor: ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#64748b', '#ec4899'],
-          borderWidth: 0
-        }
-      ]
-    },
-    options: {
-      cutout: '62%',
-      plugins: { legend: { position: 'right' as const, labels: { boxWidth: 10, font: { size: 11 } } } }
-    }
-  }), [byStatus])
 
   // Status distribution by amount (bar)
   const statusAmountBar = useMemo(() => ({
