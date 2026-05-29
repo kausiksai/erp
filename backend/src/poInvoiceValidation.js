@@ -165,19 +165,37 @@ function resolvePoLineForInvoiceLine(il, poLines, poLineByLineId, _poLineBySeq, 
     if (pl) return pl
   }
   // 2. Item-text match — preferred over sequence to handle reordered invoices.
+  //    When multiple PO lines tie on item score (e.g. PO carries "BAY LIGHT-100W"
+  //    and "BAY LIGHT-200W", both partial-match an invoice line "BAY LIGHT"),
+  //    rate is the tiebreaker — prefer the PO line whose effective rate
+  //    matches the invoice rate. Otherwise the resolver picks by iteration
+  //    order and an E022 fires even though the correct PO line is right there.
   const available = poLines.filter((p) => !usedPoLineIds.has(p.po_line_id))
-  let best = null
-  let bestScore = 0
   const MIN_ITEM_SCORE = 80
+  let bestScore = 0
+  const candidates = []
   for (const p of available) {
     const sc = itemMatchScore(il.item_name, p)
-    if (sc > bestScore) {
-      bestScore = sc
-      best = p
-    }
+    if (sc < MIN_ITEM_SCORE) continue
+    if (sc > bestScore) { bestScore = sc; candidates.length = 0 }
+    if (sc === bestScore) candidates.push(p)
   }
-  if (best && bestScore >= MIN_ITEM_SCORE) {
-    return best
+  if (candidates.length === 1) return candidates[0]
+  if (candidates.length > 1) {
+    const invRateRaw = il.rate != null ? parseFloat(il.rate) : null
+    const invQtyRaw  = il.billed_qty != null ? parseFloat(il.billed_qty) : null
+    const invTaxable = il.taxable_value != null ? parseFloat(il.taxable_value) : null
+    const invRateFromAmt = (invTaxable != null && invQtyRaw != null && invQtyRaw > 0)
+      ? invTaxable / invQtyRaw : null
+    const rateMatches = (eff) => eff != null && eff > 0 && (
+      (invRateRaw != null && (Math.abs(invRateRaw - eff) <= TOL_AMOUNT || Math.abs(invRateRaw - eff) / eff <= TOL_RATE_PCT)) ||
+      (invRateFromAmt != null && (Math.abs(invRateFromAmt - eff) <= TOL_AMOUNT || Math.abs(invRateFromAmt - eff) / eff <= TOL_RATE_PCT))
+    )
+    for (const c of candidates) {
+      const eff = c.unit_cost != null ? Number(c.unit_cost) * (1 - Number(c.disc_pct || 0) / 100) : null
+      if (rateMatches(eff)) return c
+    }
+    return candidates[0]
   }
   // 3. Sequence-number fallback (only on unused PO lines).
   if (il.sequence_number != null) {

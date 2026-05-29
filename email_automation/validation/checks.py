@@ -129,17 +129,59 @@ def _resolve_po_line(
             if pl["po_line_id"] == inv_line["po_line_id"]:
                 return pl
     # By item text (best unused match above threshold) — preferred over seq.
-    best = None
+    # When multiple PO lines tie on item score (e.g. PO has "BAY LIGHT-100W"
+    # and "BAY LIGHT-200W", both partial-match invoice item "BAY LIGHT"),
+    # rate is the tiebreaker — prefer the PO line whose effective rate
+    # matches the invoice rate. Otherwise iteration order picks one and E022
+    # fires even though the correct PO line is right there.
     best_score = 0
+    candidates: List[Dict[str, Any]] = []
     for pl in po_lines:
         if pl["po_line_id"] in used_ids:
             continue
-        score = _item_match_score(inv_line.get("item_name") or inv_line.get("item_code"), pl)
-        if score > best_score:
-            best = pl
-            best_score = score
-    if best and best_score >= 80:
-        return best
+        sc = _item_match_score(inv_line.get("item_name") or inv_line.get("item_code"), pl)
+        if sc < 80:
+            continue
+        if sc > best_score:
+            best_score = sc
+            candidates = []
+        if sc == best_score:
+            candidates.append(pl)
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        from decimal import Decimal as _D
+
+        def _dec_local(v):
+            try:
+                return _D(str(v)) if v is not None else _D(0)
+            except Exception:
+                return _D(0)
+
+        inv_rate = _dec_local(inv_line.get("rate"))
+        inv_qty = _dec_local(inv_line.get("billed_qty"))
+        inv_taxable = _dec_local(inv_line.get("assessable_value") or inv_line.get("taxable_value"))
+        inv_rate_from_amt = (inv_taxable / inv_qty) if inv_taxable > 0 and inv_qty > 0 else None
+        tol_amt = _D("0.01")
+        tol_pct = _D("0.01")
+
+        def _rate_match(eff):
+            if eff is None or eff <= 0:
+                return False
+            for r in (inv_rate, inv_rate_from_amt):
+                if r is None or r == 0:
+                    continue
+                if abs(r - eff) <= tol_amt or abs(r - eff) / eff <= tol_pct:
+                    return True
+            return False
+
+        for c in candidates:
+            uc = _dec_local(c.get("unit_cost"))
+            disc = _dec_local(c.get("disc_pct"))
+            eff = uc * (_D(1) - disc / _D(100))
+            if _rate_match(eff):
+                return c
+        return candidates[0]
     # Sequence-number fallback (only consider unused PO lines).
     if inv_line.get("sequence_number") is not None:
         for pl in po_lines:
