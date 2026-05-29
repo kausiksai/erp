@@ -686,12 +686,25 @@ export async function runFullValidation(invoiceId) {
       }
 
       // E022_LINE_RATE_MISMATCH — invoice rate vs effective PO rate (with
-      // discount applied). ERROR for standard PO, WARNING for Open PO
-      // (rate is advisory on blanket agreements). Matches Python.
+      // discount applied). Suppliers commonly write the GROSS unit price in
+      // the rate field and apply the contracted discount at the line-total
+      // level (taxable_value). In that case rate looks like a mismatch even
+      // though the discount IS applied — the per-unit effective price comes
+      // from taxable_value/qty. Accept either form: the stated rate, or the
+      // implied taxable_value/qty rate. ERROR for standard PO, WARNING for
+      // Open PO (rate is advisory on blanket agreements). Matches Python.
       if (invRate != null && effectivePoRate != null && effectivePoRate > 0) {
+        const invTaxable = il.taxable_value != null ? parseFloat(il.taxable_value) : null
+        const invRateFromAmount = (invTaxable != null && invQty != null && invQty > 0)
+          ? invTaxable / invQty
+          : null
+        const ok = (rate) => rate != null && (
+          Math.abs(rate - effectivePoRate) <= TOL_AMOUNT ||
+          Math.abs(rate - effectivePoRate) / effectivePoRate <= TOL_RATE_PCT
+        )
+        const rateOk = ok(invRate) || ok(invRateFromAmount)
         const driftAbs = Math.abs(invRate - effectivePoRate)
         const driftRel = driftAbs / effectivePoRate
-        const rateOk = driftAbs <= TOL_AMOUNT || driftRel <= TOL_RATE_PCT
         lineResult.rateMatch = rateOk
         if (!rateOk) {
           const msg =

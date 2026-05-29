@@ -327,12 +327,32 @@ def check_lines_and_resolution(ctx: InvoiceContext) -> List[Finding]:
                 ))
 
         # Rate check against effective PO rate (disc_pct applied).
-        # For Open POs this is a warning (Open POs are blanket agreements
-        # drawn down at receipt; rate is advisory, not binding).
+        # Suppliers commonly write the GROSS unit price in the rate field and
+        # apply the contracted discount at the line-total level (taxable_value).
+        # In that case the stored rate looks like a mismatch even though the
+        # discount IS applied — the per-unit effective price is taxable_value
+        # / qty. Accept either form: the stated rate, OR the implied
+        # taxable_value/qty rate.
+        # For Open POs the check is a warning (rate is advisory).
         if po_rate > 0 and inv_rate > 0:
+            inv_taxable = _dec(il.get("assessable_value") or il.get("taxable_value"))
+            inv_rate_from_amount = (
+                inv_taxable / inv_qty
+                if inv_taxable > 0 and inv_qty > 0
+                else None
+            )
+
+            def _matches(rate):
+                if rate is None or effective_rate <= 0:
+                    return False
+                d_abs = abs(rate - effective_rate)
+                d_rel = d_abs / effective_rate
+                return d_abs <= TOL_AMOUNT or d_rel <= TOL_RATE_PCT
+
+            rate_ok = _matches(inv_rate) or _matches(inv_rate_from_amount)
             drift_abs = abs(inv_rate - effective_rate)
             drift_rel = drift_abs / effective_rate if effective_rate > 0 else Decimal(0)
-            if drift_abs > TOL_AMOUNT and drift_rel > TOL_RATE_PCT:
+            if not rate_ok and drift_abs > TOL_AMOUNT and drift_rel > TOL_RATE_PCT:
                 if ctx.po.is_open_po:
                     out.append(Finding(
                         "W022_OPEN_PO_LINE_RATE_DRIFT", SEVERITY_WARNING, CAT_PRICE,
