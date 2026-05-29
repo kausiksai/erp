@@ -192,6 +192,22 @@ function resolvePoLineForInvoiceLine(il, poLines, poLineByLineId, _poLineBySeq, 
     const cand = poLines[lineIndex]
     if (!usedPoLineIds.has(cand.po_line_id)) return cand
   }
+  // 5. Split-delivery fallback — re-search ALL PO lines (including used) for a
+  //    strong item-text match. Some invoices split one PO line across multiple
+  //    invoice lines (e.g. PO line of qty 1000 → invoice lines 990 + 10 of the
+  //    same item). The earlier unused-only pass starves later invoice lines of
+  //    a valid PO line; this fallback lets them share the same PO line.
+  //    Header E060/E040 still catch genuine over-billing on the aggregate.
+  let bestShared = null
+  let bestSharedScore = 0
+  for (const p of poLines) {
+    const sc = itemMatchScore(il.item_name, p)
+    if (sc > bestSharedScore) {
+      bestSharedScore = sc
+      bestShared = p
+    }
+  }
+  if (bestShared && bestSharedScore >= MIN_ITEM_SCORE) return bestShared
   return null
 }
 

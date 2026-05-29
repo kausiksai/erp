@@ -150,6 +150,21 @@ def _resolve_po_line(
         cand = po_lines[inv_line_index]
         if cand["po_line_id"] not in used_ids:
             return cand
+    # Split-delivery fallback — search ALL PO lines (including used) for a
+    # strong item-text match. Some invoices split one PO line across multiple
+    # invoice lines (e.g. PO line of qty 1000 → invoice lines 990 + 10 of the
+    # same item). The earlier unused-only pass starves later invoice lines of
+    # a valid PO line; this fallback lets them share the same PO line. Header
+    # cumulative checks (E060/E040) still catch genuine over-billing.
+    best_shared = None
+    best_shared_score = 0
+    for pl in po_lines:
+        score = _item_match_score(inv_line.get("item_name") or inv_line.get("item_code"), pl)
+        if score > best_shared_score:
+            best_shared = pl
+            best_shared_score = score
+    if best_shared and best_shared_score >= 80:
+        return best_shared
     return None
 
 
