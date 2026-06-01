@@ -924,7 +924,7 @@ router.get('/invoices/pending-exception', authenticateToken, authorize(['admin',
 // Invoice stats — overall counts by status, ignoring pagination.
 // MUST be declared before /invoices/:id or Express will match "stats"
 // as an :id parameter and try to query invoice_id = 'stats'.
-router.get('/invoices/stats', authenticateToken, async (_req, res) => {
+router.get('/invoices/stats', authenticateToken, async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT
@@ -938,7 +938,23 @@ router.get('/invoices/stats', authenticateToken, async (_req, res) => {
         COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'debit_note_approval')::int AS debit_note_approval
       FROM invoices
     `)
-    res.json(rows[0] || { total: 0, validated: 0, waiting: 0, re_validation: 0, ready_for_payment: 0, paid: 0, exception_approval: 0, debit_note_approval: 0 })
+    const stats = rows[0] || { total: 0, validated: 0, waiting: 0, re_validation: 0, ready_for_payment: 0, paid: 0, exception_approval: 0, debit_note_approval: 0 }
+    // Reviewer role only sees the re_validation queue; zero out the other
+    // buckets so KPI tiles don't leak counts the role isn't supposed to see.
+    if (req.user?.role === 'reviewer') {
+      res.json({
+        total: stats.re_validation,
+        validated: 0,
+        waiting: 0,
+        re_validation: stats.re_validation,
+        ready_for_payment: 0,
+        paid: 0,
+        exception_approval: 0,
+        debit_note_approval: 0,
+      })
+      return
+    }
+    res.json(stats)
   } catch (err) {
     console.error('Invoice stats error:', err)
     res.status(500).json({ error: 'server_error', message: err.message })
@@ -1425,7 +1441,7 @@ router.post('/invoices/:id/debit-note-pdf', authenticateToken, authorize(['admin
 })
 
 // Get invoice details
-router.get('/invoices/:id', async (req, res) => {
+router.get('/invoices/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params
     const { rows: invoiceRows } = await pool.query(
@@ -1472,9 +1488,15 @@ router.get('/invoices/:id', async (req, res) => {
     if (invoiceRows.length === 0) {
       return res.status(404).json({ error: 'not_found' })
     }
-    
+    // Reviewer role can only see invoices in waiting_for_re_validation;
+    // anything else is treated as not-found so they can't peek at other
+    // queues via direct URL.
+    if (req.user?.role === 'reviewer' && invoiceRows[0].status !== 'waiting_for_re_validation') {
+      return res.status(404).json({ error: 'not_found' })
+    }
+
     const invoice = invoiceRows[0]
-    
+
     // Get invoice line items
     const { rows: lineRows } = await pool.query(
       `SELECT * FROM invoice_lines WHERE invoice_id = $1 ORDER BY sequence_number`,
@@ -2074,13 +2096,20 @@ router.put('/invoices/:id', async (req, res) => {
 })
 
 // Get all invoices with search and filter
-router.get('/invoices', async (req, res) => {
+router.get('/invoices', authenticateToken, async (req, res) => {
   try {
     const limitRaw = parseInt(req.query.limit, 10)
     const offsetRaw = parseInt(req.query.offset, 10)
     const limit = Math.min(1000, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 100))
     const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0
-    const { status, invoiceNumber, poNumber, q } = req.query
+    let { status } = req.query
+    const { invoiceNumber, poNumber, q } = req.query
+    // Reviewer role can ONLY see waiting_for_re_validation. Force the filter
+    // regardless of any client-supplied status — keeps the role scoped even
+    // if a user crafts a custom URL.
+    if (req.user?.role === 'reviewer') {
+      status = 'waiting_for_re_validation'
+    }
 
     // Build a shared WHERE clause so the count query and page query use
     // exactly the same filters — no drift between the two.

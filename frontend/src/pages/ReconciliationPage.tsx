@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import SlideOver from '../components/SlideOver'
 import InvoiceExpansion from '../components/InvoiceExpansion'
 import { apiFetch } from '../utils/api'
@@ -56,6 +57,9 @@ const SEV_VARIANT: Record<Rule['severity'], 'err' | 'warn' | 'info'> = {
 
 function ReconciliationPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  // Reviewer is read-only: no Re-run engine, no per-code bulk actions.
+  const isReviewer = (user?.role || '').toLowerCase() === 'reviewer'
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -286,12 +290,12 @@ function ReconciliationPage() {
           <p>Validation issues grouped by error code so you fix a category — not just one invoice. Each group shows the cause, the owner, sample invoices, and one-click bulk actions.</p>
         </div>
         <div className="hero__act">
-          <button className="btn btn--g" onClick={() => toast.info('Export queued', 'Per-code reconciliation report will download once the export endpoint lands.')}>
+          {!isReviewer && <button className="btn btn--g" onClick={() => toast.info('Export queued', 'Per-code reconciliation report will download once the export endpoint lands.')}>
             <i className="pi pi-download" /> Export client report
-          </button>
-          <button className="btn btn--p" onClick={rerunEngine}>
+          </button>}
+          {!isReviewer && <button className="btn btn--p" onClick={rerunEngine}>
             <i className="pi pi-refresh" /> Re-run engine
-          </button>
+          </button>}
         </div>
       </section>
 
@@ -602,29 +606,30 @@ function ReconciliationPage() {
                     </div>
                   )}
 
-                  {/* Bulk action button per code (matches mockup E022 / E003 cards). */}
-                  {codePref === 'E022' && (
+                  {/* Bulk action button per code (matches mockup E022 / E003 cards).
+                      Hidden for reviewer role — read-only access. */}
+                  {!isReviewer && codePref === 'E022' && (
                     <div style={{ padding: '12px 18px', background: 'var(--s-1)', borderTop: '1px solid var(--b-1)', display: 'flex', justifyContent: 'flex-end' }}>
                       <button className="btn btn--ok btn--xs" onClick={() => runBulkAction(rule, 'approve-debit-notes')}>
                         <i className="pi pi-check" /> Approve all {rule.count.toLocaleString('en-IN')} debit notes
                       </button>
                     </div>
                   )}
-                  {codePref === 'E003' && (
+                  {!isReviewer && codePref === 'E003' && (
                     <div style={{ padding: '12px 18px', background: 'var(--s-1)', borderTop: '1px solid var(--b-1)', display: 'flex', justifyContent: 'flex-end' }}>
                       <button className="btn btn--g btn--xs" onClick={() => runBulkAction(rule, 'email-erp')}>
                         <i className="pi pi-flag" /> Email source ERP
                       </button>
                     </div>
                   )}
-                  {codePref === 'E070' && (
+                  {!isReviewer && codePref === 'E070' && (
                     <div style={{ padding: '12px 18px', background: 'var(--s-1)', borderTop: '1px solid var(--b-1)', display: 'flex', justifyContent: 'flex-end' }}>
                       <button className="btn btn--g btn--xs" onClick={() => runBulkAction(rule, 'email-receiving')}>
                         <i className="pi pi-envelope" /> Email receiving team
                       </button>
                     </div>
                   )}
-                  {codePref === 'E004' && (
+                  {!isReviewer && codePref === 'E004' && (
                     <div style={{ padding: '12px 18px', background: 'var(--s-1)', borderTop: '1px solid var(--b-1)', display: 'flex', justifyContent: 'flex-end' }}>
                       <button className="btn btn--g btn--xs" onClick={() => runBulkAction(rule, 'reextract-ocr')}>
                         <i className="pi pi-refresh" /> Re-extract OCR

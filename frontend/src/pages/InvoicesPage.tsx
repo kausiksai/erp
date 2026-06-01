@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import SlideOver from '../components/SlideOver'
 import InvoiceExpansion from '../components/InvoiceExpansion'
 import { apiFetch, getErrorMessageFromResponse } from '../utils/api'
@@ -75,11 +76,15 @@ function InvoicesPage() {
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [openInv, setOpenInv] = useState<Invoice | null>(null)
+  // Reviewer role is scoped to the re-validation queue — read-only, no
+  // KPI tiles for other statuses, no toolbar status toggle, no actions.
+  const { user } = useAuth()
+  const isReviewer = (user?.role || '').toLowerCase() === 'reviewer'
 
   /* Toolbar filter state */
   const [searchParams] = useSearchParams()
   const [search,   setSearch]   = useState('')
-  const [statusFl, setStatusFl] = useState<'all' | 'validated' | 'awaiting' | 'reconcile' | 'queue' | 'debit_note' | 'exception'>('all')
+  const [statusFl, setStatusFl] = useState<'all' | 'validated' | 'awaiting' | 'reconcile' | 'queue' | 'debit_note' | 'exception'>(isReviewer ? 'reconcile' : 'all')
   const [sourceFl, setSourceFl] = useState<'all' | 'excel' | 'ocr'>('all')
   const [supplierFl, setSupplierFl] = useState<string>('all')
   const [activeView, setActiveView] = useState<ViewKey>('all')
@@ -351,38 +356,49 @@ function InvoicesPage() {
           <p>All supplier invoices loaded from Bill Register and OCR. Click any row to open detail in a side panel — keep your filters and place in the list.</p>
         </div>
         <div className="hero__act">
-          <button className="btn btn--g" onClick={exportCsv}><i className="pi pi-download" /> Export CSV</button>
-          <button className="btn btn--g" onClick={rerunValidation}><i className="pi pi-refresh" /> Re-run validation</button>
-          <button className="btn btn--p" onClick={() => navigate('/invoices/upload')}><i className="pi pi-upload" /> Upload PDF</button>
+          {!isReviewer && <button className="btn btn--g" onClick={exportCsv}><i className="pi pi-download" /> Export CSV</button>}
+          {!isReviewer && <button className="btn btn--g" onClick={rerunValidation}><i className="pi pi-refresh" /> Re-run validation</button>}
+          {!isReviewer && <button className="btn btn--p" onClick={() => navigate('/invoices/upload')}><i className="pi pi-upload" /> Upload PDF</button>}
         </div>
       </section>
 
-      {/* 4-up KPI strip */}
-      <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
-        <div className="kpi kpi--brand" onClick={() => { setActiveView('all'); setStatusFl('all') }}>
-          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-file" /></div></div>
-          <p className="kpi__l">All invoices</p>
-          <div className="kpi__v">{formatInt(stats.total)}</div>
+      {/* KPI strip — reviewers see only the re-validation tile (their scope);
+          everyone else sees the full 4-up. */}
+      {isReviewer ? (
+        <div className="kpis" style={{ gridTemplateColumns: '1fr', marginBottom: 14 }}>
+          <div className="kpi kpi--rs">
+            <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-sync" /></div></div>
+            <p className="kpi__l">Waiting for re-validation</p>
+            <div className="kpi__v">{formatInt(stats.re_validation)}</div>
+          </div>
         </div>
-        <div className="kpi kpi--em" onClick={() => setStatusFl('validated')}>
-          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-check" /></div></div>
-          <p className="kpi__l">Validated</p>
-          <div className="kpi__v">{formatInt(stats.validated)}</div>
+      ) : (
+        <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
+          <div className="kpi kpi--brand" onClick={() => { setActiveView('all'); setStatusFl('all') }}>
+            <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-file" /></div></div>
+            <p className="kpi__l">All invoices</p>
+            <div className="kpi__v">{formatInt(stats.total)}</div>
+          </div>
+          <div className="kpi kpi--em" onClick={() => setStatusFl('validated')}>
+            <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-check" /></div></div>
+            <p className="kpi__l">Validated</p>
+            <div className="kpi__v">{formatInt(stats.validated)}</div>
+          </div>
+          <div className="kpi kpi--am" onClick={() => setStatusFl('awaiting')}>
+            <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-clock" /></div></div>
+            <p className="kpi__l">Waiting for validation</p>
+            <div className="kpi__v">{formatInt(stats.waiting)}</div>
+          </div>
+          <div className="kpi kpi--rs" onClick={() => setStatusFl('reconcile')}>
+            <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-sync" /></div></div>
+            <p className="kpi__l">Waiting for re-validation</p>
+            <div className="kpi__v">{formatInt(stats.re_validation)}</div>
+          </div>
         </div>
-        <div className="kpi kpi--am" onClick={() => setStatusFl('awaiting')}>
-          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-clock" /></div></div>
-          <p className="kpi__l">Waiting for validation</p>
-          <div className="kpi__v">{formatInt(stats.waiting)}</div>
-        </div>
-        <div className="kpi kpi--rs" onClick={() => setStatusFl('reconcile')}>
-          <div className="kpi__row"><div className="kpi__ic"><i className="pi pi-sync" /></div></div>
-          <p className="kpi__l">Waiting for re-validation</p>
-          <div className="kpi__v">{formatInt(stats.re_validation)}</div>
-        </div>
-      </div>
+      )}
 
-      {/* Saved view chips */}
-      <div className="views" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+      {/* Saved view chips (hidden for reviewer — they only see re-validation) */}
+      {!isReviewer && <div className="views" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12, fontWeight: 600, alignSelf: 'center', marginRight: 6 }}>Views:</span>
         <button
           className={`view-chip ${activeView === 'all' ? 'active' : ''}`}
@@ -453,7 +469,7 @@ function InvoicesPage() {
         >
           <i className="pi pi-plus" /> Save current
         </button>
-      </div>
+      </div>}
 
       {/* Toolbar */}
       <div className="toolbar">
@@ -465,7 +481,7 @@ function InvoicesPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select value={statusFl} onChange={(e) => setStatusFl(e.target.value as typeof statusFl)}>
+        {!isReviewer && <select value={statusFl} onChange={(e) => setStatusFl(e.target.value as typeof statusFl)}>
           <option value="all">All statuses</option>
           <option value="queue">In queue (needs attention)</option>
           <option value="validated">Validated</option>
@@ -473,7 +489,7 @@ function InvoicesPage() {
           <option value="reconcile">Waiting for re-validation</option>
           <option value="debit_note">Debit note approval</option>
           <option value="exception">Exception approval</option>
-        </select>
+        </select>}
         <select value={sourceFl} onChange={(e) => setSourceFl(e.target.value as typeof sourceFl)}>
           <option value="all">All sources</option>
           <option value="excel">Excel</option>

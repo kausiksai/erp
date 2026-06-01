@@ -364,6 +364,10 @@ export default function InvoiceExpansion({
   const { user } = useAuth()
   const role = (user?.role || '').toLowerCase()
   const canManuallyApprove = role === 'admin' || role === 'manager' || role === 'finance'
+  // Reviewer is a strict read-only role — no Re-validate, no Approve, no
+  // exception/debit-note actions, no override. They open the slide-over to
+  // INSPECT only.
+  const isReviewer = role === 'reviewer'
   const [state, setState] = useState<FetchState>(() => cache.get(invoiceId) ?? emptyState)
   const [validating, setValidating] = useState(false)
   const [actionMessage, setActionMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
@@ -685,7 +689,7 @@ export default function InvoiceExpansion({
     () => new Set(['waiting_for_validation', 'waiting_for_re_validation', 'exception_approval', 'debit_note_approval', '']),
     []
   )
-  const showValidateButton = ACTIONABLE_STATUSES.has(status)
+  const showValidateButton = !isReviewer && ACTIONABLE_STATUSES.has(status)
 
   /**
    * Admin Approve visibility — only offer the manual override when the
@@ -910,7 +914,7 @@ export default function InvoiceExpansion({
                 : <><i className={`pi ${status === 'waiting_for_validation' ? 'pi-play' : 'pi-refresh'}`} /> {buttonLabel}</>}
             </button>
           )}
-          {status === 'exception_approval' && (
+          {!isReviewer && status === 'exception_approval' && (
             <button
               type="button"
               className="btn btn--p btn--sm"
@@ -934,7 +938,7 @@ export default function InvoiceExpansion({
                 : <><i className="pi pi-check-circle" /> Approve</>}
             </button>
           )}
-          {status === 'debit_note_approval' && (
+          {!isReviewer && status === 'debit_note_approval' && (
             <button
               type="button"
               className="btn btn--p btn--sm"
@@ -945,9 +949,14 @@ export default function InvoiceExpansion({
               {resolving ? <><i className="pi pi-spin pi-spinner" /> Approving…</> : <><i className="pi pi-minus-circle" /> Review debit note</>}
             </button>
           )}
-          {!showValidateButton && status !== 'exception_approval' && status !== 'debit_note_approval' && (
+          {!isReviewer && !showValidateButton && status !== 'exception_approval' && status !== 'debit_note_approval' && (
             <span className="chip chip--ok">
               <i className="pi pi-lock" /> Settled
+            </span>
+          )}
+          {isReviewer && (
+            <span className="chip chip--info" title="Read-only — reviewer role">
+              <i className="pi pi-eye" /> Read only
             </span>
           )}
         </div>
