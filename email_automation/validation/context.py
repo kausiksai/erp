@@ -345,19 +345,39 @@ def load_invoice_context(conn: PGConnection, invoice_id: int) -> InvoiceContext:
             grn_accepted_qty_total = _to_decimal(row["aq"])
 
         # -- GRN totals scoped to THIS invoice only (open-PO qty checks) -----
+        # The invoice carries an explicit grn_pfx + grn_no reference pointing
+        # at its own receipt — that's the authoritative per-invoice link.
+        # When the reference is present we use it directly; the GRN row often
+        # has po_id = NULL (import linkage gap) or no supplier_doc_no, so the
+        # previous (po_id + supplier_doc_no) scope missed the right GRN
+        # entirely. Fall back to po_id + supplier_doc_no only when the
+        # invoice has no explicit GRN reference.
         this_invoice_grn_qty_total = Decimal(0)
         this_invoice_grn_accepted_qty_total = Decimal(0)
         if po is not None and invoice.get("invoice_number"):
+            grn_pfx = (invoice.get("grn_pfx") or "").strip()
+            grn_no = (invoice.get("grn_no") or "").strip()
             cur.execute(
                 """
                 SELECT COALESCE(SUM(grn_qty), 0)::numeric       AS q,
                        COALESCE(SUM(COALESCE(accepted_qty, grn_qty, 0)), 0)::numeric AS aq
                 FROM grn
-                WHERE po_id = %s
-                  AND TRIM(COALESCE(supplier_doc_no, '')) <> ''
-                  AND LOWER(TRIM(supplier_doc_no)) = LOWER(TRIM(%s))
+                WHERE (
+                        %s <> '' AND %s <> ''
+                        AND LOWER(TRIM(COALESCE(grn_pfx, ''))) = LOWER(%s)
+                        AND LOWER(TRIM(COALESCE(grn_no,  ''))) = LOWER(%s)
+                      )
+                   OR (
+                        (%s = '' OR %s = '')
+                        AND po_id = %s
+                        AND TRIM(COALESCE(supplier_doc_no, '')) <> ''
+                        AND LOWER(TRIM(supplier_doc_no)) = LOWER(TRIM(%s))
+                      )
                 """,
-                (po.po_id, invoice["invoice_number"]),
+                (
+                    grn_pfx, grn_no, grn_pfx, grn_no,
+                    grn_pfx, grn_no, po.po_id, invoice["invoice_number"],
+                ),
             )
             row = cur.fetchone()
             this_invoice_grn_qty_total = _to_decimal(row["q"])

@@ -573,19 +573,35 @@ export async function runFullValidation(invoiceId) {
         WHERE i2.po_id = $1 AND i2.invoice_id <> $2`,
       [poId, invoiceId]
     ),
-    // GRN qty scoped to THIS invoice (matched via supplier_doc_no).
-    // Without this scoping, E071 compares this invoice's qty against the
-    // cumulative GRN total for the whole open PO (often huge sum across
-    // many invoices), producing spurious mismatches on every shipment.
-    // Mirrors Python's `this_invoice_grn_accepted_qty_total` in context.py.
+    // GRN qty scoped to THIS invoice. The invoice carries an explicit
+    // grn_pfx + grn_no reference pointing at its own receipt — that's the
+    // authoritative per-invoice link. When the reference is present we use
+    // it directly; the GRN row often has po_id = NULL (import linkage gap)
+    // or no supplier_doc_no, so the previous (po_id + supplier_doc_no)
+    // scope missed it entirely (31 of 43 open-PO E070/E071 invoices on the
+    // live data fell into this hole). Fall back to po_id + supplier_doc_no
+    // only when the invoice has no explicit GRN reference.
     pool.query(
       `SELECT COALESCE(SUM(grn_qty), 0)::numeric AS q,
               COALESCE(SUM(COALESCE(accepted_qty, grn_qty, 0)), 0)::numeric AS aq
          FROM grn
-        WHERE po_id = $1
-          AND TRIM(COALESCE(supplier_doc_no, '')) <> ''
-          AND LOWER(TRIM(supplier_doc_no)) = LOWER(TRIM($2))`,
-      [poId, String(invoice.invoice_number || '')]
+        WHERE (
+                $3 <> '' AND $4 <> ''
+                AND LOWER(TRIM(COALESCE(grn_pfx, ''))) = LOWER($3)
+                AND LOWER(TRIM(COALESCE(grn_no,  ''))) = LOWER($4)
+              )
+           OR (
+                ($3 = '' OR $4 = '')
+                AND po_id = $1
+                AND TRIM(COALESCE(supplier_doc_no, '')) <> ''
+                AND LOWER(TRIM(supplier_doc_no)) = LOWER(TRIM($2))
+              )`,
+      [
+        poId,
+        String(invoice.invoice_number || ''),
+        String(invoice.grn_pfx || '').trim(),
+        String(invoice.grn_no || '').trim(),
+      ]
     ),
     // Schedule qty scoped to THIS invoice (matched via ss_pfx + ss_no).
     // Cumulative schedule_qty_total across the whole open PO is also
