@@ -175,13 +175,24 @@ def _resolve_po_line(
                     return True
             return False
 
+        # Score by (rate match × 2 + qty match × 1). When several PO lines tie
+        # on item score AND rate (multiple items priced identically), qty
+        # settles which one this invoice line actually refers to.
+        tol_qty = _D("0.001")
+        best_c = None
+        best_score = -1
         for c in candidates:
             uc = _dec_local(c.get("unit_cost"))
             disc = _dec_local(c.get("disc_pct"))
             eff = uc * (_D(1) - disc / _D(100))
-            if _rate_match(eff):
-                return c
-        return candidates[0]
+            r_ok = _rate_match(eff)
+            c_qty = _dec_local(c.get("qty"))
+            q_ok = c_qty > 0 and inv_qty > 0 and abs(inv_qty - c_qty) <= tol_qty
+            score = (2 if r_ok else 0) + (1 if q_ok else 0)
+            if score > best_score:
+                best_score = score
+                best_c = c
+        return best_c or candidates[0]
     # Sequence-number fallback (only consider unused PO lines).
     if inv_line.get("sequence_number") is not None:
         for pl in po_lines:

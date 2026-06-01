@@ -182,6 +182,10 @@ function resolvePoLineForInvoiceLine(il, poLines, poLineByLineId, _poLineBySeq, 
   }
   if (candidates.length === 1) return candidates[0]
   if (candidates.length > 1) {
+    // Tie-break by (rate match, qty match). When a PO carries multiple lines
+    // with the same item-text score AND the same rate (e.g. several distinct
+    // items priced identically), rate alone can't disambiguate — qty match
+    // settles it. Score each candidate: rate_match × 2 + qty_match × 1.
     const invRateRaw = il.rate != null ? parseFloat(il.rate) : null
     const invQtyRaw  = il.billed_qty != null ? parseFloat(il.billed_qty) : null
     const invTaxable = il.taxable_value != null ? parseFloat(il.taxable_value) : null
@@ -191,11 +195,17 @@ function resolvePoLineForInvoiceLine(il, poLines, poLineByLineId, _poLineBySeq, 
       (invRateRaw != null && (Math.abs(invRateRaw - eff) <= TOL_AMOUNT || Math.abs(invRateRaw - eff) / eff <= TOL_RATE_PCT)) ||
       (invRateFromAmt != null && (Math.abs(invRateFromAmt - eff) <= TOL_AMOUNT || Math.abs(invRateFromAmt - eff) / eff <= TOL_RATE_PCT))
     )
+    let bestC = null
+    let bestC_score = -1
     for (const c of candidates) {
       const eff = c.unit_cost != null ? Number(c.unit_cost) * (1 - Number(c.disc_pct || 0) / 100) : null
-      if (rateMatches(eff)) return c
+      const rOk = rateMatches(eff)
+      const cQty = c.qty != null ? Number(c.qty) : null
+      const qOk  = cQty != null && cQty > 0 && invQtyRaw != null && Math.abs(invQtyRaw - cQty) <= TOL_QTY
+      const score = (rOk ? 2 : 0) + (qOk ? 1 : 0)
+      if (score > bestC_score) { bestC_score = score; bestC = c }
     }
-    return candidates[0]
+    return bestC || candidates[0]
   }
   // 3. Sequence-number fallback (only on unused PO lines).
   if (il.sequence_number != null) {
